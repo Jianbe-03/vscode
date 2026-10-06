@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { mock } from '../../../../../base/test/common/mock.js';
+import { getWindow } from '../../../../../base/browser/dom.js';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
 import { Event } from '../../../../../base/common/event.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
@@ -42,7 +43,7 @@ import { ChatOriginKind, type IGitHubInfo, type IGitHubPullRequestRef, ISessionA
 import { IActiveSession, ISessionsManagementService } from '../../../../../sessions/services/sessions/common/sessionsManagement.js';
 // eslint-disable-next-line local/code-import-patterns
 import { ISessionsProvidersService } from '../../../../../sessions/services/sessions/browser/sessionsProvidersService.js';
-import { ComponentFixtureContext, createEditorServices, defineComponentFixture, defineThemedFixtureGroup, type ServiceRegistration } from '../fixtureUtils.js';
+import { ComponentFixtureContext, createEditorServices, defineComponentFixture, defineThemedFixtureGroup, type ServiceRegistration, waitForFixtureCondition } from '../fixtureUtils.js';
 import { registerChatFixtureServices } from '../chat/chatFixtureUtils.js';
 import { IFixtureMessage, renderChatWidget } from '../chat/chatWidget.fixture.js';
 import { createFixtureGitHubService, createFixtureWorkbenchGitHubService } from './githubFixtureUtils.js';
@@ -286,6 +287,31 @@ export function renderPills(ctx: ComponentFixtureContext, sessionMock: IMockSess
 	}
 }
 
+/**
+ * Waits until the overflowing pill row has been laid out and its auto-hiding
+ * scrollbar has faded out again. A non-compact row first measures its content
+ * from a native `ResizeObserver` callback, which reveals the scrollbar.
+ */
+async function waitForOverflowingPillsRowScrollbarToHide(container: HTMLElement): Promise<void> {
+	let previousLayout: string | undefined;
+	await waitForFixtureCondition(() => {
+		const row = container.querySelector<HTMLElement>('.chat-pills-row');
+		const content = row?.querySelector<HTMLElement>('.chat-pills-row-content');
+		const scrollbar = row?.querySelector<HTMLElement>(':scope > .scrollbar.horizontal');
+		if (!row || !content || !scrollbar) {
+			return false;
+		}
+		const layout = `${row.clientWidth}/${content.scrollWidth}`;
+		const unchanged = layout === previousLayout;
+		previousLayout = layout;
+		// `fade` is only applied when a revealed scrollbar hides, so the reveal has already happened.
+		return unchanged
+			&& content.scrollWidth > row.clientWidth
+			&& scrollbar.classList.contains('fade')
+			&& getWindow(scrollbar).getComputedStyle(scrollbar).opacity === '0';
+	}, 'Pill row did not overflow, or its scrollbar did not fade out');
+}
+
 async function renderChatViewWithPills(ctx: ComponentFixtureContext, mock: IMockSessionAndChat, messages: IFixtureMessage[], options?: { readonly height?: number; readonly scrollOffsetFromBottom?: number }): Promise<void> {
 	const scrollOffsetFromBottom = options?.scrollOffsetFromBottom;
 	await renderChatWidget(ctx, {
@@ -515,20 +541,26 @@ export default defineThemedFixtureGroup({ path: 'sessions/' }, {
 	}),
 
 	SessionChatPills_HorizontalOverflow: defineComponentFixture({
-		render: ctx => renderPills(ctx, createMockSession({ providerId: 'debug-provider' }), {
-			width: '280px',
-			debugData: {
-				stats: { files: 7, insertions: 128, deletions: 34 },
-				markdownFiles: ['README.md', 'CONTRIBUTING.md', 'docs/testing.md'],
-				subagents: ['Investigate authentication', 'Review accessibility'],
-				browsers: ['Project Preview', 'Component Explorer'],
-				ciFailed: 3,
-				ciPending: 2,
-				prFeedback: 4,
-				agentFeedback: 2,
-				autoIncrementChanges: false,
-			},
-		}),
+		// The scrollbar reveal comes from a native ResizeObserver that can fire after
+		// the virtual-time window, so wait for its real hide timer instead.
+		virtualTime: { enabled: false },
+		render: async ctx => {
+			renderPills(ctx, createMockSession({ providerId: 'debug-provider' }), {
+				width: '280px',
+				debugData: {
+					stats: { files: 7, insertions: 128, deletions: 34 },
+					markdownFiles: ['README.md', 'CONTRIBUTING.md', 'docs/testing.md'],
+					subagents: ['Investigate authentication', 'Review accessibility'],
+					browsers: ['Project Preview', 'Component Explorer'],
+					ciFailed: 3,
+					ciPending: 2,
+					prFeedback: 4,
+					agentFeedback: 2,
+					autoIncrementChanges: false,
+				},
+			});
+			await waitForOverflowingPillsRowScrollbarToHide(ctx.container);
+		},
 	}),
 
 	SessionChatPills_Compact: defineComponentFixture({
