@@ -185,3 +185,60 @@ describe('OpenRouterLMProvider reasoning effort (issue #335272)', () => {
 		expect(caps?.defaultReasoningEffort).toBeUndefined();
 	});
 });
+
+describe('OpenRouterLMProvider presets (CreaEditor)', () => {
+	class PresetTestProvider extends OpenRouterLMProvider {
+		public listModels(configuration: unknown) {
+			return this.getAllModels(true, 'key', configuration as never);
+		}
+	}
+
+	function createPresetProvider(fetch = vi.fn()): PresetTestProvider {
+		const logService = { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+		return new PresetTestProvider(
+			{ getAPIKey: vi.fn().mockResolvedValue(undefined), storeAPIKey: vi.fn(), deleteAPIKey: vi.fn() } as any,
+			{ fetch } as any,
+			logService as any,
+			{ createInstance: vi.fn().mockReturnValue({}) } as any,
+			{ isConfigured: vi.fn().mockReturnValue(false), getConfig: vi.fn(), setConfig: vi.fn() } as any,
+			{} as any,
+		);
+	}
+
+	it('lists only configured presets without fetching the catalog', async () => {
+		const fetch = vi.fn();
+		const models = await createPresetProvider(fetch).listModels({ apiKey: 'key', models: [{ id: '@preset/programmer-agent' }, { id: 'review-agent', name: 'Review Agent (preset)' }] });
+		expect(fetch).not.toHaveBeenCalled();
+		expect(models.map(m => [m.id, m.name])).toEqual([
+			['@preset/programmer-agent', 'Programmer Agent (preset)'],
+			['@preset/review-agent', 'Review Agent (preset)'],
+		]);
+		expect(models[0].maxInputTokens + models[0].maxOutputTokens).toBe(200_000);
+		expect(models[0].url).toBe('https://openrouter.ai/api/v1');
+	});
+
+	it('lists nothing when no presets or models are configured', async () => {
+		const fetch = vi.fn();
+		expect(await createPresetProvider(fetch).listModels({ apiKey: 'key' })).toEqual([]);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
+	it('inherits capabilities from the catalog for models and preset base models', async () => {
+		const fetch = vi.fn().mockResolvedValue({
+			json: async () => ({
+				data: [
+					{ id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', supported_parameters: ['tools'], architecture: { input_modalities: ['text', 'image'] }, context_length: 1_000_000, top_provider: { context_length: 1_000_000, max_completion_tokens: 64_000 } },
+					{ id: 'other/model', name: 'Other', supported_parameters: ['tools'], context_length: 8000, top_provider: { context_length: 8000 } },
+				]
+			})
+		});
+		const provider = createPresetProvider(fetch);
+		const models = await provider.listModels({ apiKey: 'key', models: [{ id: 'anthropic/claude-sonnet-4.5' }, { id: '@preset/fast', baseModel: 'anthropic/claude-sonnet-4.5' }] });
+		expect(models.map(m => m.id)).toEqual(['anthropic/claude-sonnet-4.5', '@preset/fast']);
+		expect(models[1].capabilities?.imageInput).toBe(true);
+		expect(models[1].maxOutputTokens).toBe(64_000);
+
+		const all = await provider.listModels({ apiKey: 'key', showAllModels: true, models: [{ id: '@preset/fast' }] });
+		expect(all.map(m => m.id)).toEqual(['@preset/fast', 'anthropic/claude-sonnet-4.5', 'other/model']);
+	});
+});

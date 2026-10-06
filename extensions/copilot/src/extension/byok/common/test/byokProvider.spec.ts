@@ -180,27 +180,11 @@ describe('isClientBYOKAllowed', () => {
 		} as unknown as Omit<CopilotToken, 'token'>;
 	}
 
-	it('allows BYOK when there is no GitHub session (truly signed-out)', () => {
+	// CreaEditor: BYOK is always allowed since GitHub Copilot models are not available.
+	it('always allows BYOK', () => {
 		expect(isClientBYOKAllowed(false, undefined)).toBe(true);
-	});
-
-	it('denies BYOK when signed-in but the Copilot token is unavailable (e.g. EnterpriseManagedError)', () => {
-		expect(isClientBYOKAllowed(true, undefined)).toBe(false);
-	});
-
-	it('allows BYOK for internal users', () => {
+		expect(isClientBYOKAllowed(true, undefined)).toBe(true);
 		expect(isClientBYOKAllowed(true, mockToken({ isInternal: true }))).toBe(true);
-	});
-
-	it('allows BYOK for individual users', () => {
-		expect(isClientBYOKAllowed(true, mockToken({ isIndividual: true }))).toBe(true);
-	});
-
-	it('allows BYOK when the token explicitly enables it (e.g. enterprise org opt-in)', () => {
-		expect(isClientBYOKAllowed(true, mockToken({ isClientBYOKEnabled: true }))).toBe(true);
-	});
-
-	it('denies BYOK for signed-in managed users when no policy flag is set', () => {
-		expect(isClientBYOKAllowed(true, mockToken({}))).toBe(false);
+		expect(isClientBYOKAllowed(true, mockToken({}))).toBe(true);
 	});
 });

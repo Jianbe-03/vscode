@@ -13,7 +13,7 @@ import { AgentSession, type AgentProvider, type IAgentCreateSessionConfig, type 
 import { SessionStatus } from '../../common/state/protocol/channels-session/state.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import type { IAgentServerToolDefinition } from '../../common/agentServerTools.js';
-import { buildChatUri, buildDefaultChatUri, getInlineToolInput, getSessionRelatedPullRequestUrls, isDefaultChatUri, isSessionStatusArchived, isSessionStatusRead, MessageKind, parseChatUri, PendingMessageKind, readSessionGitState, readSessionGitHubState, getAllSessionRelatedPullRequestUrls, readSessionWorkspaceless, ResponsePartKind, ToolCallStatus, TurnState, withSessionCreationReference, type Message, type ModelSelection, type ResponsePart, type ToolCallState, type ToolDefinition, type Turn, type URI as ProtocolURI } from '../../common/state/sessionState.js';
+import { buildChatUri, buildDefaultChatUri, CustomizationType, getInlineToolInput, readSessionCreationReference, type AgentCustomization, type AgentSelection, type Customization, type ISessionGroupReference, type SessionActiveClient, getSessionRelatedPullRequestUrls, isDefaultChatUri, isSessionStatusArchived, isSessionStatusRead, MessageKind, parseChatUri, PendingMessageKind, readSessionGitState, readSessionGitHubState, getAllSessionRelatedPullRequestUrls, readSessionWorkspaceless, ResponsePartKind, ToolCallStatus, TurnState, withSessionCreationReference, type Message, type ModelSelection, type ResponsePart, type ToolCallState, type ToolDefinition, type Turn, type URI as ProtocolURI } from '../../common/state/sessionState.js';
 import { buildOpenSessionLinkUri, parseOpenSessionLinkChatId, parseOpenSessionLinkUri } from '../../common/openSessionLink.js';
 import { SessionServerToolName } from '../../common/serverToolNames.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -38,7 +38,12 @@ const maxCreatedChats = 50;
 /** Process-wide backstop against runaway `send_message` fan-out. */
 const maxSentMessages = 100;
 
-const sessionConfirmationToolNames: ReadonlySet<string> = new Set([SessionServerToolName.SetWorkspace, SessionServerToolName.CreateSession, SessionServerToolName.CreateChat, SessionServerToolName.SendMessage, SessionServerToolName.DeleteSession]);
+const sessionConfirmationToolNames: ReadonlySet<string> = new Set([SessionServerToolName.SetWorkspace, SessionServerToolName.CreateSession, SessionServerToolName.CreateChat, SessionServerToolName.SendMessage, SessionServerToolName.DeleteSession, SessionServerToolName.CreateSessionGroup]);
+
+/** CreaEditor: maximum number of sessions a single `create_session_group` call may start. */
+const maxSessionGroupSize = 10;
+const maxSessionGroupNameLength = 100;
+const maxBranchNameLength = 200;
 const createSessionRelationshipValues = ['currentSession', 'independent'] as const;
 export type CreateSessionRelationship = typeof createSessionRelationshipValues[number];
 
@@ -68,6 +73,10 @@ const listSessionsInputSchema: ToolDefinition['inputSchema'] = {
 	},
 };
 
+// CreaEditor: optional custom agent and explicit worktree branch for independent sessions.
+const createSessionAgentProperty = { type: 'string', description: 'Only for `independent` sessions: name of a custom agent (as shown in the agent picker) that the new session runs as. Must be one of the current session\'s custom agents. Omit for the default agent.' };
+const createSessionBranchProperty = { type: 'string', maxLength: maxBranchNameLength, description: 'Only for `independent` sessions with a worktree: explicit name for the new Git branch created for the worktree (e.g. `feature/issue-123`). Omit to derive a name from the prompt.' };
+
 const createSessionInputSchema: ToolDefinition['inputSchema'] = {
 	type: 'object',
 	properties: {
@@ -81,6 +90,8 @@ const createSessionInputSchema: ToolDefinition['inputSchema'] = {
 		worktree: { type: 'boolean', description: 'Set true when the work needs an isolated Git worktree for the workspace, or false to work in the folder directly. A worktree is not needed for read-only work. When omitted, the current session\'s isolation is used; an independent session in another project uses a worktree. Only valid when `workspace` is also set.' },
 		title: { type: 'string', maxLength: 200, description: 'Short title for the new chat or independent session.' },
 		model: { type: 'string', description: 'Optional model ID or display name. Defaults to the current chat\'s model. For `currentSession`, the model must belong to the current session\'s provider; for `independent`, the model selects the new session\'s provider.' },
+		agent: createSessionAgentProperty,
+		branch: createSessionBranchProperty,
 	},
 	required: ['prompt', 'title'],
 };
@@ -104,6 +115,8 @@ const createSessionWithSharedWorkspaceInputSchema: ToolDefinition['inputSchema']
 		worktree: { type: 'boolean', description: 'Override isolation for the new independent session. Set true only when the user explicitly asks to create a worktree, or false only when the user explicitly asks to work without one. Omit to preserve the existing isolation behavior: inherit the creating session\'s isolation for the same project, otherwise use worktree isolation. Only valid with relationship `independent`; omit for `currentSession`.' },
 		title: { type: 'string', maxLength: 200, description: 'Short title for the new chat or independent session.' },
 		model: { type: 'string', description: 'Optional model ID or display name. Defaults to the current chat\'s model. For `currentSession`, the model must belong to the current session\'s provider; for `independent`, the model selects the new session\'s provider.' },
+		agent: createSessionAgentProperty,
+		branch: createSessionBranchProperty,
 	},
 	required: ['relationship', 'prompt', 'title'],
 };
@@ -174,6 +187,42 @@ const getSessionContextInputSchema: ToolDefinition['inputSchema'] = {
 	required: ['session'],
 };
 
+// CreaEditor: chat groups of independent worktree sessions.
+const createSessionGroupInputSchema: ToolDefinition['inputSchema'] = {
+	type: 'object',
+	properties: {
+		name: { type: 'string', maxLength: maxSessionGroupNameLength, description: 'Name of the group. The sessions are shown together under this name in the Agents window session list.' },
+		workspace: { type: 'string', description: 'Git repository every session works in: a unique project name, project URI, absolute folder path, or working directory from an existing session. Defaults to the current session\'s project.' },
+		baseBranch: { type: 'string', description: 'Branch every worktree starts from (e.g. `main`). Defaults to the repository\'s upstream or default branch.' },
+		sessions: {
+			type: 'array',
+			minItems: 1,
+			maxItems: maxSessionGroupSize,
+			description: `The sessions to start (1-${maxSessionGroupSize}). Each runs independently in its own fresh worktree on its own new branch.`,
+			items: {
+				type: 'object',
+				properties: {
+					title: { type: 'string', maxLength: 200, description: 'Short title for the session.' },
+					prompt: { type: 'string', description: 'Complete, self-contained initial prompt; the session does not see this conversation.' },
+					agent: { type: 'string', description: 'Optional custom agent name (as shown in the agent picker) the session runs as.' },
+					model: { type: 'string', description: 'Optional model ID or display name. Defaults to the current chat\'s model.' },
+					branch: { type: 'string', maxLength: maxBranchNameLength, description: 'Optional explicit name for the session\'s new branch. Omit to derive one from the prompt.' },
+				},
+				required: ['title', 'prompt'],
+			},
+		},
+	},
+	required: ['name', 'sessions'],
+};
+
+const listSessionGroupInputSchema: ToolDefinition['inputSchema'] = {
+	type: 'object',
+	properties: {
+		group: { type: 'string', description: 'Group id (from `create_session_group`) or group name. Omit to list every group created by the current session.' },
+		includeArchived: { type: 'boolean', description: 'Whether to include archived member sessions. Defaults to false.' },
+	},
+};
+
 /** Server tool definitions for session management. */
 export const sessionServerToolDefinitions: IAgentServerToolDefinition[] = [
 	{
@@ -240,6 +289,23 @@ export const sessionServerToolDefinitions: IAgentServerToolDefinition[] = [
 		annotations: { readOnlyHint: false, destructiveHint: true },
 		deferLoading: true,
 	},
+	// CreaEditor: chat groups.
+	{
+		name: SessionServerToolName.CreateSessionGroup,
+		title: 'Create Session Group',
+		description: 'Start a named group of independent sessions that run in parallel in the background, each in its own fresh Git worktree on its own new branch (for example one session per issue, each opening its own pull request). Every session can run as a custom agent (`agent`) and/or a specific `model`, and starts with its own self-contained `prompt`. The sessions are shown together under the group name in the Agents window. The user confirms the whole group once. Returns the group id and each session\'s link. Afterwards use `list_session_group` to monitor status and branches, `get_session_context` to read a session\'s results, and `send_message` to follow up.',
+		inputSchema: createSessionGroupInputSchema,
+		annotations: { readOnlyHint: false },
+		deferLoading: true,
+	},
+	{
+		name: SessionServerToolName.ListSessionGroup,
+		title: 'List Session Group',
+		description: 'List the sessions of a group created with `create_session_group`, with each session\'s status, activity, branch, working directory (worktree), changes and pull request. Pass `group` (id or name), or omit it to list the groups created by the current session. Use `get_session_context` on a member to read its results.',
+		inputSchema: listSessionGroupInputSchema,
+		annotations: { readOnlyHint: true },
+		deferLoading: true,
+	},
 ];
 
 /** Resolves the owning backend session URI for the channel a tool call runs on. */
@@ -255,6 +321,8 @@ interface ICreateSessionArgs {
 	readonly prompt?: unknown;
 	readonly title?: unknown;
 	readonly model?: unknown;
+	readonly agent?: unknown;
+	readonly branch?: unknown;
 }
 
 export type IResolvedCreateSessionArgs = {
@@ -272,6 +340,10 @@ export type IResolvedCreateSessionArgs = {
 	readonly prompt: string;
 	readonly title: string;
 	readonly model?: IAgentModelInfo;
+	/** CreaEditor: requested custom agent name (resolved against the creating session's customizations). */
+	readonly agent?: string;
+	/** CreaEditor: explicit name for the worktree's new branch. */
+	readonly branch?: string;
 };
 
 /** Selects how a repository is attached to a chat's aggregate session. */
@@ -325,6 +397,10 @@ export interface IAgentServiceSessionServerToolAccessor {
 	readonly getSessionSpawnDepth: (session: URI) => number;
 	/** Records the spawn depth of a freshly-created session so its own `create_session` calls can enforce the recursion limit. */
 	readonly setSessionSpawnDepth: (session: URI, depth: number) => void;
+	/** CreaEditor: the session's published customizations, used to resolve custom agents by name. */
+	readonly getSessionCustomizations?: (session: URI) => readonly Customization[] | undefined;
+	/** CreaEditor: the session's active clients, whose customizations a spawned session inherits. */
+	readonly getActiveClients?: (session: URI) => readonly SessionActiveClient[] | undefined;
 }
 
 /** Complete dependency surface needed by the session server-tool group. */
@@ -394,6 +470,8 @@ interface ISerializedSession {
 	readonly changes?: IAgentSessionMetadata['changes'];
 	readonly git?: ISerializedGitState;
 	readonly github?: ISerializedGitHubState;
+	/** CreaEditor: the agent-created group this session belongs to. */
+	readonly sessionGroup?: ISessionGroupReference;
 }
 
 function getRequiredString(value: unknown, field: string, toolName: string): string {
@@ -596,6 +674,22 @@ export function getCreateSessionArgs(rawArgs: unknown, sessions: readonly IAgent
 	const modelName = getOptionalString(args.model, 'model', SessionServerToolName.CreateSession);
 	const worktree = getOptionalBoolean(args.worktree, 'worktree', SessionServerToolName.CreateSession);
 	const model = resolveModel(modelName, models, relationship === 'currentSession' ? currentProvider : undefined);
+	// CreaEditor: custom agent and explicit branch apply to independent sessions only.
+	const agent = getOptionalString(args.agent, 'agent', SessionServerToolName.CreateSession)?.trim() || undefined;
+	const branchInput = getOptionalString(args.branch, 'branch', SessionServerToolName.CreateSession);
+	const branch = branchInput !== undefined ? validateBranchName(branchInput, SessionServerToolName.CreateSession) : undefined;
+	if (relationship === 'currentSession' && (agent !== undefined || branch !== undefined)) {
+		throw new Error(`Invalid ${SessionServerToolName.CreateSession} input: ${agent !== undefined ? 'agent' : 'branch'} is only valid when relationship is "independent".`);
+	}
+	if (branch !== undefined && (workspace === undefined || worktree === false)) {
+		throw new Error(`Invalid ${SessionServerToolName.CreateSession} input: branch requires workspace and a worktree.`);
+	}
+	const independentExtras = {
+		...(agent !== undefined ? { agent } : {}),
+		...(branch !== undefined ? { branch } : {}),
+	};
+	// An explicit branch always means a fresh worktree.
+	const effectiveWorktree = worktree ?? (branch !== undefined ? true : undefined);
 	if (relationship === 'currentSession') {
 		if (!supportsChatWorkingDirectories) {
 			if (workspace !== undefined) {
@@ -626,15 +720,95 @@ export function getCreateSessionArgs(rawArgs: unknown, sessions: readonly IAgent
 			prompt,
 			title,
 			...(model !== undefined ? { model } : {}),
+			...independentExtras,
 		};
 	}
 	return {
 		relationship,
 		workspace: resolveWorkspace(workspace, sessions),
-		...(worktree !== undefined ? { worktree } : {}),
+		...(effectiveWorktree !== undefined ? { worktree: effectiveWorktree } : {}),
 		prompt,
 		title,
 		...(model !== undefined ? { model } : {}),
+		...independentExtras,
+	};
+}
+
+/**
+ * CreaEditor: validates an explicit Git branch name (a conservative subset of
+ * `git check-ref-format --branch`) and returns it trimmed.
+ */
+export function validateBranchName(branch: string, toolName: string): string {
+	const trimmed = branch.trim();
+	const invalid = trimmed.length === 0
+		|| trimmed.length > maxBranchNameLength
+		|| !/^[A-Za-z0-9._\-\/]+$/.test(trimmed)
+		|| trimmed.startsWith('-')
+		|| trimmed.endsWith('/')
+		|| trimmed.endsWith('.')
+		|| trimmed.endsWith('.lock')
+		|| trimmed.includes('..')
+		|| trimmed.split('/').some(part => part.length === 0 || part.startsWith('.'));
+	if (invalid) {
+		throw new Error(`Invalid ${toolName} input: branch "${branch}" is not a valid Git branch name.`);
+	}
+	return trimmed;
+}
+
+/** CreaEditor: every custom agent published in a session's customizations. */
+function getCustomAgents(customizations: readonly Customization[] | undefined): AgentCustomization[] {
+	const agents: AgentCustomization[] = [];
+	for (const customization of customizations ?? []) {
+		if (customization.type !== CustomizationType.Plugin && customization.type !== CustomizationType.Directory) {
+			continue;
+		}
+		for (const child of customization.children ?? []) {
+			if (child.type === CustomizationType.Agent && child.enabled !== false && !child.disableUserInvocation && !agents.some(agent => agent.uri === child.uri)) {
+				agents.push(child);
+			}
+		}
+	}
+	return agents;
+}
+
+/**
+ * CreaEditor: resolves a custom agent requested by name (case-insensitive), file
+ * stem (e.g. `issue-to-pr` for `issue-to-pr.agent.md`) or URI against the
+ * creating session's customizations.
+ */
+export function resolveCustomAgentSelection(agent: string, customizations: readonly Customization[] | undefined, toolName: string): { readonly selection: AgentSelection; readonly name: string } {
+	const agents = getCustomAgents(customizations);
+	const needle = agent.trim().toLowerCase();
+	const stem = (uri: string) => basename(URI.parse(uri)).replace(/(\.agent)?\.md$/i, '').toLowerCase();
+	const match = agents.find(candidate => candidate.uri === agent)
+		?? agents.find(candidate => candidate.name.toLowerCase() === needle)
+		?? agents.find(candidate => stem(candidate.uri) === needle);
+	if (!match) {
+		const available = agents.map(candidate => `"${candidate.name}"`).join(', ');
+		throw new Error(`Invalid ${toolName} input: unknown custom agent "${agent}". ${available ? `Available custom agents: ${available}.` : 'The current session has no custom agents.'}`);
+	}
+	return { selection: { uri: match.uri }, name: match.name };
+}
+
+/**
+ * CreaEditor: the active client a spawned session inherits from its creator, so
+ * the creator's client-synced customizations (custom agents, skills, …) apply
+ * before anyone opens the new session. Client tools are not inherited: they
+ * execute in a client, which publishes its own tools once the session is opened.
+ */
+function getInheritedActiveClient(accessor: ISessionServerToolAccessor, currentSession: URI | undefined, agent: AgentSelection | undefined): SessionActiveClient | undefined {
+	const clients = currentSession ? accessor.getActiveClients?.(currentSession) : undefined;
+	if (!clients?.length) {
+		return undefined;
+	}
+	const client = (agent ? clients.find(candidate => candidate.customizations?.some(plugin => plugin.children?.some(child => child.uri === agent.uri))) : undefined)
+		?? clients.find(candidate => candidate.customizations?.length)
+		?? clients[0];
+	return {
+		clientId: client.clientId,
+		...(client.displayName !== undefined ? { displayName: client.displayName } : {}),
+		tools: [],
+		...(client.customizations !== undefined ? { customizations: client.customizations } : {}),
 	};
 }
 
@@ -849,6 +1023,7 @@ function serializeSession(session: IAgentSessionMetadata): ISerializedSession {
 	const git = serializeGitState(session);
 	const github = serializeGitHubState(session);
 	const status = describeSessionStatus(session);
+	const sessionGroup = readSessionCreationReference(session._meta)?.sessionGroup;
 	return {
 		session: session.session.toString(),
 		openLink: buildOpenSessionLinkUri(session.session),
@@ -867,6 +1042,7 @@ function serializeSession(session: IAgentSessionMetadata): ISerializedSession {
 		...(session.changes !== undefined ? { changes: session.changes } : {}),
 		...(git !== undefined ? { git } : {}),
 		...(github !== undefined ? { github } : {}),
+		...(sessionGroup !== undefined ? { sessionGroup } : {}),
 	};
 }
 
@@ -886,7 +1062,7 @@ export interface ICreateSessionResult {
 /**
  * Creates work with the requested relationship and sends its initial prompt.
  */
-export async function applyCreateSessionTool(accessor: ISessionServerToolAccessor, rawArgs: unknown, source?: URI, sourceTurnId?: string, enforceSpawnDepthLimit = true): Promise<ICreateSessionResult> {
+export async function applyCreateSessionTool(accessor: ISessionServerToolAccessor, rawArgs: unknown, source?: URI, sourceTurnId?: string, enforceSpawnDepthLimit = true, maxSpawnDepth = maxSessionSpawnDepth): Promise<ICreateSessionResult> {
 	const currentSession = source ? currentSessionUri(source.toString()) : undefined;
 	const supportsChatWorkingDirectories = currentSession === undefined || accessor.supportsChatWorkingDirectories(currentSession);
 	const sessions = await getCreateSessionCatalog(accessor, rawArgs, supportsChatWorkingDirectories);
@@ -923,10 +1099,63 @@ export async function applyCreateSessionTool(accessor: ISessionServerToolAccesso
 		return { relationship: args.relationship, ...result };
 	}
 
+	const parentDepth = checkSessionSpawnDepth(accessor, currentSession, enforceSpawnDepthLimit, maxSpawnDepth);
+	// CreaEditor: resolve the requested custom agent against the creating session.
+	const agent = args.agent !== undefined
+		? resolveCustomAgentSelection(args.agent, currentSession ? accessor.getSessionCustomizations?.(currentSession) : undefined, SessionServerToolName.CreateSession).selection
+		: undefined;
+	const { session, chat } = await createIndependentSession(accessor, {
+		workspace: args.workspace,
+		worktree: args.worktree,
+		prompt: args.prompt,
+		title: args.title,
+		model: args.model,
+		branch: args.branch,
+		agent,
+		activeClient: agent !== undefined ? getInheritedActiveClient(accessor, currentSession, agent) : undefined,
+	}, { currentSession, source, sourceTurnId, defaults, parentDepth });
+	return { relationship: args.relationship, session: session.toString(), chat: chat.toString(), openLink: buildOpenSessionLinkUri(session) };
+}
+
+/** CreaEditor: enforces the spawn-depth limit and returns the creating session's depth. */
+function checkSessionSpawnDepth(accessor: ISessionServerToolAccessor, currentSession: URI | undefined, enforceSpawnDepthLimit: boolean, maxSpawnDepth: number): number {
 	const parentDepth = currentSession ? accessor.getSessionSpawnDepth(currentSession) : 0;
-	if (enforceSpawnDepthLimit && parentDepth >= maxSessionSpawnDepth) {
-		throw new Error(`Refusing to create a session: recursion limit reached (max spawn depth ${maxSessionSpawnDepth}). This session was itself created ${parentDepth} level(s) deep.`);
+	if (enforceSpawnDepthLimit && parentDepth >= maxSpawnDepth) {
+		throw new Error(`Refusing to create a session: recursion limit reached (max spawn depth ${maxSpawnDepth}, see the chat.agentHost.maxSessionSpawnDepth setting). This session was itself created ${parentDepth} level(s) deep.`);
 	}
+	return parentDepth;
+}
+
+/** CreaEditor: a fully resolved independent session to create and start. */
+interface IIndependentSessionRequest {
+	readonly workspace?: URI;
+	readonly worktree?: boolean;
+	readonly prompt: string;
+	readonly title: string;
+	readonly model?: IAgentModelInfo;
+	readonly agent?: AgentSelection;
+	/** Explicit name for the worktree's new branch. */
+	readonly branch?: string;
+	/** Branch the worktree starts from. */
+	readonly baseBranch?: string;
+	readonly sessionGroup?: ISessionGroupReference;
+	readonly activeClient?: SessionActiveClient;
+}
+
+interface IIndependentSessionCreator {
+	readonly currentSession: URI | undefined;
+	readonly source: URI | undefined;
+	readonly sourceTurnId: string | undefined;
+	readonly defaults: ISessionCreationDefaults | undefined;
+	readonly parentDepth: number;
+}
+
+/**
+ * Creates an independent top-level session, names it, and starts its initial
+ * prompt. Shared by `create_session` and (CreaEditor) `create_session_group`.
+ */
+async function createIndependentSession(accessor: ISessionServerToolAccessor, args: IIndependentSessionRequest, creator: IIndependentSessionCreator): Promise<{ readonly session: URI; readonly chat: URI }> {
+	const { currentSession, source, sourceTurnId, defaults, parentDepth } = creator;
 	let workspace = args.workspace;
 	if (workspace !== undefined && args.worktree === false) {
 		const [primaryRoot, ...linkedRoots] = await accessor.getWorktreeRoots(workspace);
@@ -951,17 +1180,23 @@ export async function applyCreateSessionTool(accessor: ISessionServerToolAccesso
 		: {
 			...inheritedProviderConfig,
 			...(isolation !== undefined ? { [SessionConfigKey.Isolation]: isolation } : {}),
+			// CreaEditor: explicit base branch / new branch name for the worktree.
+			...(isolation === 'worktree' && args.baseBranch !== undefined ? { [SessionConfigKey.Branch]: args.baseBranch } : {}),
+			...(isolation === 'worktree' && args.branch !== undefined ? { [SessionConfigKey.WorktreeBranchName]: args.branch } : {}),
 		};
 	const config: IAgentCreateSessionConfig = {
 		...(workspace !== undefined ? { workingDirectories: [workspace] } : {}),
 		...(provider !== undefined ? { provider } : {}),
 		...(args.model !== undefined ? { model: { id: args.model.id } } : defaults?.model !== undefined ? { model: defaults.model } : {}),
 		...(configValues !== undefined ? { config: configValues } : {}),
+		...(args.agent !== undefined ? { agent: args.agent } : {}),
+		...(args.activeClient !== undefined ? { activeClient: args.activeClient } : {}),
 		...(currentSession !== undefined && source !== undefined ? {
 			_meta: withSessionCreationReference(undefined, {
 				session: currentSession.toString(),
 				chat: source.toString(),
 				...(sourceTurnId !== undefined ? { turnId: sourceTurnId } : {}),
+				...(args.sessionGroup !== undefined ? { sessionGroup: args.sessionGroup } : {}),
 			})
 		} : {}),
 	};
@@ -974,7 +1209,7 @@ export async function applyCreateSessionTool(accessor: ISessionServerToolAccesso
 		sourceChat: source?.toString(),
 		...(sourceTurnId !== undefined ? { sourceTurnId } : {}),
 	} : undefined);
-	return { relationship: args.relationship, session: session.toString(), chat: chat.toString(), openLink: buildOpenSessionLinkUri(session) };
+	return { session, chat };
 }
 
 /**
@@ -995,6 +1230,250 @@ export function formatCreateSessionResult(result: ICreateSessionResult): string 
 		return `Chat created in the current session (${result.openLink}).`;
 	}
 	return `New session created (${result.openLink}).`;
+}
+
+// --- create_session_group / list_session_group (CreaEditor) -----------------
+
+interface ICreateSessionGroupMemberArgs {
+	readonly title?: unknown;
+	readonly prompt?: unknown;
+	readonly agent?: unknown;
+	readonly model?: unknown;
+	readonly branch?: unknown;
+}
+
+interface ICreateSessionGroupArgs {
+	readonly name?: unknown;
+	readonly workspace?: unknown;
+	readonly baseBranch?: unknown;
+	readonly sessions?: unknown;
+}
+
+/** A validated `create_session_group` member; `agent` is still an unresolved name. */
+export interface IResolvedSessionGroupMember {
+	readonly title: string;
+	readonly prompt: string;
+	readonly agent?: string;
+	readonly model?: IAgentModelInfo;
+	readonly branch?: string;
+}
+
+export interface IResolvedCreateSessionGroupArgs {
+	readonly name: string;
+	/** Raw workspace selector; resolved against the session catalog when set. */
+	readonly workspace?: string;
+	readonly baseBranch?: string;
+	readonly sessions: readonly IResolvedSessionGroupMember[];
+}
+
+/** Returns the number of sessions a raw `create_session_group` call requests (0 when malformed). */
+export function getRequestedSessionGroupSize(rawArgs: unknown): number {
+	const sessions = ((rawArgs ?? {}) as ICreateSessionGroupArgs).sessions;
+	return Array.isArray(sessions) ? sessions.length : 0;
+}
+
+/** Validates `create_session_group` arguments without side effects. */
+export function getCreateSessionGroupArgs(rawArgs: unknown, models: readonly IAgentModelInfo[]): IResolvedCreateSessionGroupArgs {
+	const toolName = SessionServerToolName.CreateSessionGroup;
+	const args = (rawArgs ?? {}) as ICreateSessionGroupArgs;
+	const name = normalizeGeneralChatTitle(getRequiredString(args.name, 'name', toolName));
+	if (!name) {
+		throw new Error(`Invalid ${toolName} input: name must contain non-whitespace characters.`);
+	}
+	if (Array.from(name).length > maxSessionGroupNameLength) {
+		throw new Error(`Invalid ${toolName} input: name must not exceed ${maxSessionGroupNameLength} characters.`);
+	}
+	const workspace = getOptionalString(args.workspace, 'workspace', toolName);
+	const baseBranchInput = getOptionalString(args.baseBranch, 'baseBranch', toolName);
+	const baseBranch = baseBranchInput !== undefined ? validateBranchName(baseBranchInput, toolName) : undefined;
+	if (!Array.isArray(args.sessions) || args.sessions.length === 0) {
+		throw new Error(`Invalid ${toolName} input: sessions must be a non-empty array.`);
+	}
+	if (args.sessions.length > maxSessionGroupSize) {
+		throw new Error(`Invalid ${toolName} input: a group can start at most ${maxSessionGroupSize} sessions per call.`);
+	}
+	const branches = new Set<string>();
+	const sessions = args.sessions.map((raw: unknown, index): IResolvedSessionGroupMember => {
+		if (!raw || typeof raw !== 'object') {
+			throw new Error(`Invalid ${toolName} input: sessions[${index}] must be an object.`);
+		}
+		const member = raw as ICreateSessionGroupMemberArgs;
+		const field = (key: string) => `sessions[${index}].${key}`;
+		const title = getRequiredString(member.title, field('title'), toolName);
+		if (!title.trim() || Array.from(title).length > 200) {
+			throw new Error(`Invalid ${toolName} input: ${field('title')} must contain non-whitespace characters and not exceed 200 characters.`);
+		}
+		const prompt = getRequiredString(member.prompt, field('prompt'), toolName);
+		const agent = getOptionalString(member.agent, field('agent'), toolName)?.trim() || undefined;
+		const model = resolveModel(getOptionalString(member.model, field('model'), toolName), models);
+		const branchInput = getOptionalString(member.branch, field('branch'), toolName);
+		const branch = branchInput !== undefined ? validateBranchName(branchInput, toolName) : undefined;
+		if (branch !== undefined) {
+			if (branches.has(branch)) {
+				throw new Error(`Invalid ${toolName} input: branch "${branch}" is requested by more than one session.`);
+			}
+			branches.add(branch);
+		}
+		return {
+			title,
+			prompt,
+			...(agent !== undefined ? { agent } : {}),
+			...(model !== undefined ? { model } : {}),
+			...(branch !== undefined ? { branch } : {}),
+		};
+	});
+	return {
+		name,
+		...(workspace !== undefined ? { workspace } : {}),
+		...(baseBranch !== undefined ? { baseBranch } : {}),
+		sessions,
+	};
+}
+
+export interface ISessionGroupMemberResult {
+	readonly title: string;
+	readonly session?: string;
+	readonly chat?: string;
+	readonly openLink?: string;
+	readonly agent?: string;
+	readonly model?: string;
+	readonly branch?: string;
+	/** Why this member could not be created; the other members are unaffected. */
+	readonly error?: string;
+}
+
+export interface ICreateSessionGroupResult {
+	readonly group: ISessionGroupReference;
+	readonly workspace: string;
+	readonly baseBranch?: string;
+	readonly sessions: readonly ISessionGroupMemberResult[];
+}
+
+/** Resolves the repository a group works in: the explicit selector, else the current session's project or working directory. */
+async function resolveSessionGroupWorkspace(accessor: ISessionServerToolAccessor, workspace: string | undefined, currentSession: URI, defaults: ISessionCreationDefaults | undefined): Promise<URI> {
+	if (workspace !== undefined) {
+		let sessions: readonly IAgentSessionMetadata[] = [];
+		try {
+			sessions = await accessor.listSessions();
+		} catch (error) {
+			if (parseWorkspaceUri(workspace) === undefined) {
+				throw error;
+			}
+		}
+		return resolveWorkspace(workspace, sessions);
+	}
+	if (defaults?.project !== undefined) {
+		return defaults.project;
+	}
+	const metadata = await accessor.getSession(currentSession);
+	const fallback = metadata?.project?.uri ?? metadata?.workingDirectories?.[0];
+	if (!fallback) {
+		throw new Error(`Invalid ${SessionServerToolName.CreateSessionGroup} input: the current session has no workspace; pass workspace.`);
+	}
+	return fallback;
+}
+
+/**
+ * Starts a named group of independent sessions, each in its own fresh worktree
+ * on its own new branch, in parallel. Everything is validated before anything
+ * is created; a member that fails to start is reported without affecting the
+ * others.
+ */
+export async function applyCreateSessionGroupTool(accessor: ISessionServerToolAccessor, rawArgs: unknown, source: URI, sourceTurnId?: string, enforceSpawnDepthLimit = true, maxSpawnDepth = maxSessionSpawnDepth): Promise<ICreateSessionGroupResult> {
+	const toolName = SessionServerToolName.CreateSessionGroup;
+	const currentSession = currentSessionUri(source.toString());
+	const args = getCreateSessionGroupArgs(rawArgs, accessor.getModels());
+	const parentDepth = checkSessionSpawnDepth(accessor, currentSession, enforceSpawnDepthLimit, maxSpawnDepth);
+	const defaults = accessor.getCreationDefaults(source);
+	const workspace = await resolveSessionGroupWorkspace(accessor, args.workspace, currentSession, defaults);
+	const customizations = accessor.getSessionCustomizations?.(currentSession);
+	const members = args.sessions.map(member => ({
+		member,
+		agent: member.agent !== undefined ? resolveCustomAgentSelection(member.agent, customizations, toolName) : undefined,
+	}));
+	const group: ISessionGroupReference = { id: generateUuid(), name: args.name };
+	const results = await Promise.allSettled(members.map(({ member, agent }) => createIndependentSession(accessor, {
+		workspace,
+		worktree: true,
+		prompt: member.prompt,
+		title: member.title,
+		model: member.model,
+		agent: agent?.selection,
+		branch: member.branch,
+		baseBranch: args.baseBranch,
+		sessionGroup: group,
+		activeClient: getInheritedActiveClient(accessor, currentSession, agent?.selection),
+	}, { currentSession, source, sourceTurnId, defaults, parentDepth })));
+	return {
+		group,
+		workspace: workspace.toString(),
+		...(args.baseBranch !== undefined ? { baseBranch: args.baseBranch } : {}),
+		sessions: results.map((result, index): ISessionGroupMemberResult => {
+			const { member, agent } = members[index];
+			const common = {
+				title: member.title,
+				...(agent !== undefined ? { agent: agent.name } : {}),
+				...(member.model !== undefined ? { model: member.model.id } : {}),
+				...(member.branch !== undefined ? { branch: member.branch } : {}),
+			};
+			return result.status === 'fulfilled'
+				? { ...common, session: result.value.session.toString(), chat: result.value.chat.toString(), openLink: buildOpenSessionLinkUri(result.value.session) }
+				: { ...common, error: result.reason instanceof Error ? result.reason.message : String(result.reason) };
+		}),
+	};
+}
+
+/** Builds the model-facing `create_session_group` result. */
+export function formatCreateSessionGroupResult(result: ICreateSessionGroupResult): string {
+	const started = result.sessions.filter(session => session.error === undefined).length;
+	return JSON.stringify({
+		...result,
+		note: `Started ${started} of ${result.sessions.length} session(s) in group "${result.group.name}". Each session creates its own worktree and branch as it starts; call ${SessionServerToolName.ListSessionGroup} with group "${result.group.id}" to see their status, branches and worktree paths, ${SessionServerToolName.GetSessionContext} to read results, and ${SessionServerToolName.SendMessage} to follow up. Link sessions with their openLink.`,
+	});
+}
+
+interface IListSessionGroupArgs {
+	readonly group?: unknown;
+	readonly includeArchived?: unknown;
+}
+
+/** Lists agent-created session groups and their members' compact metadata. */
+export async function applyListSessionGroupTool(accessor: ISessionServerToolAccessor, rawArgs: unknown, currentSession: URI): Promise<string> {
+	const toolName = SessionServerToolName.ListSessionGroup;
+	const args = (rawArgs ?? {}) as IListSessionGroupArgs;
+	const groupSelector = getOptionalString(args.group, 'group', toolName)?.trim();
+	const includeArchived = getOptionalBoolean(args.includeArchived, 'includeArchived', toolName) === true;
+	const groups = new Map<string, { group: ISessionGroupReference; createdBy: string; sessions: IAgentSessionMetadata[] }>();
+	for (const session of await accessor.listSessions()) {
+		const reference = readSessionCreationReference(session._meta);
+		const group = reference?.sessionGroup;
+		if (!reference || !group) {
+			continue;
+		}
+		const matches = groupSelector !== undefined
+			? group.id === groupSelector || group.name.toLowerCase() === groupSelector.toLowerCase()
+			: reference.session === currentSession.toString();
+		if (!matches || (!includeArchived && sessionIsArchived(session))) {
+			continue;
+		}
+		let entry = groups.get(group.id);
+		if (!entry) {
+			entry = { group, createdBy: reference.session, sessions: [] };
+			groups.set(group.id, entry);
+		}
+		entry.sessions.push(session);
+	}
+	if (groupSelector !== undefined && groups.size === 0) {
+		throw new Error(`Invalid ${toolName} input: no session group matches "${groupSelector}"${includeArchived ? '' : ' (archived sessions are excluded; pass includeArchived to include them)'}.`);
+	}
+	return JSON.stringify({
+		groups: [...groups.values()].map(entry => ({
+			id: entry.group.id,
+			name: entry.group.name,
+			createdBy: entry.createdBy,
+			sessions: entry.sessions.sort((a, b) => a.startTime - b.startTime).map(serializeSession),
+		})),
+	});
 }
 
 interface ICreateChatArgs {
@@ -1531,6 +2010,40 @@ export function applySetWorkspaceTool(accessor: ISessionServerToolAccessor, rawA
 		: `Workspace will be set to ${workspaceFolder.toString()} after this turn ends. End this turn now without calling more tools or replying; the host will continue the original task automatically in the selected workspace.`;
 }
 
+function escapeMarkdown(text: string): string {
+	return text.replace(/[\\`*_{}\[\]()#+\-.!|<>~]/g, '\\$&');
+}
+
+/** CreaEditor: display (including the single whole-group confirmation) for `create_session_group`. */
+function getCreateSessionGroupDisplay(args: unknown): IServerToolDisplay {
+	const input = (args ?? {}) as ICreateSessionGroupArgs;
+	const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : localize('toolConfirm.createSessionGroup.unnamed', "new group");
+	const members = Array.isArray(input.sessions) ? input.sessions.filter((member): member is ICreateSessionGroupMemberArgs => !!member && typeof member === 'object') : [];
+	const lines = members.map(member => {
+		const title = typeof member.title === 'string' ? member.title : localize('toolConfirm.createSessionGroup.untitled', "Untitled");
+		const details = [
+			typeof member.agent === 'string' ? localize('toolConfirm.createSessionGroup.agent', "agent: {0}", member.agent) : undefined,
+			typeof member.model === 'string' ? localize('toolConfirm.createSessionGroup.model', "model: {0}", member.model) : undefined,
+			typeof member.branch === 'string' ? localize('toolConfirm.createSessionGroup.branch', "branch: {0}", member.branch) : undefined,
+		].filter((detail): detail is string => detail !== undefined);
+		const prompt = typeof member.prompt === 'string' ? truncateText(member.prompt.replace(/\s+/g, ' '), 160).text : '';
+		return `- **${escapeMarkdown(title)}**${details.length ? ` (${escapeMarkdown(details.join(', '))})` : ''}${prompt ? `: ${escapeMarkdown(prompt)}` : ''}`;
+	});
+	const workspace = typeof input.workspace === 'string' ? input.workspace : undefined;
+	const baseBranch = typeof input.baseBranch === 'string' ? input.baseBranch : undefined;
+	const inWorkspace = workspace ? localize('toolConfirm.createSessionGroup.inWorkspace', " in {0}", workspace) : '';
+	const intro = baseBranch
+		? localize('toolConfirm.createSessionGroup.introBase', "Each session runs in the background in its own new Git worktree and branch, starting from {0}{1}.", baseBranch, inWorkspace)
+		: localize('toolConfirm.createSessionGroup.intro', "Each session runs in the background in its own new Git worktree and branch{0}.", inWorkspace);
+	return {
+		displayName: localize('toolName.createSessionGroup', "Create Session Group"),
+		invocationMessage: localize('toolInvoke.createSessionGroup', "Starting session group \"{0}\"", name),
+		pastTenseMessage: localize('toolComplete.createSessionGroup', "Started session group \"{0}\"", name),
+		confirmationTitle: localize('toolConfirm.createSessionGroup.title', "Start {0} session(s) in group \"{1}\"?", members.length, name),
+		confirmationMessage: { markdown: `${escapeMarkdown(intro)}\n\n${lines.join('\n')}` },
+	};
+}
+
 function getSessionToolDisplay(toolName: string, args: unknown, _result?: IServerToolDisplayResult): IServerToolDisplay | undefined {
 	switch (toolName) {
 		case SessionServerToolName.ListSessions:
@@ -1616,6 +2129,15 @@ function getSessionToolDisplay(toolName: string, args: unknown, _result?: IServe
 				invocationMessage: localize('toolInvoke.deleteSession', "Deleting session"),
 				pastTenseMessage: localize('toolComplete.deleteSession', "Deleted session"),
 			};
+		// CreaEditor: chat groups.
+		case SessionServerToolName.CreateSessionGroup:
+			return getCreateSessionGroupDisplay(args);
+		case SessionServerToolName.ListSessionGroup:
+			return {
+				displayName: localize('toolName.listSessionGroup', "List Session Group"),
+				invocationMessage: localize('toolInvoke.listSessionGroup', "Listing session group"),
+				pastTenseMessage: localize('toolComplete.listSessionGroup', "Listed session group"),
+			};
 		default:
 			return undefined;
 	}
@@ -1630,7 +2152,7 @@ function getSessionToolDisplay(toolName: string, args: unknown, _result?: IServe
  * and never invokes {@link IServerToolGroup.execute}. `execute` throws when no
  * accessor was provided.
  */
-export function createSessionServerToolGroup(accessor?: ISessionServerToolAccessor, areAgentOrchestrationLimitsEnabled: () => boolean = () => true): IServerToolGroup {
+export function createSessionServerToolGroup(accessor?: ISessionServerToolAccessor, areAgentOrchestrationLimitsEnabled: () => boolean = () => true, getMaxSessionSpawnDepth: () => number = () => maxSessionSpawnDepth): IServerToolGroup {
 	let createdSessionCount = 0;
 	let createdChatCount = 0;
 	let sentMessageCount = 0;
@@ -1674,6 +2196,9 @@ export function createSessionServerToolGroup(accessor?: ISessionServerToolAccess
 			}
 			const currentChannel = context.chatUri;
 			const enforceAgentOrchestrationLimits = areAgentOrchestrationLimitsEnabled();
+			// CreaEditor: user-configurable spawn depth (at least 1).
+			const configuredSpawnDepth = getMaxSessionSpawnDepth();
+			const maxSpawnDepth = Number.isFinite(configuredSpawnDepth) ? Math.max(1, Math.floor(configuredSpawnDepth)) : maxSessionSpawnDepth;
 			switch (toolName) {
 				case SessionServerToolName.ListSessions:
 					{
@@ -1696,7 +2221,7 @@ export function createSessionServerToolGroup(accessor?: ISessionServerToolAccess
 					if (enforceAgentOrchestrationLimits && relationship === 'independent' && createdSessionCount >= maxCreatedSessions) {
 						throw new Error(`Refusing to create more than ${maxCreatedSessions} sessions from server tools in this process.`);
 					}
-					const result = await applyCreateSessionTool(accessor, rawArgs, URI.parse(currentChannel), context.turnId, enforceAgentOrchestrationLimits);
+					const result = await applyCreateSessionTool(accessor, rawArgs, URI.parse(currentChannel), context.turnId, enforceAgentOrchestrationLimits, maxSpawnDepth);
 					if (relationship === 'currentSession') {
 						createdChatCount++;
 					} else {
@@ -1726,6 +2251,18 @@ export function createSessionServerToolGroup(accessor?: ISessionServerToolAccess
 					return applyGetSessionContextTool(accessor, rawArgs);
 				case SessionServerToolName.DeleteSession:
 					return applyDeleteSessionTool(accessor, rawArgs, currentSessionUri(currentChannel));
+				// CreaEditor: chat groups.
+				case SessionServerToolName.CreateSessionGroup: {
+					const requested = getRequestedSessionGroupSize(rawArgs);
+					if (enforceAgentOrchestrationLimits && createdSessionCount + requested > maxCreatedSessions) {
+						throw new Error(`Refusing to create more than ${maxCreatedSessions} sessions from server tools in this process (${createdSessionCount} already created).`);
+					}
+					const result = await applyCreateSessionGroupTool(accessor, rawArgs, URI.parse(currentChannel), context.turnId, enforceAgentOrchestrationLimits, maxSpawnDepth);
+					createdSessionCount += result.sessions.filter(session => session.error === undefined).length;
+					return formatCreateSessionGroupResult(result);
+				}
+				case SessionServerToolName.ListSessionGroup:
+					return applyListSessionGroupTool(accessor, rawArgs, currentSessionUri(currentChannel));
 				default:
 					throw new Error(`Unknown session server tool: ${toolName}`);
 			}

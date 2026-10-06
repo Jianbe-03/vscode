@@ -100,7 +100,7 @@ import { getStoredSelectedModel, storeSelectedModel } from '../../../common/chat
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind, ChatPermissionLevel, isChatPermissionLevel } from '../../../common/constants.js';
 import { isAutoApprovePolicyRestricted, isAutoApproveValuePolicyRestricted } from '../../../common/agentHostConfigPolicy.js';
 import { IChatEditingSession, IModifiedFileEntry, ModifiedFileEntryState } from '../../../common/editing/chatEditingService.js';
-import { ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService, isAutoLanguageModel } from '../../../common/languageModels.js';
+import { COPILOT_VENDOR_ID, ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService, isAutoLanguageModel } from '../../../common/languageModels.js';
 import { ChatInputModelSelectionController, IChatInputModelSelectionRuntime } from './chatInputModelSelectionController.js';
 import { ChatModelConfigurationStore } from './chatModelConfigurationStore.js';
 import { AgentHostAutoTierScope } from '../../agentSessions/agentHost/agentHostAutoTierScope.js';
@@ -2026,7 +2026,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	 */
 	private _showAutoModel(): boolean {
 		const sessionType = this.getCurrentSessionType();
-		return !sessionType || this.chatSessionsService.supportsAutoModelForSessionType(sessionType);
+		if (!sessionType || sessionType === localChatSessionType) {
+			// CreaEditor: the synthetic "Auto" model is GitHub Copilot's model router, so only offer it
+			// when a Copilot model exists. Otherwise the picker shows its "no models" / "Manage Models" state.
+			return this.getModels().some(model => model.metadata.vendor === COPILOT_VENDOR_ID);
+		}
+		return this.chatSessionsService.supportsAutoModelForSessionType(sessionType);
 	}
 
 	/**

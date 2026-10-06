@@ -109,7 +109,7 @@ export function buildUnavailableStateItems(options: IBuildModelPickerItemsOption
 		: undefined;
 	const hover = canUpgrade ? new MarkdownString('', { isTrusted: true, supportThemeIcons: true }) : undefined;
 	hover?.appendMarkdown(localize('chat.modelPicker.upgradeHover', "[Upgrade to GitHub Copilot Pro](command:workbench.action.chat.upgradePlan \" \") to use the best models."));
-	return [{
+	const items: IActionListItem<IActionWidgetDropdownAction>[] = [{
 		item: {
 			id: 'noModels',
 			enabled: false,
@@ -127,6 +127,9 @@ export function buildUnavailableStateItems(options: IBuildModelPickerItemsOption
 		hideIcon: false,
 		hover: hover ? { content: hover } : undefined,
 	}];
+	// CreaEditor: without models, offer adding some instead of a dead end.
+	appendManageModelsItems(items, options);
+	return items;
 }
 
 export function buildFlatModelItems(options: IBuildModelPickerItemsOptions): IActionListItem<IActionWidgetDropdownAction>[] {
@@ -335,6 +338,10 @@ function appendOtherModels(context: IGroupedContext): boolean {
 	const toolbarActions = options.manageModelsAction
 		? [toAction({ id: options.manageModelsAction.id, label: options.manageModelsAction.tooltip ?? options.manageModelsAction.label, class: ThemeIcon.asClassName(Codicon.gear), run: () => options.manageModelsAction!.run() })]
 		: undefined;
+	if (toolbarActions && options.addOpenRouterModelAction) {
+		const addAction = options.addOpenRouterModelAction;
+		toolbarActions.unshift(toAction({ id: addAction.id, label: addAction.tooltip ?? addAction.label, class: ThemeIcon.asClassName(Codicon.add), run: () => addAction.run() }));
+	}
 	items.push({
 		item: { id: 'otherModels', enabled: true, checked: false, class: undefined, tooltip: localize('chat.modelPicker.otherModels', "Other Models"), label: localize('chat.modelPicker.otherModels', "Other Models"), run: () => { } },
 		kind: ActionListItemKind.Action,
@@ -391,16 +398,30 @@ export function buildGroupedModelItems(options: IBuildModelPickerItemsOptions): 
 	const pinnedSet = appendPinnedModels(context);
 	appendPromotedModels(context, autoModel, pinnedSet);
 	const hasOtherModels = appendOtherModels(context);
-	if (options.manageModelsAction && !hasOtherModels) {
-		context.items.push({ kind: ActionListItemKind.Separator });
-		context.items.push({
-			item: options.manageModelsAction,
-			kind: ActionListItemKind.Action,
-			label: options.manageModelsAction.label,
-			group: { title: '', icon: Codicon.blank },
-			hideIcon: false,
-			showAlways: true,
-		});
+	if (!hasOtherModels) {
+		appendManageModelsItems(context.items, options);
 	}
 	return context.items;
+}
+
+/**
+ * CreaEditor: appends the "Manage Models..." and "Add OpenRouter Preset or Model..." entries, if available.
+ */
+function appendManageModelsItems(items: IActionListItem<IActionWidgetDropdownAction>[], options: IBuildModelPickerItemsOptions): void {
+	if (!options.manageModelsAction) {
+		return;
+	}
+	items.push({ kind: ActionListItemKind.Separator });
+	for (const action of [options.manageModelsAction, options.addOpenRouterModelAction]) {
+		if (action) {
+			items.push({
+				item: action,
+				kind: ActionListItemKind.Action,
+				label: action.label,
+				group: { title: '', icon: Codicon.blank },
+				hideIcon: false,
+				showAlways: true,
+			});
+		}
+	}
 }

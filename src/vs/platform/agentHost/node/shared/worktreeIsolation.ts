@@ -156,6 +156,21 @@ export interface IWorktreeMetadata {
 export { getWorktreesRoot };
 
 /**
+ * CreaEditor: returns {@link branchName} when it is free, otherwise the first
+ * free `<branchName>-<n>` candidate.
+ */
+export async function findAvailableBranchName(branchName: string, branchNameCollides: (candidate: string) => Promise<boolean>): Promise<string> {
+	const maxCandidates = 20;
+	for (let index = 0; index < maxCandidates; index++) {
+		const candidate = index === 0 ? branchName : `${branchName}-${index + 1}`;
+		if (!await branchNameCollides(candidate)) {
+			return candidate;
+		}
+	}
+	throw new Error(`Unable to find an available branch name for "${branchName}" after checking ${maxCandidates} candidates`);
+}
+
+/**
  * Derives the on-disk worktree directory name from a branch name: strips the
  * caller-supplied prefix (e.g. the user's `git.branchPrefix`) and the built-in
  * `agents/` prefix so the directory stays concise, then flattens any remaining
@@ -372,6 +387,8 @@ export interface IIsolationConfigContribution {
 	readonly worktreeBranchTrackProperty: ISchemaProperty<boolean> | undefined;
 	/** Read-only carrier for checking out the selected branch directly. */
 	readonly worktreeCreateNewBranchProperty: ISchemaProperty<boolean> | undefined;
+	/** CreaEditor: read-only carrier for an explicit new worktree branch name (programmatic session creation). */
+	readonly worktreeBranchNameProperty?: ISchemaProperty<string>;
 	readonly isolationValue: 'folder' | 'worktree';
 	readonly branchDefault: string | undefined;
 	readonly branchValue: string | undefined;
@@ -772,6 +789,7 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 		let worktreeSymlinkFoldersProperty: ISchemaProperty<readonly string[]> | undefined;
 		let worktreeBranchTrackProperty: ISchemaProperty<boolean> | undefined;
 		let worktreeCreateNewBranchProperty: ISchemaProperty<boolean> | undefined;
+		let worktreeBranchNameProperty: ISchemaProperty<string> | undefined;
 		if (gitInfo) {
 			const branch = isolationValue === 'worktree' && request.workingDirectory
 				? await this._gitService.getBranch(request.workingDirectory, gitInfo.currentBranch)
@@ -830,6 +848,16 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 				sessionMutable: false,
 			});
 
+			// CreaEditor: explicit branch name for the worktree's new branch,
+			// seeded by agent tools (`create_session`/`create_session_group`).
+			worktreeBranchNameProperty = schemaProperty<string>({
+				type: 'string',
+				title: localize('agentHost.sessionConfig.worktreeBranchName', "Worktree Branch Name"),
+				description: localize('agentHost.sessionConfig.worktreeBranchNameDescription', "Explicit name of the branch created for an isolated worktree."),
+				readOnly: true,
+				sessionMutable: false,
+			});
+
 			worktreeIncludeFilesProperty = schemaProperty<readonly string[]>({
 				type: 'array',
 				title: localize('agentHost.sessionConfig.worktreeIncludeFiles', "Worktree Include Files"),
@@ -855,7 +883,7 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 			});
 		}
 
-		return { isolationProperty, branchProperty, worktreeBranchPrefixProperty, worktreeBranchTrackProperty, worktreeCreateNewBranchProperty, worktreeIncludeFilesProperty, worktreeSymlinkFoldersProperty, isolationValue, branchDefault, branchValue };
+		return { isolationProperty, branchProperty, worktreeBranchPrefixProperty, worktreeBranchTrackProperty, worktreeCreateNewBranchProperty, worktreeBranchNameProperty, worktreeIncludeFilesProperty, worktreeSymlinkFoldersProperty, isolationValue, branchDefault, branchValue };
 	}
 
 	/**
@@ -928,21 +956,29 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 			if (worktreeCreateNewBranch) {
 				onProgress?.(buildWorktreeProgressText(WorktreeCreationPhase.NamingBranch));
 			}
-			const newBranchName = worktreeCreateNewBranch
-				? await this._branchNameGenerator.generateBranchName({
-					sessionId,
-					message: prompt,
-					githubToken,
-					branchPrefix: worktreeBranchPrefix,
-					branchNameCollides: async candidate => {
-						if (await this._gitService.branchExists(repositoryRoot, candidate).catch(() => true)) {
-							return true;
-						}
-						const candidateWorktree = URI.joinPath(worktreesRoot, getWorktreeName(candidate, worktreeBranchPrefix));
-						return fileExists(candidateWorktree.fsPath);
-					},
-				})
+			// CreaEditor: an explicit branch name (from agent tools) wins over the
+			// generated one; a collision falls back to a numbered suffix.
+			const explicitBranchName = worktreeCreateNewBranch && typeof config[SessionConfigKey.WorktreeBranchName] === 'string' && config[SessionConfigKey.WorktreeBranchName]
+				? config[SessionConfigKey.WorktreeBranchName] as string
 				: undefined;
+			const branchNameCollides = async (candidate: string) => {
+				if (await this._gitService.branchExists(repositoryRoot, candidate).catch(() => true)) {
+					return true;
+				}
+				const candidateWorktree = URI.joinPath(worktreesRoot, getWorktreeName(candidate, worktreeBranchPrefix));
+				return fileExists(candidateWorktree.fsPath);
+			};
+			const newBranchName = explicitBranchName
+				? await findAvailableBranchName(explicitBranchName, branchNameCollides)
+				: worktreeCreateNewBranch
+					? await this._branchNameGenerator.generateBranchName({
+						sessionId,
+						message: prompt,
+						githubToken,
+						branchPrefix: worktreeBranchPrefix,
+						branchNameCollides,
+					})
+					: undefined;
 
 			const baseBranch = worktreeCreateNewBranch
 				? selectedBranch

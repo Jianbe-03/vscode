@@ -28,6 +28,12 @@ const enum BYOKUtilityModelDefault {
 	Copilot = 'copilot',
 }
 
+/**
+ * CreaEditor: GitHub Copilot (CAPI) models are never used. Only bring-your-own-key and other
+ * extension-contributed language models back chat and the internal utility aliases.
+ */
+const CREAEDITOR_BYOK_ONLY = true;
+
 export class ProductionEndpointProvider extends Disposable implements IEndpointProvider {
 
 	declare readonly _serviceBrand: undefined;
@@ -75,6 +81,12 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 			}
 		}));
 
+		// CreaEditor: keep the fallback BYOK utility model in sync with the available models.
+		if (CREAEDITOR_BYOK_ONLY) {
+			this._register(lm.onDidChangeChatModels(() => {
+				void this._revalidateFallbackBYOKModel();
+			}));
+		}
 	}
 
 	// NOTE: Keep in sync with `ChatConfiguration.UtilityModel` /
@@ -88,6 +100,9 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 	private static readonly UTILITY_SMALL_MODEL_CONFIG_KEY = 'chat.utilitySmallModel';
 	private static readonly BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY = 'chat.byokUtilityModelDefault';
 	private _mainAgentBYOKModel: LanguageModelChat | undefined;
+	// CreaEditor: BYOK model used for utility flows before any main agent model is known.
+	private _fallbackBYOKModel: LanguageModelChat | undefined;
+	private _fallbackBYOKModelRequest: Promise<LanguageModelChat | undefined> | undefined;
 
 	/**
 	 * Per-family marker recording that we already emitted a telemetry event
@@ -136,6 +151,12 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 			return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, model);
 		}
 
+		// CreaEditor: GitHub Copilot (CAPI) models are never used. The only copilot-vendor models are the
+		// internal utility aliases, which resolve to bring-your-own-key models.
+		if (CREAEDITOR_BYOK_ONLY) {
+			return this._resolveUtilityFamily(model.id === 'copilot-utility-small' ? 'copilot-utility-small' : 'copilot-utility');
+		}
+
 		if (model.id === AutoChatEndpoint.pseudoModelId) {
 			try {
 				const allEndpoints = await this.getAllChatEndpoints();
@@ -169,6 +190,14 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 	 * falling back to the parent model.
 	 */
 	private async _resolveFamily(family: string): Promise<IChatEndpoint> {
+		// CreaEditor: never resolve CAPI model families. Dictation cleanup is a Copilot-only service; any other
+		// family (e.g. a subagent model override naming a CAPI family) uses the BYOK utility model instead.
+		if (CREAEDITOR_BYOK_ONLY) {
+			if (family === 'copilot-dictation-cleanup-nano' || family === 'copilot-dictation-cleanup-luna') {
+				throw new Error(`Model family '${family}' is not available without GitHub Copilot.`);
+			}
+			return this._resolveUtilityFamily(family === 'copilot-utility-small' ? 'copilot-utility-small' : 'copilot-utility');
+		}
 		if (family === 'copilot-dictation-cleanup-nano') {
 			const modelMetadata = await this._modelFetcher.getChatModelFromCapiFamily('gpt-5.4-nano');
 			return this.getOrCreateChatEndpointInstance(modelMetadata);
@@ -195,6 +224,19 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 		const override = await this._resolveUtilityOverride(family);
 		if (override) {
 			return override;
+		}
+
+		// CreaEditor: there is no Copilot fallback. Use the BYOK main agent model, or, before a chat request
+		// has selected one, any available bring-your-own-key / extension-contributed model.
+		if (CREAEDITOR_BYOK_ONLY) {
+			if (this._getBYOKUtilityModelDefault() === BYOKUtilityModelDefault.None) {
+				throw this._createMissingUtilityModelError(family);
+			}
+			const byokModel = this._mainAgentBYOKModel ?? await this._getFallbackBYOKModel();
+			if (!byokModel) {
+				throw this._createMissingUtilityModelError(family);
+			}
+			return this._instantiationService.createInstance(ExtensionContributedChatEndpoint, byokModel);
 		}
 
 		if (this._mainAgentBYOKModel) {
@@ -229,12 +271,59 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 		return new Error(`No utility model is configured for '${family}' while the selected main agent model is BYOK. Configure setting '${utilityModelSetting}' or set 'chat.byokUtilityModelDefault' to ${defaultOptions}.`);
 	}
 
+	/**
+	 * CreaEditor: returns a bring-your-own-key (non-copilot) model to back the utility aliases when no
+	 * main agent model is known yet. The result is cached and re-validated when the set of chat models
+	 * changes; consumers are notified through {@link onDidModelsRefresh} only when the choice changes.
+	 */
+	private _getFallbackBYOKModel(): Promise<LanguageModelChat | undefined> {
+		if (this._fallbackBYOKModel) {
+			return Promise.resolve(this._fallbackBYOKModel);
+		}
+		if (!this._fallbackBYOKModelRequest) {
+			// `lm.selectChatModels` re-resolves every vendor, including the copilot vendor, which in turn
+			// re-resolves the utility aliases. Share the in-flight request so re-entrant calls don't loop.
+			this._fallbackBYOKModelRequest = this._selectFallbackBYOKModel().then(model => {
+				this._fallbackBYOKModel = model;
+				return model;
+			}).finally(() => {
+				this._fallbackBYOKModelRequest = undefined;
+			});
+		}
+		return this._fallbackBYOKModelRequest;
+	}
+
+	private async _selectFallbackBYOKModel(): Promise<LanguageModelChat | undefined> {
+		let models: readonly LanguageModelChat[];
+		try {
+			models = await lm.selectChatModels();
+		} catch (err) {
+			this._logService.warn(`[ProductionEndpointProvider] Failed to select a fallback BYOK utility model: ${err}`);
+			return undefined;
+		}
+		const candidates = models.filter(m => m.vendor !== 'copilot');
+		return candidates.find(m => m.capabilities.supportsToolCalling) ?? candidates[0];
+	}
+
+	private async _revalidateFallbackBYOKModel(): Promise<void> {
+		if (!this._fallbackBYOKModel || this._fallbackBYOKModelRequest) {
+			return;
+		}
+		const previous = this._fallbackBYOKModel;
+		this._fallbackBYOKModel = undefined;
+		const next = await this._getFallbackBYOKModel();
+		if (next?.vendor !== previous.vendor || next?.id !== previous.id) {
+			this._logService.trace(`[ProductionEndpointProvider] Fallback BYOK utility model changed to '${next ? `${next.vendor}/${next.id}` : 'none'}'.`);
+			this._onDidModelsRefresh.fire();
+		}
+	}
+
 	private _getBYOKUtilityModelDefault(): BYOKUtilityModelDefault {
 		const value = this._configService.getNonExtensionConfig<unknown>(ProductionEndpointProvider.BYOK_UTILITY_MODEL_DEFAULT_CONFIG_KEY);
 		switch (value) {
 			case undefined:
-				// Preserve the Copilot default when running against a core that does not register this setting.
-				return BYOKUtilityModelDefault.Copilot;
+				// CreaEditor: GitHub Copilot models are not available, default to the main agent model.
+				return CREAEDITOR_BYOK_ONLY ? BYOKUtilityModelDefault.MainAgent : BYOKUtilityModelDefault.Copilot;
 			case BYOKUtilityModelDefault.None:
 			case BYOKUtilityModelDefault.MainAgent:
 			case BYOKUtilityModelDefault.Copilot:
@@ -285,6 +374,11 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 		// middle of preparing its model list (which is exactly when this
 		// resolution path runs as part of utility-alias publishing). That
 		// re-entrancy deadlocks the picker.
+		// CreaEditor: copilot-vendor (CAPI) overrides cannot be used.
+		if (vendor === 'copilot' && CREAEDITOR_BYOK_ONLY) {
+			this._logService.warn(`[ProductionEndpointProvider] Ignoring ${configKey} override '${raw}': GitHub Copilot models are not available.`);
+			return undefined;
+		}
 		if (vendor === 'copilot') {
 			let allModels: IChatModelInformation[];
 			try {
@@ -370,10 +464,18 @@ export class ProductionEndpointProvider extends Disposable implements IEndpointP
 	}
 
 	async getAllCompletionModels(forceRefresh?: boolean): Promise<ICompletionModelInformation[]> {
+		// CreaEditor: GitHub Copilot (CAPI) models are never used.
+		if (CREAEDITOR_BYOK_ONLY) {
+			return [];
+		}
 		return this._modelFetcher.getAllCompletionModels(forceRefresh ?? false);
 	}
 
 	async getAllChatEndpoints(): Promise<IChatEndpoint[]> {
+		// CreaEditor: GitHub Copilot (CAPI) models are never used.
+		if (CREAEDITOR_BYOK_ONLY) {
+			return [];
+		}
 		const models: IChatModelInformation[] = await this._modelFetcher.getAllChatModels();
 		return models.map(model => this.getOrCreateChatEndpointInstance(model));
 	}

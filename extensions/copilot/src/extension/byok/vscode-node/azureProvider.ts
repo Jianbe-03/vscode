@@ -157,6 +157,7 @@ export class AzureBYOKModelProvider extends AbstractCustomOAIBYOKModelProvider {
 			session.accessToken,  // Pass Entra ID token
 			url
 		);
+		this.attachRequestMetadata(openAIChatEndpoint, model);
 
 		return this._lmWrapper.provideLanguageModelResponse(
 			openAIChatEndpoint,

@@ -40,8 +40,8 @@
 
 		// minimal color configuration (works with or without persisted data)
 		let baseTheme = 'vs-dark';
-		let shellBackground = '#1E1E1E';
-		let shellForeground = '#CCCCCC';
+		let shellBackground = '#16152D';
+		let shellForeground = '#BCBBCA';
 		if (data) {
 			baseTheme = data.baseTheme;
 			shellBackground = data.baseTheme === 'vs'
@@ -61,8 +61,8 @@
 		} else if (configuration.autoDetectColorScheme) {
 			if (configuration.colorScheme.dark) {
 				baseTheme = 'vs-dark';
-				shellBackground = '#1E1E1E';
-				shellForeground = '#CCCCCC';
+				shellBackground = '#16152D';
+				shellForeground = '#BCBBCA';
 			} else {
 				baseTheme = 'vs';
 				shellBackground = '#F3F3F3';

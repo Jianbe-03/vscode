@@ -545,6 +545,12 @@ export class CodeMapper {
 	}
 
 	private async mapCodeUsingFastEdit(request: ICodeMapperRequestInput, resultStream: MappedEditsResponseStream, telemetryInfo: ICodeMapperTelemetryInfo | undefined, token: CancellationToken): Promise<CodeMapperOutcome | CodeMapperRefusal> {
+		// CreaEditor: the fast edit (speculative decoding / instant apply) endpoints are GitHub Copilot (CAPI)
+		// only. Without a Copilot token source, rewrite using the utility (bring-your-own-key) model instead.
+		if (!this.authenticationService.hasCopilotTokenSource) {
+			return new CodeMapperRefusal();
+		}
+
 		// When generating edits for notebooks that are from location=panel, do not use fast edit.
 		// location = panel, is when user is applying code displayed in chat panel into notebook.
 		// Fast apply doesn't work well when we have only a part of the code and no code markers.

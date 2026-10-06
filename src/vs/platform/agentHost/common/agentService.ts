@@ -121,6 +121,9 @@ export const AgentHostMarkdownPlanRichLinksEnabledSettingId = 'chat.agentHost.ex
 /** Configuration key controlling Agent Host agent-orchestration safety limits. */
 export const AgentHostAgentOrchestrationLimitsSettingId = 'chat.agentHost.agentOrchestrationLimits';
 
+/** CreaEditor: configuration key for the maximum agent session spawn (nesting) depth. */
+export const AgentHostMaxSessionSpawnDepthSettingId = 'chat.agentHost.maxSessionSpawnDepth';
+
 /** Configuration key gating the artifact tools and their agent instruction. */
 export const ArtifactToolsSettingId = 'chat.artifactTools.enabled';
 

@@ -24,6 +24,7 @@ import {
 	AgentHostCodexAgentCodexHomeSettingId,
 	AgentHostCopilotMultiRootEnabledSettingId,
 	AgentHostMarkdownPlanRichLinksEnabledSettingId,
+	AgentHostMaxSessionSpawnDepthSettingId,
 	AgentHostOTelCaptureContentSettingId,
 	AgentHostOTelDbSpanExporterEnabledSettingId,
 	AgentHostOTelEnabledSettingId,
@@ -45,6 +46,8 @@ import {
 	AgentHostCopilotMultiRootEnabledConfigKey,
 	AgentHostGitHubMcpServerEnabledConfigKey,
 	AgentHostMarkdownPlanRichLinksEnabledConfigKey,
+	AgentHostMaxSessionSpawnDepthConfigKey,
+	AgentHostMaxSessionSpawnDepthDefault,
 	AgentHostSystemProxyEnabledConfigKey,
 } from './agentHostSchema.js';
 import { AgentMergeConfigKey, AgentMergeSettingId, AGENT_MERGE_SETTING_TAG } from './agentMerge.js';
@@ -214,6 +217,17 @@ configurationRegistry.registerConfiguration({
 			tags: ['experimental', 'advanced'],
 			agentHost: { key: AgentHostAgentOrchestrationLimitsConfigKey },
 		},
+		// CreaEditor: how deep agent-created sessions/session groups may nest.
+		[AgentHostMaxSessionSpawnDepthSettingId]: {
+			type: 'number',
+			minimum: 1,
+			maximum: 10,
+			description: nls.localize('chat.agentHost.maxSessionSpawnDepth', "Maximum nesting depth for sessions created by agents with the `create_session` and `create_session_group` tools. A session created by a top-level session is at depth 1; a session at this depth can no longer create sessions. Ignored when {0} is `off`.", '`#chat.agentHost.agentOrchestrationLimits#`'),
+			default: AgentHostMaxSessionSpawnDepthDefault,
+			scope: ConfigurationScope.APPLICATION,
+			tags: ['advanced'],
+			agentHost: { key: AgentHostMaxSessionSpawnDepthConfigKey },
+		},
 		[AgentHostSystemProxyEnabledSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.agentHost.systemProxy.enabled', "When enabled, Copilot sessions automatically discover and use the operating system's proxy configuration when no proxy environment variable is set."),
@@ -279,9 +293,8 @@ configurationRegistry.registerConfiguration({
 		[AgentHostByokModelsEnabledSettingId]: {
 			type: 'boolean',
 			description: nls.localize('chat.agentHost.byokModels.enabled', "When enabled, extension-provided BYOK ('bring your own key') models can run in agent-host sessions. Changes are synchronized to the running agent host and do not require a restart."),
-			default: false,
+			default: true, // CreaEditor: BYOK models are the only models available.
 			tags: ['experimental', 'advanced'],
-			experiment: { mode: 'startup' },
 			agentHost: { key: AgentHostByokModelsEnabledConfigKey, scope: AgentHostConfigurationSyncScope.Local },
 		},
 		[AgentHostCodexAgentEnabledSettingId]: {

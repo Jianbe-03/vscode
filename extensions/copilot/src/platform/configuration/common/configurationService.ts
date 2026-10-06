@@ -1191,8 +1191,9 @@ export namespace ConfigKey {
 	export type GitHubMcpChannelValue = 'stable' | 'insiders';
 	export const GitHubMcpChannel = defineSetting<GitHubMcpChannelValue>('chat.githubMcpServer.channel', ConfigType.Simple, 'stable');
 
-	export const BackgroundAgentEnabled = defineSetting<boolean>('chat.backgroundAgent.enabled', ConfigType.Simple, true);
-	export const CloudAgentEnabled = defineSetting<boolean>('chat.cloudAgent.enabled', ConfigType.Simple, true);
+	// CreaEditor: the Copilot CLI and Cloud session types require GitHub Copilot, so they are off by default.
+	export const BackgroundAgentEnabled = defineSetting<boolean>('chat.backgroundAgent.enabled', ConfigType.Simple, false);
+	export const CloudAgentEnabled = defineSetting<boolean>('chat.cloudAgent.enabled', ConfigType.Simple, false);
 	export const AdditionalReadAccessPaths = defineSetting<string[]>('chat.additionalReadAccessPaths', ConfigType.Simple, []);
 	export const SwitchAgentEnabled = defineSetting<boolean>('chat.switchAgent.enabled', ConfigType.ExperimentBased, false);
 

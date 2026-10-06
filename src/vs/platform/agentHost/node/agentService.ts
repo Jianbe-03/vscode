@@ -219,6 +219,7 @@ const HOST_OWNED_SESSION_CONFIG_KEYS = [
 	SessionConfigKey.WorktreeSymlinkFolders,
 	SessionConfigKey.WorktreeBranchTrack,
 	SessionConfigKey.WorktreeCreateNewBranch,
+	SessionConfigKey.WorktreeBranchName, // CreaEditor
 ] as const;
 
 /**
@@ -1520,6 +1521,9 @@ export class AgentService extends Disposable implements IAgentService {
 				type: ActionType.SessionMetaChanged,
 				_meta: withSessionSpawnDepth(this._stateManager.getSessionSummary(session.toString())?._meta, depth),
 			}),
+			// CreaEditor: custom-agent lookup and active-client inheritance for agent-spawned sessions.
+			getSessionCustomizations: session => this._stateManager.getSessionState(session.toString())?.customizations,
+			getActiveClients: session => this._stateManager.getSessionState(session.toString())?.activeClients,
 		};
 	}
 
@@ -5796,6 +5800,10 @@ export class AgentService extends Disposable implements IAgentService {
 		if (iso.worktreeCreateNewBranchProperty) {
 			properties[SessionConfigKey.WorktreeCreateNewBranch] = iso.worktreeCreateNewBranchProperty.protocol;
 		}
+		// CreaEditor: explicit worktree branch name carrier (agent tools).
+		if (iso.worktreeBranchNameProperty) {
+			properties[SessionConfigKey.WorktreeBranchName] = iso.worktreeBranchNameProperty.protocol;
+		}
 		if (iso.worktreeIncludeFilesProperty) {
 			properties[SessionConfigKey.WorktreeIncludeFiles] = iso.worktreeIncludeFilesProperty.protocol;
 		}
@@ -5815,6 +5823,9 @@ export class AgentService extends Disposable implements IAgentService {
 		}
 		if (iso.worktreeCreateNewBranchProperty && typeof params.config?.[SessionConfigKey.WorktreeCreateNewBranch] === 'boolean') {
 			values[SessionConfigKey.WorktreeCreateNewBranch] = params.config[SessionConfigKey.WorktreeCreateNewBranch];
+		}
+		if (iso.worktreeBranchNameProperty && typeof params.config?.[SessionConfigKey.WorktreeBranchName] === 'string') {
+			values[SessionConfigKey.WorktreeBranchName] = params.config[SessionConfigKey.WorktreeBranchName];
 		}
 		if (iso.worktreeIncludeFilesProperty
 			&& Array.isArray(params.config?.[SessionConfigKey.WorktreeIncludeFiles])

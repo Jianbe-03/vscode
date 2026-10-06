@@ -145,6 +145,12 @@ export class ConversationFeature implements IExtensionContribution {
 		}));
 
 		reevaluate();
+
+		// CreaEditor: a Copilot token is never minted, so don't hold extension activation waiting for one.
+		// Chat is enabled by `reevaluate` as soon as any bring-your-own-key model is available (also later on).
+		if (!authenticationService.hasCopilotTokenSource && !activationBlockerDeferred.isSettled) {
+			activationBlockerDeferred.complete();
+		}
 	}
 
 	get enabled() {

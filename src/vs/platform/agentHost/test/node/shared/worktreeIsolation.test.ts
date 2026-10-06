@@ -348,6 +348,36 @@ suite('WorktreeIsolation', () => {
 		});
 	});
 
+	// CreaEditor: explicit worktree branch names from agent tools.
+	test('uses an explicit worktree branch name, suffixing it on collision', async () => {
+		const gitService = createGitService();
+		gitService.getDefaultBranch = async () => ({ name: 'main', startPoint: 'origin/main' });
+		gitService.branchExists = async (_repo, branch) => branch === 'fix/issue-1';
+		const isolation = createIsolation(disposables, { gitService });
+
+		await isolation.resolveWorkingDirectory({
+			sessionUri,
+			sessionId,
+			workingDirectory: repoRoot,
+			config: {
+				[SessionConfigKey.Isolation]: 'worktree',
+				[SessionConfigKey.Branch]: 'main',
+				[SessionConfigKey.WorktreeBranchName]: 'fix/issue-1',
+			},
+			prompt: 'do a thing',
+		});
+
+		assert.deepStrictEqual({
+			newBranchName: addWorktreeCalls[0]?.newBranchName,
+			startPoint: addWorktreeCalls[0]?.commitish,
+			worktree: basename(addWorktreeCalls[0]!.path),
+		}, {
+			newBranchName: 'fix/issue-1-2',
+			startPoint: 'main',
+			worktree: 'fix-issue-1-2',
+		});
+	});
+
 	test('uses an explicitly selected remote branch as the worktree start point', async () => {
 		const gitService = createGitService();
 		const operations: string[] = [];

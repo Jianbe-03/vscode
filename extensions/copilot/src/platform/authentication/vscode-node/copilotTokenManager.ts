@@ -43,6 +43,12 @@ export class RateLimitedError extends FetchBlockedError {
 export class GitHubLoginFailedError extends ErrorNoTelemetry { }
 
 export class VSCodeCopilotTokenManager extends BaseCopilotTokenManager {
+	/**
+	 * CreaEditor: GitHub Copilot tokens are never minted. Only bring-your-own-key language models are used.
+	 * Tests of the upstream minting flow turn this off.
+	 */
+	static copilotTokensDisabled = true;
+
 	private _taskSingler = new TaskSingler<TokenInfoOrError>();
 
 	constructor(
@@ -59,6 +65,13 @@ export class VSCodeCopilotTokenManager extends BaseCopilotTokenManager {
 	}
 
 	async getCopilotToken(force?: boolean): Promise<CopilotToken> {
+		// CreaEditor: GitHub Copilot models are not used; only bring-your-own-key models are supported.
+		// Never mint a Copilot (CAPI) token, even when the user is signed in to GitHub for other features.
+		if (VSCodeCopilotTokenManager.copilotTokensDisabled) {
+			this.copilotToken = undefined;
+			throw new GitHubLoginFailedError('GitHub Copilot is not available in CreaEditor.');
+		}
+
 		const failWith = this.configurationService.getConfig(ConfigKey.Advanced.DebugGitHubAuthFailWith);
 		if (failWith) {
 			this.copilotToken = undefined;

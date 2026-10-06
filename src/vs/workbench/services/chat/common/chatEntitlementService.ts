@@ -179,10 +179,20 @@ export interface IChatSetupRequirement {
 }
 
 /**
+ * CreaEditor: GitHub Copilot entitlements are never resolved and no Copilot setup is required.
+ */
+const CREAEDITOR_NO_COPILOT_SETUP = true;
+
+/**
  * Returns whether Chat requires setup before it can service a request.
  * The model picker uses a narrower condition that only surfaces interactive setup.
  */
 export function chatRequiresSetup(context: IChatSetupRequirement): boolean {
+	// CreaEditor: GitHub Copilot sign-in / sign-up is never required; chat runs on bring-your-own-key
+	// models. Only enabling the chat extension or trusting the workspace still requires setup.
+	if (CREAEDITOR_NO_COPILOT_SETUP) {
+		return context.disabled || context.untrusted;
+	}
 	return (
 		(!context.completed && !context.hasByokModels) ||			// Setup not completed (unless BYOK models are available)
 		context.disabled ||											// Extension disabled: run setup to enable
@@ -1103,6 +1113,12 @@ export class ChatEntitlementRequests extends Disposable {
 			return undefined;
 		}
 
+		// CreaEditor: GitHub Copilot entitlements are not used. A GitHub account (if any) is only used
+		// for non-Copilot features, so chat always treats the user as having no Copilot entitlement.
+		if (CREAEDITOR_NO_COPILOT_SETUP) {
+			return { entitlement: ChatEntitlement.Unknown };
+		}
+
 		const entitlementsData = defaultAccount.entitlementsData;
 		if (!entitlementsData) {
 			this.logService.trace('[chat entitlement]: no entitlements data available on default account');
@@ -1233,6 +1249,10 @@ export class ChatEntitlementRequests extends Disposable {
 		const sessions = await this.getSessions();
 		if (sessions.length === 0) {
 			return undefined;
+		}
+		// CreaEditor: never sign the user up for GitHub Copilot Free; GitHub sign-in is only used for non-Copilot features.
+		if (CREAEDITOR_NO_COPILOT_SETUP) {
+			return false;
 		}
 		return this.doSignUpFree(sessions);
 	}
@@ -1539,6 +1559,9 @@ export class ChatEntitlementContext extends Disposable {
 
 			if (context.installed && !context.disabled) {
 				context.hidden = false; // treat this as a sign to make Chat visible again in case it is hidden
+				if (CREAEDITOR_NO_COPILOT_SETUP) {
+					context.completed = true; // CreaEditor: there is no Copilot setup flow to complete
+				}
 			}
 		}
 

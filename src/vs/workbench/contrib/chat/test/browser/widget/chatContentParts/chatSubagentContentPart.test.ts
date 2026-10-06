@@ -231,15 +231,17 @@ suite('ChatSubagentContentPart', () => {
 		const stateType = options.stateType ?? IChatToolInvocation.StateKind.Streaming;
 		const stateValue = createState(stateType, options.parameters);
 		const toolCallId = options.toolCallId ?? 'tool-call-' + Math.random().toString(36).substring(7);
+		// Only subagent tools carry subagent data; other tools (e.g. a subagent's own tool calls) do not.
+		const isSubagentTool = (options.toolId ?? RunSubagentTool.Id) === RunSubagentTool.Id;
 
 		const toolInvocation: IChatToolInvocation = {
 			presentation: undefined,
-			toolSpecificData: options.toolSpecificData ?? {
+			toolSpecificData: options.toolSpecificData ?? (isSubagentTool ? {
 				kind: 'subagent',
 				description: 'Test subagent description',
 				agentName: 'TestAgent',
 				prompt: 'Test prompt'
-			},
+			} : undefined),
 			originMessage: undefined,
 			invocationMessage: options.invocationMessage ?? 'Running subagent',
 			pastTenseMessage: undefined,
@@ -248,7 +250,7 @@ suite('ChatSubagentContentPart', () => {
 			toolCallId: toolCallId,
 			subAgentInvocationId: options.subAgentInvocationId,
 			state: observableValue('state', stateValue),
-			toolSpecificDataKind: observableValue('test', (options.toolSpecificData ?? { kind: 'subagent' }).kind),
+			toolSpecificDataKind: observableValue('test', options.toolSpecificData?.kind ?? (isSubagentTool ? 'subagent' : undefined)),
 			isAttachedToThinking: false,
 			kind: 'toolInvocation',
 			toJSON: () => createMockSerializedToolInvocation({
@@ -4258,6 +4260,43 @@ suite('ChatSubagentContentPart', () => {
 
 			const modelHover = setupDelayedHoverCalls.find(c => c.content.includes('Claude Sonnet 4'));
 			assert.ok(modelHover, 'Should set up hover with model name after it arrives');
+		});
+	});
+
+	// CreaEditor: subagents started by a subagent render as nested cards.
+	suite('Nested subagents', () => {
+		test('renders a subagent started by a subagent as a nested card that receives its own tools', () => {
+			const root = createMockToolInvocation({ toolCallId: 'root-call', stateType: IChatToolInvocation.StateKind.Executing });
+			const part = createPart(root, createMockRenderContext(false));
+			const nestedCall = createMockToolInvocation({
+				toolCallId: 'nested-call',
+				subAgentInvocationId: 'root-call',
+				stateType: IChatToolInvocation.StateKind.Executing,
+				toolSpecificData: { kind: 'subagent', description: 'Nested task', agentName: 'Explore', prompt: 'Find it' },
+			});
+
+			part.appendToolInvocation(nestedCall, 0);
+			// Appending the same call again (for example after a re-render) does not create a second card.
+			part.appendToolInvocation(nestedCall, 0);
+			getSubagentPill(part)?.querySelector<HTMLElement>('.chat-subagent-pill-content')?.click();
+
+			const nested = part.findSubagentPart('nested-call');
+			const nestedContainers = part.domNode.querySelectorAll('.chat-subagent-nested');
+			assert.deepStrictEqual({
+				rootFound: part.findSubagentPart('root-call') === part,
+				nestedIsSeparatePart: !!nested && nested !== part,
+				nestedTitle: nested?.getSubagentTitle(),
+				unknown: part.findSubagentPart('unknown-call'),
+				nestedContainerCount: nestedContainers.length,
+				nestedDomAttached: !!nested && nestedContainers[0]?.contains(nested.domNode),
+			}, {
+				rootFound: true,
+				nestedIsSeparatePart: true,
+				nestedTitle: 'Nested task',
+				unknown: undefined,
+				nestedContainerCount: 1,
+				nestedDomAttached: true,
+			});
 		});
 	});
 });

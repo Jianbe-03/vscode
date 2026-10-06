@@ -11,6 +11,7 @@ import { TokenizerType } from '../../../util/common/tokenizer';
 import { Event } from '../../../util/vs/base/common/event';
 import type { ChatRequest } from '../../../vscodeTypes';
 import { IChatEndpoint, IEmbeddingsEndpoint } from '../../networking/common/networking';
+import { IRequestMetadata } from './requestMetadata';
 
 export type CustomModel = {
 	key_name: string;
@@ -154,6 +155,11 @@ export type IChatModelInformation = IModelAPIResponse & {
 	urlOrRequestMetadata?: string | RequestMetadata;
 	requestHeaders?: Readonly<Record<string, string>>;
 	modelOptions?: Readonly<IChatModelRequestOptions>;
+	/**
+	 * BYOK-only extra headers and body fields configured by the user (per provider group and per model).
+	 * String values may still contain per-request `${sessionId}` / `${requestId}` placeholders.
+	 */
+	requestMetadata?: IRequestMetadata;
 	zeroDataRetentionEnabled?: boolean;
 	/**
 	 * BYOK-only override that forces the body shape used when forwarding the reasoning effort to the model.

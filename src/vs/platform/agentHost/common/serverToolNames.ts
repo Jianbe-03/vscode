@@ -26,6 +26,9 @@ export const enum SessionServerToolName {
 	SendMessage = 'send_message',
 	GetSessionContext = 'get_session_context',
 	DeleteSession = 'delete_session',
+	// CreaEditor: chat groups of independent worktree sessions started by an agent.
+	CreateSessionGroup = 'create_session_group',
+	ListSessionGroup = 'list_session_group',
 }
 
 /**

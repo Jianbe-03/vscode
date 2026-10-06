@@ -20,6 +20,8 @@ export interface IBuildModelPickerItemsOptions {
 	readonly updateStateType: StateType;
 	readonly manageSettingsUrl: string | undefined;
 	readonly manageModelsAction: IActionWidgetDropdownAction | undefined;
+	/** CreaEditor: quick "Add OpenRouter Preset or Model..." entry shown next to Manage Models. */
+	readonly addOpenRouterModelAction?: IActionWidgetDropdownAction;
 	readonly chatEntitlementService: IChatEntitlementService;
 	readonly languageModelsService: ILanguageModelsService;
 	readonly openerService: IOpenerService | undefined;

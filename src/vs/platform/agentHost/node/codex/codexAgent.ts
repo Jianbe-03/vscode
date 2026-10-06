@@ -3627,6 +3627,8 @@ export class CodexAgent extends Disposable implements IAgent {
 	private _dispatchItemCompleted(params: ItemCompletedNotification): void {
 		const subagent = this._subagentsByThreadId.get(params.threadId);
 		if (subagent) {
+			// CreaEditor: a subagent can spawn its own subagents (nested collab agents).
+			this._maybeRegisterSubagents(subagent.session, params, subagent);
 			const actions = mapItemCompleted(subagent.session.mapState, this._withHostTurnId(subagent.session, params));
 			for (const action of actions) {
 				this._fireSubagent(subagent, action);
@@ -3688,7 +3690,7 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * child conversation and attaches its discovery block to the parent tool
 	 * call.
 	 */
-	private _maybeRegisterSubagents(session: ICodexSession, params: ItemCompletedNotification): void {
+	private _maybeRegisterSubagents(session: ICodexSession, params: ItemCompletedNotification, spawningSubagent?: ICodexSubagent): void {
 		const item = params.item;
 		if (item.type !== 'collabAgentToolCall' || item.tool !== 'spawnAgent') {
 			return;
@@ -3719,6 +3721,8 @@ export class CodexAgent extends Disposable implements IAgent {
 				taskDescription,
 				// Codex surfaces the full delegated instruction as `item.prompt`.
 				taskPrompt: typeof item.prompt === 'string' && item.prompt.length > 0 ? item.prompt : undefined,
+				// CreaEditor: a nested subagent's spawning tool call lives in its parent subagent's chat.
+				...(spawningSubagent ? { parentToolCallId: spawningSubagent.toolCallId } : {}),
 			});
 			this._logService.trace(`[Codex:${session.sessionId}] subagent spawned thread=${childThreadId} toolCall=${entry.toolCallId} model=${model ?? '(default)'}`);
 		}

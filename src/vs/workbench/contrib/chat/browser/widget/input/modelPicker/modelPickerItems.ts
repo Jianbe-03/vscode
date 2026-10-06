@@ -52,17 +52,24 @@ export function getModelPickerControlModels(
 	return controlModels;
 }
 
-export function shouldShowManageModelsAction(chatEntitlementService: IChatEntitlementService): boolean {
-	return chatEntitlementService.clientByokEnabled ||
-		chatEntitlementService.hasByokModels ||
-		chatEntitlementService.entitlement === ChatEntitlement.Free ||
-		chatEntitlementService.entitlement === ChatEntitlement.EDU ||
-		chatEntitlementService.entitlement === ChatEntitlement.Pro ||
-		chatEntitlementService.entitlement === ChatEntitlement.ProPlus ||
-		chatEntitlementService.entitlement === ChatEntitlement.Max ||
-		chatEntitlementService.entitlement === ChatEntitlement.Business ||
-		chatEntitlementService.entitlement === ChatEntitlement.Enterprise ||
-		chatEntitlementService.isInternal;
+/**
+ * CreaEditor: bring-your-own-key models are the only models, so managing models is always offered.
+ */
+export function shouldShowManageModelsAction(_chatEntitlementService: IChatEntitlementService): boolean {
+	return true;
+}
+
+/** CreaEditor: opens the "Add OpenRouter Preset or Model..." flow. */
+export function createAddOpenRouterModelAction(commandService: ICommandService): IActionWidgetDropdownAction {
+	return {
+		id: 'addOpenRouterModel',
+		enabled: true,
+		checked: false,
+		class: ThemeIcon.asClassName(Codicon.add),
+		tooltip: localize('chat.addOpenRouterModel.tooltip', "Add OpenRouter Preset or Model"),
+		label: localize('chat.addOpenRouterModel', "Add OpenRouter Preset..."),
+		run: () => { commandService.executeCommand('workbench.action.chat.addOpenRouterModel'); },
+	};
 }
 
 export function createManageModelsAction(commandService: ICommandService): IActionWidgetDropdownAction {

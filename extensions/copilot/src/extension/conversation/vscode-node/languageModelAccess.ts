@@ -157,6 +157,12 @@ function buildConfigurationSchema(endpoint: IChatEndpoint, claudeDefaultEffort: 
 	return { configurationSchema: { properties } };
 }
 
+/**
+ * CreaEditor: GitHub Copilot (CAPI) models are never published or used; the copilot vendor only
+ * publishes the internal utility aliases, resolved to bring-your-own-key models.
+ */
+const CREAEDITOR_BYOK_ONLY = true;
+
 const DICTATION_CLEANUP_NANO_ALIAS = 'copilot-dictation-cleanup-nano';
 const DICTATION_CLEANUP_LUNA_ALIAS = 'copilot-dictation-cleanup-luna';
 const DICTATION_CLEANUP_LUNA_MODEL_ID = 'gpt-5.6-luna';
@@ -261,9 +267,10 @@ export class LanguageModelAccess extends Disposable implements IExtensionContrib
 		}
 
 		// initial
+		// CreaEditor: the Copilot (CAPI) embeddings provider is never registered.
 		this.activationBlocker = Promise.all([
 			this._registerChatProvider(),
-			this._registerEmbeddings(),
+			CREAEDITOR_BYOK_ONLY ? Promise.resolve() : this._registerEmbeddings(),
 		]).then(() => { });
 	}
 
@@ -285,7 +292,7 @@ export class LanguageModelAccess extends Disposable implements IExtensionContrib
 		};
 		this._register(vscode.lm.registerLanguageModelChatProvider('copilot', provider));
 		this._register(this._authenticationService.onDidAuthenticationChange(() => {
-			if (!this._authenticationService.anyGitHubSession) {
+			if (!this._authenticationService.anyGitHubSession && !CREAEDITOR_BYOK_ONLY) {
 				this._currentModels = [];
 			}
 			// Auth changed which means models could've changed. Fire the event
@@ -308,6 +315,16 @@ export class LanguageModelAccess extends Disposable implements IExtensionContrib
 	}
 
 	private async _provideLanguageModelChatInfo(options: { silent: boolean }, token: vscode.CancellationToken): Promise<vscode.LanguageModelChatInformation[]> {
+		// CreaEditor: GitHub Copilot (CAPI) models and Auto are never published. Only the internal,
+		// non-user-selectable utility aliases are published, backed by bring-your-own-key models.
+		if (CREAEDITOR_BYOK_ONLY) {
+			const aliasModels: vscode.LanguageModelChatInformation[] = [];
+			this._chatEndpoints = [];
+			this._registerUtilityAliasModels(aliasModels);
+			this._currentModels = aliasModels;
+			return aliasModels;
+		}
+
 		const session = await this._getToken();
 		if (!session) {
 			// Return cached models until we have auth reacquired
@@ -437,7 +454,8 @@ export class LanguageModelAccess extends Disposable implements IExtensionContrib
 		models: vscode.LanguageModelChatInformation[],
 	): void {
 		this._utilityAliasEndpoints.clear();
-		const session = this._authenticationService.anyGitHubSession;
+		// CreaEditor: the aliases are backed by BYOK models, which don't require GitHub authorization.
+		const session = CREAEDITOR_BYOK_ONLY ? undefined : this._authenticationService.anyGitHubSession;
 		const requiresAuthorization = session ? { label: session.account.label } : undefined;
 
 		for (const family of utilityAliasFamilies) {

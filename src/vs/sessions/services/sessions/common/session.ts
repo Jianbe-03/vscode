@@ -850,6 +850,8 @@ export interface ISessionCreationReference {
 	readonly session: URI;
 	readonly chat?: URI;
 	readonly turnId?: string;
+	/** CreaEditor: the agent-created session group (`create_session_group`) this session was started in. */
+	readonly sessionGroup?: { readonly id: string; readonly name: string };
 }
 
 /** Returns whether any chat or the session summary reports file changes. */

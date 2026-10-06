@@ -91,7 +91,16 @@ interface ILazyHookItem {
 	hookPart: IChatHookPart;
 }
 
-type ILazyItem = ILazyToolItem | ILazyEditItem | ILazyHookItem;
+/**
+ * CreaEditor: a nested subagent started by this subagent, rendered as its own card inside this one.
+ */
+interface ILazyNestedSubagentItem {
+	kind: 'subagent';
+	part: ChatSubagentContentPart;
+	materialized: boolean;
+}
+
+type ILazyItem = ILazyToolItem | ILazyEditItem | ILazyHookItem | ILazyNestedSubagentItem;
 
 /** Renders a subagent pill with inline details when the harness does not provide a child chat. */
 export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implements IChatContentPart {
@@ -124,6 +133,12 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 
 	// Lazy rendering support
 	private readonly lazyItems: ILazyItem[] = [];
+	/** CreaEditor: nested subagent parts started by this subagent, keyed by their subagent invocation id. */
+	private readonly nestedSubagentParts = new Map<string, ChatSubagentContentPart>();
+	/** CreaEditor: the subagent part that contains this one when this subagent was started by another subagent. */
+	private parentSubagentPart: ChatSubagentContentPart | undefined;
+	/** CreaEditor: rendered tool rows by tool call id, so a row can be replaced by a nested subagent card. */
+	private readonly renderedToolItems = new Map<string, HTMLElement>();
 	private hasExpandedOnce: boolean = false;
 	private pendingPromptRender: boolean = false;
 	private pendingResultText: string | undefined;
@@ -186,19 +201,29 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 	/**
 	 * Check if a tool invocation is the parent subagent tool (the tool that spawns a subagent).
 	 * A parent subagent tool has subagent toolSpecificData but no subAgentInvocationId.
+	 * CreaEditor: a nested subagent tool (started by another subagent) does have a subAgentInvocationId,
+	 * so it is also the parent tool of the part whose id is its own tool call id.
 	 */
-	private static isParentSubagentTool(toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
-		return toolInvocation.toolSpecificData?.kind === 'subagent' && !toolInvocation.subAgentInvocationId;
+	private static isParentSubagentTool(toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized, subAgentInvocationId?: string): boolean {
+		return toolInvocation.toolSpecificData?.kind === 'subagent'
+			&& (!toolInvocation.subAgentInvocationId || (subAgentInvocationId !== undefined && toolInvocation.toolCallId === subAgentInvocationId));
+	}
+
+	/** CreaEditor: whether a tool invocation that runs in this subagent starts a nested subagent. */
+	private isNestedSubagentTool(toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized): boolean {
+		return toolInvocation.toolSpecificData?.kind === 'subagent'
+			&& !!toolInvocation.subAgentInvocationId
+			&& toolInvocation.toolCallId !== this.subAgentInvocationId;
 	}
 
 	/**
 	 * Extracts subagent metadata from a tool invocation.
 	 */
-	private static extractSubagentInfo(toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized): { description: string; isDefaultDescription: boolean; agentDisplayName: string | undefined; agentName: string | undefined; prompt: string | undefined; modelName: string | undefined; credits: number | undefined } {
+	private static extractSubagentInfo(toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized, subAgentInvocationId: string): { description: string; isDefaultDescription: boolean; agentDisplayName: string | undefined; agentName: string | undefined; prompt: string | undefined; modelName: string | undefined; credits: number | undefined } {
 		const defaultDescription = localize('chat.subagent.defaultDescription', 'Running subagent');
 
 		// Only parent subagent tools contain the full subagent info
-		if (!ChatSubagentContentPart.isParentSubagentTool(toolInvocation)) {
+		if (!ChatSubagentContentPart.isParentSubagentTool(toolInvocation, subAgentInvocationId)) {
 			return { description: defaultDescription, isDefaultDescription: true, agentDisplayName: undefined, agentName: undefined, prompt: undefined, modelName: undefined, credits: undefined };
 		}
 
@@ -410,7 +435,7 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 		@IWorkbenchEnvironmentService private readonly environmentService: IWorkbenchEnvironmentService,
 	) {
 		// Extract subagent metadata from the tool invocation
-		const { description, isDefaultDescription, agentDisplayName, agentName, prompt, modelName, credits } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation);
+		const { description, isDefaultDescription, agentDisplayName, agentName, prompt, modelName, credits } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation, subAgentInvocationId);
 
 		super(description, context, undefined, hoverService, configurationService, telemetryService);
 
@@ -435,7 +460,9 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 					return;
 				}
 				if (this.isActive) {
-					this.markAsInactive(true);
+					// CreaEditor: a nested subagent card (started by another subagent) must not force its tool data
+					// inactive; a background child may still start after the parent response completed.
+					this.markAsInactive(!toolInvocation.subAgentInvocationId);
 				}
 				// A child that outlived its parent takes over the progress signal the footer owned.
 				if (this.isActive && this.wrapper && !this.hasToolsWaitingForConfirmation) {
@@ -640,7 +667,46 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 	}
 
 	public get hasToolsWaitingForConfirmation(): boolean {
-		return this.toolsWaitingForConfirmation > 0;
+		if (this.toolsWaitingForConfirmation > 0) {
+			return true;
+		}
+		// CreaEditor: a nested subagent waiting for confirmation keeps its ancestors waiting too.
+		for (const nested of this.nestedSubagentParts.values()) {
+			if (nested.hasToolsWaitingForConfirmation) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * CreaEditor: finds the subagent part for a subagent invocation id, either this part or a
+	 * nested subagent part started (directly or transitively) by this subagent.
+	 */
+	public findSubagentPart(subAgentInvocationId: string): ChatSubagentContentPart | undefined {
+		if (this.subAgentInvocationId === subAgentInvocationId) {
+			return this;
+		}
+		for (const nested of this.nestedSubagentParts.values()) {
+			const found = nested.findSubagentPart(subAgentInvocationId);
+			if (found) {
+				return found;
+			}
+		}
+		return undefined;
+	}
+
+	/** CreaEditor: expands the subagent parts containing this one so that it is visible. */
+	public expandAncestors(): void {
+		const parent = this.parentSubagentPart;
+		if (!parent) {
+			return;
+		}
+		parent.expandAncestors();
+		if (!parent.isExpanded()) {
+			parent.autoExpandedForConfirmation = true;
+			parent.setExpanded(true);
+		}
 	}
 
 	public beginToolPresentationBatch(): void {
@@ -1009,7 +1075,7 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 	 */
 	private watchToolCompletion(toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized): void {
 		// Only watch parent subagent tools for completion
-		if (!ChatSubagentContentPart.isParentSubagentTool(toolInvocation)) {
+		if (!ChatSubagentContentPart.isParentSubagentTool(toolInvocation, this.subAgentInvocationId)) {
 			return;
 		}
 
@@ -1058,7 +1124,7 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 				} else if (wasStreaming && state.type !== IChatToolInvocation.StateKind.Streaming) {
 					wasStreaming = false;
 					// Update things that change when tool is done streaming
-					const { description, isDefaultDescription, agentDisplayName, agentName, prompt, modelName } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation);
+					const { description, isDefaultDescription, agentDisplayName, agentName, prompt, modelName } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation, this.subAgentInvocationId);
 					this.description = description;
 					this._isDefaultDescription = isDefaultDescription;
 					this.agentDisplayName = agentDisplayName;
@@ -1078,7 +1144,7 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 					// after the part was first constructed in PendingConfirmation).
 					// Re-read metadata and update the title if real values are
 					// now available that we didn't have before.
-					const { description, isDefaultDescription, agentDisplayName, agentName } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation);
+					const { description, isDefaultDescription, agentDisplayName, agentName } = ChatSubagentContentPart.extractSubagentInfo(toolInvocation, this.subAgentInvocationId);
 					const descriptionChanged = this._isDefaultDescription && !isDefaultDescription;
 					const agentDisplayNameChanged = !!agentDisplayName && agentDisplayName !== this.agentDisplayName;
 					const agentNameChanged = !!agentName && agentName !== this.agentName;
@@ -1199,6 +1265,12 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 		// Track tool state for title updates and auto-expand/collapse on confirmation
 		this.trackToolState(toolInvocation);
 
+		// CreaEditor: a subagent started by this subagent gets its own nested card.
+		if (this.isNestedSubagentTool(toolInvocation)) {
+			this.appendNestedSubagent(toolInvocation);
+			return;
+		}
+
 		// Render immediately only if already expanded or has been expanded before
 		if (this.isExpanded() || this.hasExpandedOnce) {
 			const part = this.createToolPart(toolInvocation, codeBlockStartIndex);
@@ -1213,6 +1285,76 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 			};
 			this.lazyItems.push(item);
 		}
+	}
+
+	/**
+	 * CreaEditor: renders a subagent started by this subagent as a nested subagent card. Tools of the
+	 * nested subagent are routed to it through {@link findSubagentPart}.
+	 */
+	private appendNestedSubagent(toolInvocation: IChatToolInvocation | IChatToolInvocationSerialized): void {
+		if (this.nestedSubagentParts.has(toolInvocation.toolCallId)) {
+			return;
+		}
+		// The call may already have been appended as a plain tool row while its arguments were streaming.
+		const lazyIndex = this.lazyItems.findIndex(item => item.kind === 'tool' && item.toolInvocation.toolCallId === toolInvocation.toolCallId);
+		if (lazyIndex !== -1) {
+			const [lazyItem] = this.lazyItems.splice(lazyIndex, 1);
+			if (lazyItem.kind === 'tool' && lazyItem.lazy.hasValue) {
+				lazyItem.lazy.value.dispose();
+			}
+		}
+		this.renderedToolItems.get(toolInvocation.toolCallId)?.remove();
+		this.renderedToolItems.delete(toolInvocation.toolCallId);
+		const nested = this._register(this.instantiationService.createInstance(
+			ChatSubagentContentPart,
+			toolInvocation.toolCallId,
+			toolInvocation,
+			this.context,
+			this.chatContentMarkdownRenderer,
+			this.listPool,
+			this.editorPool,
+			this.currentWidthDelegate,
+			this.announcedToolProgressKeys,
+		));
+		nested.parentSubagentPart = this;
+		this.nestedSubagentParts.set(toolInvocation.toolCallId, nested);
+
+		// Keep the nested card visible when it expands itself (for example to show a confirmation),
+		// and collapse this card again once that is resolved if it was only expanded for that reason.
+		let nestedWasExpanded = nested.expanded.get();
+		this._register(autorun(r => {
+			const nestedExpanded = nested.expanded.read(r);
+			if (nestedExpanded && !nestedWasExpanded && !this.isExpanded()) {
+				this.autoExpandedForConfirmation = true;
+				this.setExpanded(true);
+			} else if (!nestedExpanded && nestedWasExpanded && this.autoExpandedForConfirmation && !this.userManuallyExpanded && !this.hasToolsWaitingForConfirmation) {
+				this.autoExpandedForConfirmation = false;
+				this.setExpanded(false);
+			}
+			nestedWasExpanded = nestedExpanded;
+		}));
+
+		// Kept in the lazy items so it is attached once the body exists; materializing twice is a no-op.
+		const item: ILazyNestedSubagentItem = { kind: 'subagent', part: nested, materialized: false };
+		this.lazyItems.push(item);
+		if (this.isExpanded() || this.hasExpandedOnce) {
+			this.materializeLazyItem(item);
+		}
+	}
+
+	private appendNestedSubagentToDOM(nested: ChatSubagentContentPart): void {
+		const itemWrapper = $('.chat-subagent-nested');
+		itemWrapper.appendChild(nested.domNode);
+		if (this.wrapper) {
+			this.wrapper.style.display = '';
+			const anchor = this._confirmationPlaceholder ?? this.workingSpinnerElement ?? this.resultContainer;
+			if (anchor) {
+				this.wrapper.insertBefore(itemWrapper, anchor);
+			} else {
+				this.wrapper.appendChild(itemWrapper);
+			}
+		}
+		this.layoutScheduler.schedule();
 	}
 
 	/** Appends markdown or external edits lazily. Pass any already-created part as `eagerDisposable` to transfer ownership immediately. */
@@ -1409,6 +1551,7 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 
 		// Wrap with icon like thinking parts do
 		const itemWrapper = $('.chat-thinking-tool-wrapper');
+		this.renderedToolItems.set(toolInvocation.toolCallId, itemWrapper);
 		const icon = getToolInvocationIcon(toolInvocation.toolId, toolInvocation, content.textContent ?? undefined);
 		const iconElement = createThinkingIcon(icon);
 		itemWrapper.appendChild(content);
@@ -1463,6 +1606,13 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 	 * Materializes a lazy item by creating the content and adding it to the DOM.
 	 */
 	private materializeLazyItem(item: ILazyItem): void {
+		if (item.kind === 'subagent') {
+			if (!item.materialized && this.wrapper) {
+				item.materialized = true;
+				this.appendNestedSubagentToDOM(item.part);
+			}
+			return;
+		}
 		if (item.lazy.hasValue) {
 			return; // Already materialized
 		}
@@ -1525,7 +1675,7 @@ export class ChatSubagentContentPart extends ChatThinkingStyleContentPart implem
 
 	hasSameContent(other: IChatRendererContent, _followingContent: IChatRendererContent[], _element: ChatTreeItem): boolean {
 		return (other.kind === 'toolInvocation' || other.kind === 'toolInvocationSerialized')
-			&& ChatSubagentContentPart.isParentSubagentTool(other)
+			&& ChatSubagentContentPart.isParentSubagentTool(other, this.subAgentInvocationId)
 			&& this.subAgentInvocationId === other.toolCallId;
 	}
 }

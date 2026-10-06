@@ -33,7 +33,7 @@ suite('claudeTransportMode', () => {
 			'flag=true,token=false,setup=false': 'proxy',  // nothing usable ⇒ safe end (fails at use, not here)
 			'flag=true,token=false,setup=true': 'native',  // signed out + own creds ⇒ native
 			'flag=true,token=true,setup=false': 'proxy',   // signed in ⇒ prefer Copilot
-			'flag=true,token=true,setup=true': 'proxy',    // signed in wins over setup
+			'flag=true,token=true,setup=true': 'native',   // CreaEditor: own creds win over signed in
 		});
 	});
 

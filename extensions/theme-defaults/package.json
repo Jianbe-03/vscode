@@ -14,6 +14,18 @@
   "contributes": {
     "themes": [
       {
+        "id": "Creacoon Dark",
+        "label": "%creacoonDarkThemeLabel%",
+        "uiTheme": "vs-dark",
+        "path": "./themes/creacoon-dark.json"
+      },
+      {
+        "id": "Creacoon Light",
+        "label": "%creacoonLightThemeLabel%",
+        "uiTheme": "vs",
+        "path": "./themes/creacoon-light.json"
+      },
+      {
         "id": "Light 2026",
         "label": "%light2026ThemeLabel%",
         "uiTheme": "vs",

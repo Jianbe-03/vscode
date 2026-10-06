@@ -83,6 +83,14 @@ export interface ICodexLaunchConfig {
 
 export const CODEX_DEFAULT_MODE_REQUEST_USER_INPUT_CONFIG_KEY = 'features.default_mode_request_user_input';
 
+/**
+ * CreaEditor: maximum nesting depth for Codex collab (sub)agents. Codex defaults
+ * `agents.max_depth` to 1, which lets only the root thread spawn agents; raise it so
+ * spawned agents can spawn their own agents, like `chat.subagents.maxNestingDepth`
+ * does for local chat. Extra launch arguments can still override it.
+ */
+export const CODEX_AGENT_MAX_DEPTH = 5;
+
 export function buildCodexResumeParams(
 	model: { readonly modelProvider: string; readonly modelId: string },
 	threadId: string,
@@ -141,6 +149,8 @@ export function buildCodexLaunchConfig(
 		// Keep image generation disabled for the Copilot/CAPI proxy by default.
 		// ChatGPT subscription threads opt in with a per-thread override.
 		`features.image_generation=false`,
+		// CreaEditor: allow nested subagents (spawned agents spawning agents).
+		`agents.max_depth=${CODEX_AGENT_MAX_DEPTH}`,
 	];
 	const permissionOverrides = codexPermissionProfileOverrides(binaryPath);
 	const telemetryOverrides = codexTelemetryOverrides(telemetry);

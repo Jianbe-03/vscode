@@ -482,7 +482,9 @@ export function packageCopilotExtensionStream(): Stream {
 	return es.merge(
 		localExtensionsStream,
 		gulp.src(dependenciesSrc, { base: '.' })
-			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
+			// CreaEditor: the app-wide rules strip @github/copilot (the agent host uses @github/copilot-sdk),
+			// but the Copilot Chat extension built from source needs its own copy of the Copilot SDK.
+			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore'), ['@github/copilot/**']))
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`)))
 	).pipe(util2.setExecutableBit(['**/*.sh']));
 }

@@ -99,12 +99,15 @@ export interface ISessionGroupsService {
 export const ISessionGroupsService = createDecorator<ISessionGroupsService>('sessionGroupsService');
 
 const EXPLICITLY_UNGROUPED_FIELD = 'explicitlyUngroupedSessionIds';
+const AGENT_GROUP_IDS_FIELD = 'agentGroupIds';
 
 interface ISerializedState {
 	readonly groups: readonly ISessionGroup[];
 	/** sessionId -> groupId */
 	readonly membership: Readonly<Record<string, string>>;
 	readonly [EXPLICITLY_UNGROUPED_FIELD]?: readonly string[];
+	/** CreaEditor: ids of every group materialized from an agent-created session group. */
+	readonly [AGENT_GROUP_IDS_FIELD]?: readonly string[];
 }
 
 export class SessionGroupsService extends Disposable implements ISessionGroupsService {
@@ -120,6 +123,12 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 	/** sessionId -> groupId */
 	private readonly _membership = new Map<string, string>();
 	private readonly _explicitlyUngroupedSessionIds = new Set<string>();
+	/**
+	 * CreaEditor: ids of groups created from agent session groups
+	 * (`create_session_group`). A group the user deleted stays in this set so it
+	 * is not recreated when more of its sessions arrive.
+	 */
+	private readonly _agentGroupIds = new Set<string>();
 
 	/**
 	 * Group that the composer's in-progress new session should join once sent,
@@ -147,8 +156,8 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 		this.load();
 		const archivedMembershipChanged = new Set<string>();
 		const archivedStateChanged = this.removeArchivedMembership(this.sessionsManagementService.getSessions(), archivedMembershipChanged);
-		this.updateDefaultPlacement(this.sessionsManagementService.getSessions(), archivedMembershipChanged);
-		if (archivedStateChanged || archivedMembershipChanged.size > 0) {
+		const initialGroupsCreated = this.updateDefaultPlacement(this.sessionsManagementService.getSessions(), archivedMembershipChanged);
+		if (archivedStateChanged || initialGroupsCreated || archivedMembershipChanged.size > 0) {
 			this.save();
 		}
 
@@ -163,12 +172,12 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 			}
 			const changed = new Set<string>();
 			const archivedStateChanged = this.removeArchivedMembership([...e.added, ...e.changed], changed);
-			this.updateDefaultPlacement(this.sessionsManagementService.getSessions(), changed);
-			if (archivedStateChanged || changed.size > 0) {
+			const groupsCreated = this.updateDefaultPlacement(this.sessionsManagementService.getSessions(), changed);
+			if (archivedStateChanged || groupsCreated || changed.size > 0) {
 				this.save();
 			}
-			if (changed.size > 0) {
-				this._onDidChange.fire({ groupsChanged: false, membershipChanged: changed });
+			if (groupsCreated || changed.size > 0) {
+				this._onDidChange.fire({ groupsChanged: groupsCreated, membershipChanged: changed });
 			}
 		}));
 
@@ -237,14 +246,32 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 		}));
 	}
 
-	/** Fills missing custom-group membership from creation provenance; explicit membership or ungrouping remains authoritative. */
-	private updateDefaultPlacement(sessions: readonly ISession[], changed: Set<string>): void {
+	/**
+	 * Fills missing custom-group membership from creation provenance; explicit membership or ungrouping remains authoritative.
+	 * @returns whether a group was created from an agent session group.
+	 */
+	private updateDefaultPlacement(sessions: readonly ISession[], changed: Set<string>): boolean {
 		let placed: boolean;
+		let groupsCreated = false;
 		do {
 			placed = false;
 			for (const session of sessions) {
 				if (session.isArchived.get() || this._membership.has(session.sessionId) || this._explicitlyUngroupedSessionIds.has(session.sessionId)) {
 					continue;
+				}
+				// CreaEditor: sessions started by `create_session_group` join a group of the same name.
+				const agentGroup = session.createdBySession?.get()?.sessionGroup;
+				if (agentGroup) {
+					if (!this._groups.has(agentGroup.id) && !this._agentGroupIds.has(agentGroup.id)) {
+						this._groups.set(agentGroup.id, { id: agentGroup.id, name: agentGroup.name, createdAt: Date.now() });
+						this._agentGroupIds.add(agentGroup.id);
+						groupsCreated = true;
+					}
+					if (this._groups.has(agentGroup.id)) {
+						this.setMembership(session.sessionId, agentGroup.id, changed);
+						placed = true;
+						continue;
+					}
 				}
 				const creatorResource = session.createdBySession?.get()?.session;
 				const creator = creatorResource ? this.sessionsManagementService.getSession(creatorResource) : undefined;
@@ -255,6 +282,7 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 				}
 			}
 		} while (placed);
+		return groupsCreated;
 	}
 
 	getGroups(): ISessionGroup[] {
@@ -325,12 +353,12 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 		for (const sessionId of sessionIds) {
 			this.setMembership(sessionId, groupId, membershipChanged);
 		}
-		this.updateDefaultPlacement(this.sessionsManagementService.getSessions(), membershipChanged);
-		if (membershipChanged.size === 0) {
+		const groupsCreated = this.updateDefaultPlacement(this.sessionsManagementService.getSessions(), membershipChanged);
+		if (membershipChanged.size === 0 && !groupsCreated) {
 			return;
 		}
 		this.save();
-		this._onDidChange.fire({ groupsChanged: false, membershipChanged });
+		this._onDidChange.fire({ groupsChanged: groupsCreated, membershipChanged });
 	}
 
 	removeFromGroup(sessionId: string): void {
@@ -425,6 +453,14 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 					}
 				}
 			}
+			const agentGroupIds = parsed[AGENT_GROUP_IDS_FIELD];
+			if (Array.isArray(agentGroupIds)) {
+				for (const groupId of agentGroupIds) {
+					if (typeof groupId === 'string') {
+						this._agentGroupIds.add(groupId);
+					}
+				}
+			}
 			const explicitlyUngroupedSessionIds = parsed[EXPLICITLY_UNGROUPED_FIELD];
 			if (Array.isArray(explicitlyUngroupedSessionIds)) {
 				for (const sessionId of explicitlyUngroupedSessionIds) {
@@ -439,7 +475,7 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 	}
 
 	private save(): void {
-		if (this._groups.size === 0 && this._explicitlyUngroupedSessionIds.size === 0) {
+		if (this._groups.size === 0 && this._explicitlyUngroupedSessionIds.size === 0 && this._agentGroupIds.size === 0) {
 			this.storageService.remove(SessionGroupsService.STORAGE_KEY, StorageScope.PROFILE);
 			return;
 		}
@@ -447,6 +483,7 @@ export class SessionGroupsService extends Disposable implements ISessionGroupsSe
 			groups: [...this._groups.values()],
 			membership: Object.fromEntries(this._membership),
 			[EXPLICITLY_UNGROUPED_FIELD]: [...this._explicitlyUngroupedSessionIds],
+			...(this._agentGroupIds.size > 0 ? { [AGENT_GROUP_IDS_FIELD]: [...this._agentGroupIds] } : {}),
 		};
 		this.storageService.store(SessionGroupsService.STORAGE_KEY, JSON.stringify(state), StorageScope.PROFILE, StorageTarget.USER);
 	}

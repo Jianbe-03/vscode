@@ -136,7 +136,11 @@ export class ContextKeysContribution extends Disposable {
 		let error: unknown | undefined = undefined;
 		let key: string | undefined;
 		try {
-			await this._authenticationService.getCopilotToken();
+			// CreaEditor: GitHub Copilot is never used, so there is no Copilot token to wait for and no
+			// Copilot sign-in/subscription error welcome to show. Chat is driven by bring-your-own-key models.
+			if (this._authenticationService.hasCopilotTokenSource) {
+				await this._authenticationService.getCopilotToken();
+			}
 			key = welcomeViewContextKeys.Activated;
 		} catch (e: any) {
 			error = e;

@@ -13,7 +13,7 @@ import { ChatEntitlementContextKeys } from '../../../services/chat/common/chatEn
 import { IExtensionService } from '../../../services/extensions/common/extensions.js';
 import { ChatContextKeys } from '../common/actions/chatContextKeys.js';
 import { ChatAIDisabledSettingId } from '../common/constants.js';
-import { COPILOT_VENDOR_ID } from '../common/languageModels.js';
+import { COPILOT_VENDOR_ID, ILanguageModelsService } from '../common/languageModels.js';
 import { ILanguageModelsConfigurationService } from '../common/languageModelsConfiguration.js';
 
 /**
@@ -54,6 +54,7 @@ export class HasByokModelsContribution extends Disposable implements IWorkbenchC
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IStorageService private readonly _storageService: IStorageService,
 		@IExtensionService extensionService: IExtensionService,
+		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
 	) {
 		super();
 
@@ -80,6 +81,8 @@ export class HasByokModelsContribution extends Disposable implements IWorkbenchC
 			Event.filter(this._configurationService.onDidChangeConfiguration, e => e.affectsConfiguration(ChatAIDisabledSettingId)),
 			Event.filter(this._contextKeyService.onDidChangeContext, e => e.affectsSome(HasByokModelsContribution.TRACKED_KEYS)),
 			this._languageModelsConfigurationService.onDidChangeLanguageModelGroups,
+			// CreaEditor: also track live models, e.g. from third-party language model provider extensions.
+			this._languageModelsService.onDidChangeLanguageModels,
 		)(() => this._update()));
 	}
 
@@ -96,6 +99,18 @@ export class HasByokModelsContribution extends Disposable implements IWorkbenchC
 		this._hasByokModels.set(this._storageService.getBoolean(HasByokModelsContribution.STORAGE_KEY_LAST_KNOWN, StorageScope.APPLICATION, false));
 	}
 
+	/**
+	 * CreaEditor: whether a resolved, user-selectable, non-Copilot chat model exists (for example one
+	 * contributed by a third-party extension through `vscode.lm.registerLanguageModelChatProvider`).
+	 * Models that only target a specific chat session type (agent host harnesses) are not counted.
+	 */
+	private _hasLiveNonCopilotChatModels(): boolean {
+		return this._languageModelsService.getLanguageModelIds().some(id => {
+			const metadata = this._languageModelsService.lookupLanguageModel(id);
+			return !!metadata && metadata.vendor !== COPILOT_VENDOR_ID && metadata.isUserSelectable !== false && !metadata.targetChatSessionType;
+		});
+	}
+
 	private _setResult(value: boolean): void {
 		this._hasByokModels.set(value);
 		this._storageService.store(HasByokModelsContribution.STORAGE_KEY_LAST_KNOWN, value, StorageScope.APPLICATION, StorageTarget.MACHINE);
@@ -108,7 +123,7 @@ export class HasByokModelsContribution extends Disposable implements IWorkbenchC
 		}
 
 		const hasByokVendor = this._languageModelsConfigurationService.getLanguageModelsProviderGroups().some(g => g.vendor !== COPILOT_VENDOR_ID);
-		if (hasByokVendor) {
+		if (hasByokVendor || this._hasLiveNonCopilotChatModels()) {
 			this._setResult(true);
 			return;
 		}

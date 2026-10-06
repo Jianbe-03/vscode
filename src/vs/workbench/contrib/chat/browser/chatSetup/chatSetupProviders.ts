@@ -30,7 +30,7 @@ import { ChatMode } from '../../common/chatModes.js';
 import { ChatRequestAgentPart, ChatRequestToolPart } from '../../common/requestParser/chatParserTypes.js';
 import { IChatProgress, IChatService } from '../../common/chatService/chatService.js';
 import { IChatRequestToolEntry } from '../../common/attachments/chatVariableEntries.js';
-import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../common/constants.js';
+import { ChatAgentLocation, ChatConfiguration, ChatModeKind, MANAGE_CHAT_COMMAND_ID } from '../../common/constants.js';
 import { ILanguageModelsService } from '../../common/languageModels.js';
 import { CHAT_OPEN_ACTION_ID, CHAT_SETUP_ACTION_ID } from '../actions/chatActions.js';
 import { ChatViewId, IChatWidgetService } from '../chat.js';
@@ -175,7 +175,8 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		return { agent, disposable: disposables };
 	}
 
-	private static readonly SETUP_NEEDED_MESSAGE = new MarkdownString(localize('settingUpCopilotNeeded', "You need to set up GitHub Copilot and be signed in to use Chat."));
+	// CreaEditor: chat runs on bring-your-own-key models; point to model management instead of Copilot sign-in.
+	private static readonly SETUP_NEEDED_MESSAGE = new MarkdownString(localize('addModelNeeded', "Add a language model to start using Chat. [Manage Models]({0})", `command:${MANAGE_CHAT_COMMAND_ID}`), { isTrusted: { enabledCommands: [MANAGE_CHAT_COMMAND_ID] } });
 	private static readonly TRUST_NEEDED_MESSAGE = new MarkdownString(localize('trustNeeded', "You need to trust this workspace to use Chat."));
 
 	private static readonly CHAT_RETRY_COMMAND_ID = 'workbench.action.chat.retrySetup';
@@ -275,6 +276,16 @@ export class SetupAgent extends Disposable implements IChatAgentImplementation {
 		if (!requestModel) {
 			this.logService.error('[chat setup] Request model not found, cannot redispatch request.');
 			return {}; // this should not happen
+		}
+
+		// CreaEditor: chat only runs on bring-your-own-key models. Without any model there is nothing
+		// to forward the request to, so point to model management instead of waiting for a timeout.
+		if (!requestModel.modelId && !this.chatEntitlementService.hasByokModels) {
+			progress({
+				kind: 'markdownContent',
+				content: SetupAgent.SETUP_NEEDED_MESSAGE
+			});
+			return {};
 		}
 
 		progress({

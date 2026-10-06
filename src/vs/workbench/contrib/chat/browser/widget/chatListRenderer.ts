@@ -4160,8 +4160,10 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			const part = renderedParts[i];
 			if (part instanceof ChatSubagentContentPart) {
 				// If looking for a specific ID, return the part with that ID regardless of active state
-				if (subAgentInvocationId && part.subAgentInvocationId === subAgentInvocationId) {
-					return part;
+				// CreaEditor: this includes subagents nested inside the part (started by its subagent).
+				const found = subAgentInvocationId ? part.findSubagentPart(subAgentInvocationId) : undefined;
+				if (found) {
+					return found;
 				}
 				// If no ID specified, only return active parts
 				if (!subAgentInvocationId && part.getIsActive()) {
@@ -4201,9 +4203,12 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			// But skip the parent subagent tool itself - we only want child tools
 			if (!isParentSubagentTool(toolInvocation)) {
 				lastSubagent.appendToolInvocation(toolInvocation, codeBlockStartIndex);
+				// CreaEditor: re-render once a streamed call turns out to start a nested subagent, so it gets its own card.
+				const wasSubagentTool = toolInvocation.toolSpecificData?.kind === 'subagent';
 				return this.renderNoContent(other =>
 					(other.kind === 'toolInvocation' || other.kind === 'toolInvocationSerialized')
-					&& other.toolCallId === toolInvocation.toolCallId);
+					&& other.toolCallId === toolInvocation.toolCallId
+					&& (other.toolSpecificData?.kind === 'subagent') === wasSubagentTool);
 			}
 			return lastSubagent;
 		}
@@ -4310,6 +4315,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 			if (this.environmentService.isSessionsWindow && chatResource) {
 				void this.commandService.executeCommand(CHAT_OPEN_AGENT_HOST_CHAT_COMMAND_ID, { chatResource });
 			} else {
+				currentSubagentPart.expandAncestors(); // CreaEditor: a nested subagent is only visible when its parents are expanded.
 				currentSubagentPart.domNode.scrollIntoView({ behavior: 'smooth', block: 'center' });
 			}
 		};

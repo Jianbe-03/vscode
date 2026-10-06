@@ -97,6 +97,8 @@ export enum ChatConfiguration {
 	SessionStateIndicatorEnabled = 'chat.experimental.sessionStateIndicator.enabled',
 	SubagentToolCustomAgents = 'chat.customAgentInSubagent.enabled',
 	SubagentsAllowInvocationsFromSubagents = 'chat.subagents.allowInvocationsFromSubagents',
+	/** CreaEditor: maximum nesting depth for subagents that invoke subagents. */
+	SubagentsMaxNestingDepth = 'chat.subagents.maxNestingDepth',
 	SubagentsDefaultToAuto = 'chat.subagents.defaultToAuto',
 	SubagentsShowCreditUsage = 'chat.subagents.showCreditUsage',
 	ShowCodeBlockProgressAnimation = 'chat.agent.codeBlockProgress',

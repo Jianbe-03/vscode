@@ -120,6 +120,8 @@ describe('Copilot session provenance', () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks();
+		// CreaEditor: Copilot token minting is disabled in the product; these tests cover the upstream flow.
+		VSCodeCopilotTokenManager.copilotTokensDisabled = false;
 		api = new TestAuthenticationApi();
 		configuration = disposables.add(new InMemoryConfigurationService(disposables.add(new DefaultsOnlyConfigurationService())));
 		await configuration.setConfig(ConfigKey.Shared.AuthProvider, AuthProviderId.GitHubEnterprise);
@@ -131,7 +133,10 @@ describe('Copilot session provenance', () => {
 		vscodeAuthentication.onDidChangeSessions.mockImplementation(listener => changes.event(listener));
 	});
 
-	afterEach(() => disposables.clear());
+	afterEach(() => {
+		disposables.clear();
+		VSCodeCopilotTokenManager.copilotTokensDisabled = true;
+	});
 
 	function createService(tokenManager: ICopilotTokenManager = new TestCopilotTokenManager(), capi = new TestCAPIClientService(new TestFetcherService())): TestAuthenticationService {
 		disposables.add(new DomainService(configuration, tokenStore, capi));

@@ -645,6 +645,45 @@ suite('SessionGroupsService', () => {
 		assert.deepStrictEqual(service.getSessionIdsInGroup(a.id), []);
 	});
 
+	// CreaEditor: sessions started by `create_session_group` are grouped under the group name.
+	test('materializes agent-created session groups and does not recreate a deleted one', () => {
+		const creator = createSession('creator');
+		const agentGroup = { id: 'agent-group-1', name: 'Sprint 12' };
+		const member = (id: string): ISession => ({ ...createSession(id), createdBySession: constObservable({ session: creator.resource, sessionGroup: agentGroup }) });
+		const first = member('m1');
+		const second = member('m2');
+		sessions = [creator, first, second];
+		const events: boolean[] = [];
+		disposables.add(service.onDidChange(e => events.push(e.groupsChanged)));
+		sessionsChangedEmitter.fire({ added: [first, second], removed: [], changed: [] });
+
+		assert.deepStrictEqual({
+			group: service.getGroup(agentGroup.id)?.name,
+			members: service.getSessionIdsInGroup(agentGroup.id),
+			creatorGroup: service.getGroupOfSession(creator.sessionId),
+			events,
+		}, {
+			group: 'Sprint 12',
+			members: ['m1', 'm2'],
+			creatorGroup: undefined,
+			events: [true],
+		});
+
+		service.deleteGroup(agentGroup.id);
+		const third = member('m3');
+		sessions = [creator, first, second, third];
+		sessionsChangedEmitter.fire({ added: [third], removed: [], changed: [] });
+		service.dispose();
+		service = disposables.add(instantiationService.createInstance(SessionGroupsService));
+		assert.deepStrictEqual({
+			group: service.getGroup(agentGroup.id),
+			third: service.getGroupOfSession(third.sessionId),
+		}, {
+			group: undefined,
+			third: undefined,
+		});
+	});
+
 	test('pending group for a non-existent group is ignored', () => {
 		service.setPendingNewSessionGroup('missing');
 		sendNewSession('s1');

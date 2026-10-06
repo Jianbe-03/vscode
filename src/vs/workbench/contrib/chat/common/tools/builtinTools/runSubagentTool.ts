@@ -65,7 +65,10 @@ export interface IRunSubagentToolInputParams {
 	model?: string;
 }
 
+/** CreaEditor: default for `chat.subagents.maxNestingDepth`. A subagent started by the main agent has depth 1. */
 export const RUN_SUBAGENT_MAX_NESTING_DEPTH = 5;
+/** CreaEditor: upper bound for `chat.subagents.maxNestingDepth`. */
+export const RUN_SUBAGENT_MAX_NESTING_DEPTH_LIMIT = 10;
 
 type SubagentModelSelectionSource = 'explicitModel' | 'agentModel' | 'autoDefault' | 'mainModel';
 
@@ -82,6 +85,8 @@ interface IRunningSubagent {
 	readonly tools: UserSelectedTools;
 	/** The hooks from the subagent's frontmatter, remapped for running as a subagent. */
 	readonly hooks: ChatRequestHooks | undefined;
+	/** CreaEditor: nesting depth of this subagent along its own call chain. A subagent started by the main agent has depth 1. */
+	readonly depth: number;
 }
 
 type SubagentModelSelectionEvent = {
@@ -103,9 +108,6 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 
 	/** Hack to port data between prepare/invoke */
 	private readonly _resolvedModels = new Map<string, IResolvedSubagentModel>();
-
-	/** Tracks the current subagent nesting depth per session to detect and limit recursion. */
-	private readonly _sessionDepth = new Map<string, number>();
 
 	/** Running subagents keyed by the id of the request they run in, which their tool calls carry in the tool invocation context. */
 	private readonly _runningSubagents = new Map<string, IRunningSubagent>();
@@ -204,6 +206,17 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 			let modelSelectionSource: SubagentModelSelectionSource = 'mainModel';
 			const callingSubagent = this.getRunningSubagent(invocation.context.requestId);
 			const currentModeInstructions = callingSubagent ? callingSubagent.modeInstructions : request.modeInfo?.modeInstructions;
+
+			// CreaEditor: depth is tracked per call chain (via the calling subagent), not per session,
+			// so parallel subagents do not inflate each other's depth.
+			const maxDepth = this.getMaxNestingDepth();
+			const subagentDepth = (callingSubagent?.depth ?? 0) + 1;
+			if (subagentDepth > maxDepth) {
+				this._resolvedModels.delete(invocation.callId);
+				throw new Error(maxDepth <= 1
+					? 'Subagents are not allowed to invoke other subagents. Complete the task yourself.'
+					: `Maximum subagent nesting depth (${maxDepth}) reached. Complete the task yourself instead of starting another subagent.`);
+			}
 
 			const subAgentName = this.normalizeRequestedAgentName(args.agentName);
 			const effectiveSubAgentName = subAgentName ?? currentModeInstructions?.name;
@@ -321,16 +334,11 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 			};
 
 			// Determine whether the subagent should be allowed to spawn its own subagents.
-			const allowInvocationsFromSubagents = this.configurationService.getValue<boolean>(ChatConfiguration.SubagentsAllowInvocationsFromSubagents) ?? false;
-			const maxDepth = allowInvocationsFromSubagents ? RUN_SUBAGENT_MAX_NESTING_DEPTH : 0;
-			const sessionKey = invocation.context.sessionResource.toString();
-			const currentDepth = this._sessionDepth.get(sessionKey) ?? 0;
-			const depthAllowed = currentDepth + 1 <= maxDepth;
+			const depthAllowed = subagentDepth < maxDepth;
 
-			if (!modeTools) {
-				// Initialize modeTools so that we can still enforce the max depth restriction
-				modeTools = {};
-			}
+			// Copy (or initialize) modeTools so that we can enforce the max depth restriction without
+			// mutating the caller's tool selection.
+			modeTools = { ...modeTools };
 
 			// Only further-restrict RunSubagentTool: do not re-enable it if it was explicitly disabled.
 			const existingRunSubagentEnablement = modeTools[RunSubagentTool.Id];
@@ -341,9 +349,7 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 			modeTools[ManageTodoListToolToolId] = false;
 			modeTools['copilot_askQuestions'] = false;
 
-			if (maxDepth > 0) {
-				this.logService.debug(`RunSubagentTool: Nested subagents enabling ${modeTools[RunSubagentTool.Id]}: session ${sessionKey}, currentDepth: ${currentDepth}, maxDepth: ${maxDepth}, allowInvocationsFromSubagents: ${allowInvocationsFromSubagents}`);
-			}
+			this.logService.debug(`RunSubagentTool: Nested subagents enabling ${modeTools[RunSubagentTool.Id]}: depth: ${subagentDepth}, maxDepth: ${maxDepth}`);
 
 			const variableSet = new ChatRequestVariableSet();
 			// When the extension is responsible for instruction collection, skip the core path entirely.
@@ -409,12 +415,12 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 			this.telemetryService.publicLog2<SubagentModelSelectionEvent, SubagentModelSelectionClassification>('chat.subagentModelSelection', {
 				selectionSource: modelSelectionSource,
 			});
-			this._sessionDepth.set(sessionKey, currentDepth + 1);
 			this._runningSubagents.set(agentRequest.requestId, {
 				modeInstructions,
 				model: { modeModelId, resolvedModelName, selectionSource: modelSelectionSource },
 				tools: modeTools,
 				hooks: agentHooks,
+				depth: subagentDepth,
 			});
 			let result: IChatAgentResult | undefined;
 			try {
@@ -427,12 +433,6 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 				);
 			} finally {
 				this._runningSubagents.delete(agentRequest.requestId);
-				const newDepth = (this._sessionDepth.get(sessionKey) ?? 1) - 1;
-				if (newDepth <= 0) {
-					this._sessionDepth.delete(sessionKey);
-				} else {
-					this._sessionDepth.set(sessionKey, newDepth);
-				}
 			}
 
 			// Check for errors
@@ -715,6 +715,19 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 		}
 		const model = this.chatService.getSession(sessionResource) as ChatModel | undefined;
 		return model?.getRequests().at(-1)?.modeInfo?.modeInstructions;
+	}
+
+	/**
+	 * CreaEditor: the maximum subagent nesting depth. A subagent started by the main agent has depth 1,
+	 * so a result of 1 means subagents cannot start further subagents.
+	 */
+	private getMaxNestingDepth(): number {
+		if (this.configurationService.getValue<boolean>(ChatConfiguration.SubagentsAllowInvocationsFromSubagents) === false) {
+			return 1;
+		}
+		const configured = this.configurationService.getValue<number>(ChatConfiguration.SubagentsMaxNestingDepth);
+		const depth = typeof configured === 'number' && Number.isFinite(configured) ? Math.floor(configured) : RUN_SUBAGENT_MAX_NESTING_DEPTH;
+		return Math.min(Math.max(depth, 1), RUN_SUBAGENT_MAX_NESTING_DEPTH_LIMIT);
 	}
 
 	/** Returns the running subagent that made a call, if the call was made in a subagent request. */

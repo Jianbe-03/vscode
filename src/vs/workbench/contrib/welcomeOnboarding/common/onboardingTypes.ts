@@ -47,7 +47,7 @@ export function getOnboardingStepSubtitle(stepId: OnboardingStepId): string {
  * Ordered step IDs for the onboarding flow.
  */
 export const ONBOARDING_STEPS: readonly OnboardingStepId[] = [
-	OnboardingStepId.SignIn,
+	// CreaEditor: no GitHub Copilot sign-in step; chat runs on bring-your-own-key models.
 	OnboardingStepId.Personalize,
 ];
 

@@ -107,6 +107,11 @@ export function computeQuotaResumeState(previous: ChatQuotaResumeState, entitlem
 	return hasResolvedQuota(quotas) ? 'resumed' : 'blocked';
 }
 
+/**
+ * CreaEditor: chat runs on bring-your-own-key models only, so Copilot sign-in is never offered here.
+ */
+const CREAEDITOR_NO_COPILOT_SIGN_IN = true;
+
 export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribution {
 
 	static readonly ID = 'workbench.contrib.chatStatusBarEntry';
@@ -370,7 +375,8 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 
 			// Signed out — keep showing Sign-in affordance even when BYOK models are present
 			// so air-gapped users can still authenticate to unlock the full Copilot experience.
-			else if (this.chatEntitlementService.entitlement === ChatEntitlement.Unknown) {
+			// CreaEditor: GitHub Copilot is not used, so there is no Copilot sign-in affordance.
+			else if (this.chatEntitlementService.entitlement === ChatEntitlement.Unknown && !CREAEDITOR_NO_COPILOT_SIGN_IN) {
 				return this.getSetupEntryProps();
 			}
 

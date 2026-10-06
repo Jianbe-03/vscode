@@ -97,7 +97,8 @@ suite('Endpoint Class Test', function () {
 		assert.strictEqual(CHAT_MODEL.GPT4OMINI, 'gpt-4o-mini', 'Incorrect GPT 4o mini model name, changing this will break requests.');
 	});
 
-	test('resolves the dictation cleanup Nano alias to GPT-5.4 Nano', async function () {
+	// CreaEditor: GitHub Copilot (CAPI) models, including the dictation cleanup aliases, are never resolved.
+	test.skip('resolves the dictation cleanup Nano alias to GPT-5.4 Nano', async function () {
 		const endpoint = await endpointProvider.getChatEndpoint('copilot-dictation-cleanup-nano');
 
 		assert.strictEqual(endpoint.model, 'gpt-5.4-nano');
@@ -160,7 +161,8 @@ function makeChatModel(modelId: string, overrides: Partial<IChatModelInformation
 	};
 }
 
-suite('ProductionEndpointProvider — utility model overrides', () => {
+// CreaEditor: utility models never fall back to GitHub Copilot (CAPI) models, so the upstream expectations no longer apply.
+suite.skip('ProductionEndpointProvider — utility model overrides', () => {
 	let configService: InMemoryConfigurationService;
 	let endpointProvider: ProductionEndpointProvider;
 	let sandbox: SinonSandbox;

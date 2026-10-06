@@ -25,6 +25,8 @@ import { apiMessageToGeminiMessage, geminiMessagesToRawMessagesForLogging } from
 import { AbstractLanguageModelChatProvider, ExtendedLanguageModelChatInformation, LanguageModelChatConfiguration } from './abstractLanguageModelChatProvider';
 import { IBYOKStorageService } from './byokStorageService';
 import { byokKnownModelsToAPIInfoWithEffort } from './byokModelInfo';
+import { expandRequestMetadata } from '../../../platform/endpoint/common/requestMetadata';
+import { resolveByokRequestMetadata } from './byokRequestMetadata';
 
 export class GeminiNativeBYOKLMProvider extends AbstractLanguageModelChatProvider {
 
@@ -98,7 +100,10 @@ export class GeminiNativeBYOKLMProvider extends AbstractLanguageModelChatProvide
 				throw new Error('API key not found for the model');
 			}
 
-			const client = new GoogleGenAI({ apiKey });
+			// CreaEditor: user-configured request metadata. Gemini only supports the header part.
+			const requestMetadata = resolveByokRequestMetadata(model, this._id);
+			const metadataHeaders = requestMetadata?.headers && expandRequestMetadata(requestMetadata, { sessionId: (options as { modelOptions?: { _conversationId?: string } }).modelOptions?._conversationId }).headers;
+			const client = new GoogleGenAI({ apiKey, ...(metadataHeaders && Object.keys(metadataHeaders).length ? { httpOptions: { headers: { ...metadataHeaders } } } : {}) });
 			// Convert the messages from the API format into messages that we can use against Gemini
 			const { contents, systemInstruction } = apiMessageToGeminiMessage(messages as LanguageModelChatMessage[]);
 

@@ -64,11 +64,12 @@ export function resolveClaudeTransportMode(inputs: IClaudeTransportModeInputs): 
 	if (!allowSignedOutWhenUsable) {
 		return 'proxy';
 	}
-	if (hasGitHubToken) {
-		return 'proxy';
-	}
+	// CreaEditor: the user's own Claude credentials win over GitHub Copilot, even when signed in to GitHub.
 	if (hasExistingSetup) {
 		return 'native';
+	}
+	if (hasGitHubToken) {
+		return 'proxy';
 	}
 	return 'proxy';
 }

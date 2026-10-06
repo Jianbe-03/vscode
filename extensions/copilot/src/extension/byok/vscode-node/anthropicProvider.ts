@@ -31,6 +31,8 @@ import { BYOKKnownModels, BYOKModelCapabilities, LMResponsePart } from '../commo
 import { AbstractLanguageModelChatProvider, ExtendedLanguageModelChatInformation, LanguageModelChatConfiguration } from './abstractLanguageModelChatProvider';
 import { byokKnownModelsToAPIInfoWithEffort } from './byokModelInfo';
 import { IBYOKStorageService } from './byokStorageService';
+import { applyRequestMetadataToBody, expandRequestMetadata } from '../../../platform/endpoint/common/requestMetadata';
+import { resolveByokRequestMetadata } from './byokRequestMetadata';
 
 export class AnthropicLMProvider extends AbstractLanguageModelChatProvider {
 
@@ -112,7 +114,11 @@ export class AnthropicLMProvider extends AbstractLanguageModelChatProvider {
 				throw new Error('API key not found for the model');
 			}
 
-			const anthropicClient = new Anthropic({ apiKey });
+			// CreaEditor: user-configured request metadata (headers + body fields) for this group/model.
+			const requestMetadata = resolveByokRequestMetadata(model, this._id);
+			const requestVariables = { sessionId: (options as { modelOptions?: { _conversationId?: string } }).modelOptions?._conversationId, requestId: undefined };
+			const metadata = requestMetadata && expandRequestMetadata(requestMetadata, requestVariables);
+			const anthropicClient = new Anthropic({ apiKey, defaultHeaders: metadata?.headers });
 
 			// Convert the messages from the API format into messages that we can use against anthropic
 			const { system, messages: convertedMessages } = apiMessageToAnthropicMessage(messages as LanguageModelChatMessage[]);
@@ -275,6 +281,7 @@ export class AnthropicLMProvider extends AbstractLanguageModelChatProvider {
 				...(effort ? { output_config: { effort } } : {}),
 				context_management: contextManagement as Anthropic.Beta.Messages.BetaContextManagementConfig | undefined,
 			};
+			applyRequestMetadataToBody(params, metadata?.body);
 
 			const wrappedProgress = new RecordedProgress(progress);
 

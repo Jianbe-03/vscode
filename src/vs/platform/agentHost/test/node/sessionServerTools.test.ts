@@ -13,7 +13,7 @@ import { NullLogService } from '../../../log/common/log.js';
 import type { IAgentCreateSessionConfig, IAgentModelInfo, IAgentSessionMetadata } from '../../common/agent.js';
 import { SessionStatus } from '../../common/state/protocol/channels-session/state.js';
 import { ActionType } from '../../common/state/sessionActions.js';
-import { buildChatUri, buildDefaultChatUri, MessageKind, PendingMessageKind, readSessionCreationReference, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, TurnState, withSessionGitState, withSessionGitHubState, withSessionWorkspaceless, type ModelSelection, type ResponsePart, type ToolCallState, type Turn } from '../../common/state/sessionState.js';
+import { buildChatUri, buildDefaultChatUri, CustomizationType, withSessionCreationReference, type Customization, type SessionActiveClient, MessageKind, PendingMessageKind, readSessionCreationReference, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, TurnState, withSessionGitState, withSessionGitHubState, withSessionWorkspaceless, type ModelSelection, type ResponsePart, type ToolCallState, type Turn } from '../../common/state/sessionState.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
 import { AgentHostStateManager } from '../../node/agentHostStateManager.js';
 import type { AutomaticTitleGenerationStrategy } from '../../node/agentHostSessionTitleController.js';
@@ -21,8 +21,14 @@ import { SessionServerToolName } from '../../common/serverToolNames.js';
 import { withEphemeralSessionMeta } from '../../common/meta/agentEphemeralSessionMeta.js';
 import { readAgentMessageDelegationMeta } from '../../common/meta/agentMessageDelegationMeta.js';
 import { AgentServerToolHost, type IServerToolGroup } from '../../node/shared/agentServerToolHost.js';
+import { getServerToolDisplay } from '../../node/shared/serverToolGroups.js';
 import {
 	applyCreateChatTool,
+	applyCreateSessionGroupTool,
+	applyListSessionGroupTool,
+	getCreateSessionGroupArgs,
+	resolveCustomAgentSelection,
+	validateBranchName,
 	applyCreateSessionTool,
 	applySetWorkspaceTool,
 	applyDeleteSessionTool,
@@ -106,7 +112,7 @@ suite('SessionServerTools', () => {
 	}
 
 	test('definitions and confirmation', () => {
-		assert.deepStrictEqual(sessionServerToolDefinitions.map(d => d.name), [SessionServerToolName.ListSessions, SessionServerToolName.GetCurrentSession, SessionServerToolName.SetWorkspace, SessionServerToolName.CreateSession, SessionServerToolName.RenameChat, SessionServerToolName.SendMessage, SessionServerToolName.GetSessionContext, SessionServerToolName.DeleteSession]);
+		assert.deepStrictEqual(sessionServerToolDefinitions.map(d => d.name), [SessionServerToolName.ListSessions, SessionServerToolName.GetCurrentSession, SessionServerToolName.SetWorkspace, SessionServerToolName.CreateSession, SessionServerToolName.RenameChat, SessionServerToolName.SendMessage, SessionServerToolName.GetSessionContext, SessionServerToolName.DeleteSession, SessionServerToolName.CreateSessionGroup, SessionServerToolName.ListSessionGroup]);
 		assert.match(sessionServerToolDefinitions.find(definition => definition.name === SessionServerToolName.ListSessions)?.description ?? '', /`openLink` for clickable Markdown links/);
 		assert.match(sessionServerToolDefinitions.find(definition => definition.name === SessionServerToolName.SendMessage)?.description ?? '', /target chat is busy.*message is queued/);
 		assert.deepStrictEqual(sessionServerToolDefinitions.filter(definition => definition.enabledForEphemeralSessions).map(definition => definition.name), []);
@@ -123,7 +129,11 @@ suite('SessionServerTools', () => {
 		assert.strictEqual(sessionToolRequiresConfirmation(SessionServerToolName.ListSessions), false);
 		assert.strictEqual(sessionToolRequiresConfirmation(SessionServerToolName.GetCurrentSession), false);
 		assert.strictEqual(sessionToolRequiresConfirmation(SessionServerToolName.GetSessionContext), false);
-		assert.deepStrictEqual(sessionServerToolDefinitions.find(def => def.name === SessionServerToolName.CreateSession)?.inputSchema, {
+		assert.strictEqual(sessionToolRequiresConfirmation(SessionServerToolName.CreateSessionGroup), true);
+		assert.strictEqual(sessionToolRequiresConfirmation(SessionServerToolName.ListSessionGroup), false);
+		const { agent: createSessionAgent, branch: createSessionBranch, ...createSessionProperties } = sessionServerToolDefinitions.find(def => def.name === SessionServerToolName.CreateSession)?.inputSchema?.properties ?? {};
+		assert.ok(createSessionAgent && createSessionBranch);
+		assert.deepStrictEqual({ ...sessionServerToolDefinitions.find(def => def.name === SessionServerToolName.CreateSession)?.inputSchema, properties: createSessionProperties }, {
 			type: 'object',
 			properties: {
 				relationship: {
@@ -289,6 +299,8 @@ suite('SessionServerTools', () => {
 				SessionServerToolName.SendMessage,
 				SessionServerToolName.GetSessionContext,
 				SessionServerToolName.DeleteSession,
+				SessionServerToolName.CreateSessionGroup,
+				SessionServerToolName.ListSessionGroup,
 			],
 			enabledTools: sessionServerToolDefinitions.map(tool => tool.name),
 		});
@@ -459,6 +471,8 @@ suite('SessionServerTools', () => {
 				SessionServerToolName.SendMessage,
 				SessionServerToolName.GetSessionContext,
 				SessionServerToolName.DeleteSession,
+				SessionServerToolName.CreateSessionGroup,
+				SessionServerToolName.ListSessionGroup,
 				'dynamic_tool',
 			],
 			disabledTools: [
@@ -469,6 +483,8 @@ suite('SessionServerTools', () => {
 				SessionServerToolName.SendMessage,
 				SessionServerToolName.GetSessionContext,
 				SessionServerToolName.DeleteSession,
+				SessionServerToolName.CreateSessionGroup,
+				SessionServerToolName.ListSessionGroup,
 			],
 		});
 		stateManager.dispose();
@@ -2478,5 +2494,211 @@ suite('SessionServerTools', () => {
 		const text = await applyDeleteSessionTool(accessor, { session: 'copilot:/s2' }, URI.parse('copilot:/s1'));
 		assert.strictEqual(deleted?.toString(), 'copilot:/s2');
 		assert.ok(text.includes('copilot:/s2'));
+	});
+
+	// CreaEditor: custom agents, explicit branches and session groups.
+	suite('session groups', () => {
+
+		const agentUri = 'file:///workspace/app/.github/agents/issue-to-pr-agents-view.agent.md';
+		const customizations: Customization[] = [{
+			type: CustomizationType.Plugin,
+			id: 'plugin-1',
+			uri: 'file:///workspace/app/.github',
+			name: 'Workspace',
+			children: [
+				{ type: CustomizationType.Agent, id: 'agent-1', uri: agentUri, name: 'Issue to PR (Agents View)' },
+				{ type: CustomizationType.Agent, id: 'agent-2', uri: 'file:///workspace/app/.github/agents/reviewer.agent.md', name: 'Reviewer' },
+			],
+		}];
+		const activeClient: SessionActiveClient = {
+			clientId: 'client-1',
+			displayName: 'Agents',
+			tools: [{ name: 'clientTool', description: 'A client tool.' }],
+			customizations: [{ type: CustomizationType.Plugin, id: 'plugin-1', uri: 'file:///workspace/app/.github', name: 'Workspace' }],
+		};
+
+		function groupAccessor(overrides?: Parameters<typeof createAccessor>[0]): ISessionServerToolAccessor {
+			let created = 0;
+			return {
+				...createAccessor({
+					createSession: async config => { overrides?.onCreate?.(config); return URI.parse(`copilot:/member-${created++}`); },
+					getCreationDefaults: () => ({ provider: 'copilot', project: workspace }),
+					...overrides,
+				}),
+				getSessionCustomizations: () => customizations,
+				getActiveClients: () => [activeClient],
+			};
+		}
+
+		test('validateBranchName accepts common names and rejects invalid ones', () => {
+			assert.strictEqual(validateBranchName(' feature/issue-123 ', 'tool'), 'feature/issue-123');
+			for (const invalid of ['-x', 'a..b', 'a/', 'a/.hidden', 'x.lock', 'with space', 'a//b', '']) {
+				assert.throws(() => validateBranchName(invalid, 'tool'), /not a valid Git branch name/, invalid);
+			}
+		});
+
+		test('resolveCustomAgentSelection matches name, file stem and uri', () => {
+			assert.strictEqual(resolveCustomAgentSelection('issue to pr (agents view)', customizations, 'tool').selection.uri, agentUri);
+			assert.strictEqual(resolveCustomAgentSelection('issue-to-pr-agents-view', customizations, 'tool').selection.uri, agentUri);
+			assert.strictEqual(resolveCustomAgentSelection(agentUri, customizations, 'tool').name, 'Issue to PR (Agents View)');
+			assert.throws(() => resolveCustomAgentSelection('Unknown', customizations, 'tool'), /Available custom agents: "Issue to PR \(Agents View\)", "Reviewer"/);
+			assert.throws(() => resolveCustomAgentSelection('Unknown', undefined, 'tool'), /has no custom agents/);
+		});
+
+		test('create_session forwards a custom agent, explicit branch and inherited customizations', async () => {
+			let config: IAgentCreateSessionConfig | undefined;
+			const accessor = groupAccessor({ onCreate: c => { config = c; } });
+			await applyCreateSessionTool(accessor, { relationship: 'independent', workspace: workspace.toString(), prompt: 'Fix #1', title: 'Issue 1', agent: 'Issue to PR (Agents View)', branch: 'fix/issue-1' }, URI.parse(buildDefaultChatUri('copilot:/caller')), 'turn-1');
+			assert.deepStrictEqual({
+				agent: config?.agent,
+				isolation: config?.config?.[SessionConfigKey.Isolation],
+				branchName: config?.config?.[SessionConfigKey.WorktreeBranchName],
+				activeClient: config?.activeClient,
+			}, {
+				agent: { uri: agentUri },
+				isolation: 'worktree',
+				branchName: 'fix/issue-1',
+				activeClient: { clientId: 'client-1', displayName: 'Agents', tools: [], customizations: activeClient.customizations },
+			});
+		});
+
+		test('create_session rejects agent/branch for current-session chats and branch without a worktree', async () => {
+			const accessor = groupAccessor();
+			const source = URI.parse(buildDefaultChatUri('copilot:/caller'));
+			await assert.rejects(() => applyCreateSessionTool(accessor, { relationship: 'currentSession', prompt: 'go', title: 'Chat', agent: 'Reviewer' }, source), /agent is only valid when relationship is "independent"/);
+			await assert.rejects(() => applyCreateSessionTool(accessor, { relationship: 'independent', prompt: 'go', title: 'S', branch: 'x' }, source), /branch requires workspace and a worktree/);
+			await assert.rejects(() => applyCreateSessionTool(accessor, { relationship: 'independent', workspace: workspace.toString(), worktree: false, prompt: 'go', title: 'S', branch: 'x' }, source), /branch requires workspace and a worktree/);
+			await assert.rejects(() => applyCreateSessionTool(accessor, { relationship: 'independent', workspace: workspace.toString(), prompt: 'go', title: 'S', agent: 'Nope' }, source), /unknown custom agent "Nope"/);
+		});
+
+		test('getCreateSessionGroupArgs validates the group', () => {
+			assert.throws(() => getCreateSessionGroupArgs({ name: 'G', sessions: [] }, [model]), /non-empty array/);
+			assert.throws(() => getCreateSessionGroupArgs({ name: 'G', sessions: Array.from({ length: 11 }, (_, i) => ({ title: `t${i}`, prompt: 'p' })) }, [model]), /at most 10 sessions/);
+			assert.throws(() => getCreateSessionGroupArgs({ name: 'G', sessions: [{ title: 'a', prompt: 'p', branch: 'b' }, { title: 'b', prompt: 'p', branch: 'b' }] }, [model]), /requested by more than one session/);
+			assert.throws(() => getCreateSessionGroupArgs({ name: 'G', sessions: [{ title: 'a' }] }, [model]), /sessions\[0\]\.prompt must be a non-empty string/);
+			assert.throws(() => getCreateSessionGroupArgs({ name: 'G', sessions: [{ title: 'a', prompt: 'p', model: 'missing' }] }, [model]), /model must match/);
+			assert.deepStrictEqual(getCreateSessionGroupArgs({ name: ' Sprint  12 ', baseBranch: 'main', sessions: [{ title: 'a', prompt: 'p', model: 'GPT-4o' }] }, [model]), {
+				name: 'Sprint 12',
+				baseBranch: 'main',
+				sessions: [{ title: 'a', prompt: 'p', model }],
+			});
+		});
+
+		test('create_session_group starts every member in its own worktree with group provenance', async () => {
+			const configs: IAgentCreateSessionConfig[] = [];
+			const prompts: string[] = [];
+			const depths = new Map<string, number>([['copilot:/caller', 1]]);
+			const accessor = groupAccessor({ onCreate: config => configs.push(config), onPrompt: (_session, _chat, prompt) => prompts.push(prompt), depths });
+			const result = await applyCreateSessionGroupTool(accessor, {
+				name: 'Sprint 12',
+				baseBranch: 'main',
+				sessions: [
+					{ title: 'Issue 1', prompt: 'Fix #1', agent: 'Issue to PR (Agents View)', branch: 'fix/issue-1' },
+					{ title: 'Issue 2', prompt: 'Fix #2', model: 'gpt-4o' },
+				],
+			}, URI.parse(buildDefaultChatUri('copilot:/caller')), 'turn-1');
+
+			assert.strictEqual(configs.length, 2);
+			const groupRefs = configs.map(config => readSessionCreationReference(config._meta)?.sessionGroup);
+			assert.deepStrictEqual(groupRefs, [result.group, result.group]);
+			assert.strictEqual(result.group.name, 'Sprint 12');
+			assert.deepStrictEqual(configs.map(config => ({
+				workingDirectories: config.workingDirectories?.map(directory => directory.toString()),
+				isolation: config.config?.[SessionConfigKey.Isolation],
+				baseBranch: config.config?.[SessionConfigKey.Branch],
+				branchName: config.config?.[SessionConfigKey.WorktreeBranchName],
+				agent: config.agent?.uri,
+				model: config.model?.id,
+				createdBy: readSessionCreationReference(config._meta)?.session,
+				inheritedTools: config.activeClient?.tools,
+			})), [
+				{ workingDirectories: [workspace.toString()], isolation: 'worktree', baseBranch: 'main', branchName: 'fix/issue-1', agent: agentUri, model: undefined, createdBy: 'copilot:/caller', inheritedTools: [] },
+				{ workingDirectories: [workspace.toString()], isolation: 'worktree', baseBranch: 'main', branchName: undefined, agent: undefined, model: 'gpt-4o', createdBy: 'copilot:/caller', inheritedTools: [] },
+			]);
+			assert.deepStrictEqual(prompts.sort(), ['Fix #1', 'Fix #2']);
+			assert.deepStrictEqual(result.sessions.map(session => ({ title: session.title, session: session.session, agent: session.agent, branch: session.branch, error: session.error })), [
+				{ title: 'Issue 1', session: 'copilot:/member-0', agent: 'Issue to PR (Agents View)', branch: 'fix/issue-1', error: undefined },
+				{ title: 'Issue 2', session: 'copilot:/member-1', agent: undefined, branch: undefined, error: undefined },
+			]);
+			// Members are one level deeper than their creator, so they can nest further within the limit.
+			assert.deepStrictEqual([depths.get('copilot:/member-0'), depths.get('copilot:/member-1')], [2, 2]);
+		});
+
+		test('create_session_group reports a failing member without affecting the others', async () => {
+			let created = 0;
+			const accessor = groupAccessor({
+				createSession: async () => {
+					const index = created++;
+					if (index === 1) {
+						throw new Error('worktree failed');
+					}
+					return URI.parse(`copilot:/ok-${index}`);
+				},
+			});
+			const result = await applyCreateSessionGroupTool(accessor, { name: 'G', sessions: [{ title: 'a', prompt: 'p' }, { title: 'b', prompt: 'p' }, { title: 'c', prompt: 'p' }] }, URI.parse(buildDefaultChatUri('copilot:/caller')));
+			assert.deepStrictEqual(result.sessions.map(session => session.error ?? session.session), ['copilot:/ok-0', 'worktree failed', 'copilot:/ok-2']);
+		});
+
+		test('create_session_group validates everything before creating any session', async () => {
+			let created = 0;
+			const accessor = groupAccessor({ onCreate: () => { created++; } });
+			await assert.rejects(() => applyCreateSessionGroupTool(accessor, { name: 'G', sessions: [{ title: 'a', prompt: 'p' }, { title: 'b', prompt: 'p', agent: 'Missing' }] }, URI.parse(buildDefaultChatUri('copilot:/caller'))), /unknown custom agent "Missing"/);
+			assert.strictEqual(created, 0);
+		});
+
+		test('create_session_group honors the configurable spawn depth and breadth limits', async () => {
+			const store = new DisposableStore();
+			const stateManager = store.add(new AgentHostStateManager(new NullLogService()));
+			const depths = new Map<string, number>([['copilot:/deep', 2]]);
+			let maxDepth = 2;
+			const group = createSessionServerToolGroup(groupAccessor({ depths }), () => true, () => maxDepth);
+			const args = { name: 'G', sessions: [{ title: 'a', prompt: 'p' }] };
+			await assert.rejects(async () => { await group.execute(stateManager, executionContext('copilot:/deep'), SessionServerToolName.CreateSessionGroup, args); }, /max spawn depth 2/);
+			maxDepth = 3;
+			await group.execute(stateManager, executionContext('copilot:/deep'), SessionServerToolName.CreateSessionGroup, args);
+			assert.strictEqual(depths.get('copilot:/member-0'), 3);
+
+			const tenSessions = { name: 'G', sessions: Array.from({ length: 10 }, (_, i) => ({ title: `t${i}`, prompt: 'p' })) };
+			for (let i = 0; i < 4; i++) {
+				await group.execute(stateManager, executionContext('copilot:/caller'), SessionServerToolName.CreateSessionGroup, tenSessions);
+			}
+			await assert.rejects(async () => { await group.execute(stateManager, executionContext('copilot:/caller'), SessionServerToolName.CreateSessionGroup, tenSessions); }, /more than 50 sessions/);
+			store.dispose();
+		});
+
+		test('list_session_group lists members by group id, name, or creator', async () => {
+			const groupA = { id: 'group-a', name: 'Sprint 12' };
+			const groupB = { id: 'group-b', name: 'Other' };
+			const member = (id: string, group: typeof groupA, creator = 'copilot:/caller', status = SessionStatus.Idle): IAgentSessionMetadata => ({
+				...sessionMeta(id, status, workspace),
+				_meta: withSessionCreationReference(undefined, { session: creator, sessionGroup: group }),
+			});
+			const accessor = createAccessor({
+				listSessions: async () => [
+					sessionMeta('unrelated', SessionStatus.Idle, workspace),
+					member('a1', groupA),
+					member('a2', groupA, 'copilot:/caller', SessionStatus.InProgress),
+					member('b1', groupB, 'copilot:/someone-else'),
+					member('a3', groupA, 'copilot:/caller', SessionStatus.Idle | SessionStatus.IsArchived),
+				],
+			});
+			const byId = JSON.parse(await applyListSessionGroupTool(accessor, { group: 'group-a' }, URI.parse('copilot:/caller')));
+			assert.deepStrictEqual(byId.groups.map((group: { id: string; sessions: { session: string; status: string; sessionGroup: unknown }[] }) => ({ id: group.id, sessions: group.sessions.map(session => [session.session, session.status]) })), [
+				{ id: 'group-a', sessions: [['copilot:/a1', 'idle'], ['copilot:/a2', 'inProgress']] },
+			]);
+			const byName = JSON.parse(await applyListSessionGroupTool(accessor, { group: 'other' }, URI.parse('copilot:/caller')));
+			assert.deepStrictEqual(byName.groups.map((group: { id: string }) => group.id), ['group-b']);
+			const byCreator = JSON.parse(await applyListSessionGroupTool(accessor, { includeArchived: true }, URI.parse('copilot:/caller')));
+			assert.deepStrictEqual(byCreator.groups.map((group: { id: string; sessions: unknown[] }) => [group.id, group.sessions.length]), [['group-a', 3]]);
+			await assert.rejects(() => applyListSessionGroupTool(accessor, { group: 'missing' }, URI.parse('copilot:/caller')), /no session group matches "missing"/);
+		});
+
+		test('create_session_group confirmation lists every session', () => {
+			const display = getServerToolDisplay(SessionServerToolName.CreateSessionGroup, { name: 'Sprint 12', sessions: [{ title: 'Issue 1', prompt: 'Fix it', agent: 'Reviewer', branch: 'fix/one' }, { title: 'Issue 2', prompt: 'Fix that' }] });
+			assert.strictEqual(display?.confirmationTitle, 'Start 2 session(s) in group "Sprint 12"?');
+			const message = display?.confirmationMessage;
+			const markdown = typeof message === 'object' ? message.markdown : '';
+			assert.ok(markdown.includes('**Issue 1**') && markdown.includes('**Issue 2**') && markdown.includes('Reviewer'), markdown);
+		});
 	});
 });

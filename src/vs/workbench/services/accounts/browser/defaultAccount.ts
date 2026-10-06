@@ -1533,6 +1533,10 @@ export class DefaultAccountProvider extends Disposable implements IDefaultAccoun
 	}
 
 	private getEntitlementUrl(sessionContext: IAccountSessionContext): string | undefined {
+		// CreaEditor: an empty product URL disables the Copilot entitlement request, also for GitHub Enterprise.
+		if (!this.defaultAccountConfig.entitlementUrl) {
+			return undefined;
+		}
 		return this.getAccountUrl('/copilot_internal/user', this.defaultAccountConfig.entitlementUrl, sessionContext);
 	}
 

@@ -451,7 +451,9 @@ class SessionsSetUpWidget extends Disposable {
 
 				await this._showWelcomeDialog();
 			} else {
-				if (this._canInitializeWithoutGitHub()) {
+				// CreaEditor: also open the window without GitHub when a session type is already usable signed out
+				// (e.g. bring-your-own-key models are configured), instead of showing the sign-in dialog first.
+				if (this._canInitializeWithoutGitHub() || this._signedOutWindowGate() === SignedOutWindowGate.Proceed) {
 					this.storageService.store(WELCOME_COMPLETE_KEY, true, StorageScope.APPLICATION, StorageTarget.MACHINE);
 					this.serviceMarkDone();
 					this.dialogRef.clear();

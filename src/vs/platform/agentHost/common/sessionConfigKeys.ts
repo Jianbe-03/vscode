@@ -39,6 +39,8 @@ export const enum SessionConfigKey {
 	WorktreeBranchTrack = 'worktreeBranchTrack',
 	/** `'worktreeCreateNewBranch'` — host-owned choice to create a branch instead of checking out the selected branch. */
 	WorktreeCreateNewBranch = 'worktreeCreateNewBranch',
+	/** CreaEditor: `'worktreeBranchName'` — host-owned explicit name for the branch created for an isolated worktree (programmatic session creation). */
+	WorktreeBranchName = 'worktreeBranchName',
 	/** `'agentMerge'` — client-owned Agent Merge enablement and session overrides. */
 	AgentMerge = 'agentMerge',
 	/** `'agentMerge.controller'` — host-owned Agent Merge lifecycle state. */

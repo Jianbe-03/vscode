@@ -16,6 +16,7 @@ import { McpServerType, type IMcpServerConfiguration } from '../../../mcp/common
 import type { IMcpServerDefinition, INamedPluginResource, IParsedAgent, IParsedHookCommand, IParsedHookGroup, IParsedPlugin } from '../../../agentPlugins/common/pluginParsers.js';
 import { type AgentCustomization, type ChildCustomization } from '../../common/state/protocol/state.js';
 import { resolveMcpServerWorkingDirectory } from '../shared/mcpServerWorkingDirectory.js';
+import { SessionServerToolName } from '../../common/serverToolNames.js';
 
 type PreToolUseHookInput = Parameters<NonNullable<SessionHooks['onPreToolUse']>>[0];
 type PreToolUseHookOutput = Awaited<ReturnType<NonNullable<SessionHooks['onPreToolUse']>>>;
@@ -95,6 +96,32 @@ function isCustomAgentReasoningEffort(value: string | undefined): value is Custo
 }
 
 /**
+ * CreaEditor: Agent Host session-orchestration server tools granted to a
+ * custom agent whose `tools` allow-list contains the `agent` tool set, so
+ * agents restricted to e.g. `[execute, read, agent, edit, search, todo]` can
+ * still create session groups and manage the sessions they start. The runtime's
+ * `tool_search_tool` is included because these tools are deferred behind it.
+ */
+const agentToolSetOrchestrationTools: readonly string[] = [
+	SessionServerToolName.ListSessions,
+	SessionServerToolName.GetCurrentSession,
+	SessionServerToolName.CreateSession,
+	SessionServerToolName.CreateSessionGroup,
+	SessionServerToolName.ListSessionGroup,
+	SessionServerToolName.SendMessage,
+	SessionServerToolName.GetSessionContext,
+	'tool_search_tool',
+];
+
+/** CreaEditor: expands the `agent` tool set in a custom agent's allow-list with the orchestration tools. */
+export function expandCustomAgentToolAllowList(tools: readonly string[]): string[] {
+	if (!tools.some(tool => tool.toLowerCase() === 'agent')) {
+		return [...tools];
+	}
+	return [...tools, ...agentToolSetOrchestrationTools.filter(tool => !tools.includes(tool))];
+}
+
+/**
  * Converts parsed plugin agents into the SDK's `customAgents` config.
  *
  * Each agent file is read and (when present) its YAML frontmatter is parsed:
@@ -144,7 +171,7 @@ export async function toSdkCustomAgents(agents: readonly INamedPluginResource[],
 					...(description ? { description } : {}),
 					...(model ? { model } : {}),
 					...(isCustomAgentReasoningEffort(reasoningEffort) ? { reasoningEffort } : {}),
-					tools: tools && tools.length > 0 ? tools : null,
+					tools: tools && tools.length > 0 ? expandCustomAgentToolAllowList(tools) : null,
 					...(skills !== undefined ? { skills } : {}),
 					...(infer !== undefined ? { infer } : {}),
 					prompt,

@@ -182,7 +182,8 @@ export function getByokLmAgentModelId(model: IByokLmModelInfo): string {
 
 /** Resolves BYOK enablement and trace context from synchronized root configuration. */
 export function resolveByokLmEnablement(rootConfigValue: boolean | undefined): { readonly enabled: boolean; readonly trace: string } {
-	const enabled = rootConfigValue === true;
+	// CreaEditor: BYOK models are the only models available, so they are enabled unless explicitly turned off.
+	const enabled = rootConfigValue !== false;
 	return {
 		enabled,
 		trace: `enabled: ${enabled} (root config: ${rootConfigValue ?? 'unset'})`,

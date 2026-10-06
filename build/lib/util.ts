@@ -169,11 +169,14 @@ export function skipDirectories(): NodeJS.ReadWriteStream {
 	});
 }
 
-export function cleanNodeModules(rulePath: string): NodeJS.ReadWriteStream {
+/**
+ * Filters node_modules files by the rules in `rulePath`. Rules listed in `skippedRules` are not applied.
+ */
+export function cleanNodeModules(rulePath: string, skippedRules: readonly string[] = []): NodeJS.ReadWriteStream {
 	const rules = fs.readFileSync(rulePath, 'utf8')
 		.split(/\r?\n/g)
 		.map(line => line.trim())
-		.filter(line => line && !/^#/.test(line));
+		.filter(line => line && !/^#/.test(line) && !skippedRules.includes(line));
 
 	const excludes = rules.filter(line => !/^!/.test(line)).map(line => `!**/node_modules/${line}`);
 	const includes = rules.filter(line => /^!/.test(line)).map(line => `**/node_modules/${line.substr(1)}`);

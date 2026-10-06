@@ -54,6 +54,15 @@
 		}
 	}
 
+	/* CreaEditor: a subagent started by this subagent is rendered as a nested card */
+	.chat-subagent-nested {
+		padding: 2px 8px 2px 18px;
+
+		> .chat-used-context {
+			margin-bottom: 0px;
+		}
+	}
+
 	button.chat-subagent-confirmation-placeholder {
 		display: flex;
 		align-items: center;

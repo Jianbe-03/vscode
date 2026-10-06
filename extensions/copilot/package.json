@@ -1,7 +1,7 @@
 {
   "name": "copilot-chat",
-  "displayName": "GitHub Copilot",
-  "description": "AI chat features powered by Copilot",
+  "displayName": "CreaEditor Chat",
+  "description": "AI chat, agents and prompts powered by your own language models",
   "version": "0.68.0",
   "build": "1",
   "completionsCoreVersion": "1.378.1799",
@@ -1753,6 +1753,71 @@
               "secret": true,
               "description": "API key for Anthropic",
               "title": "API Key"
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           },
           "required": [
@@ -1771,6 +1836,71 @@
               "secret": true,
               "description": "API key for xAI",
               "title": "API Key"
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           },
           "required": [
@@ -1789,6 +1919,71 @@
               "secret": true,
               "description": "API key for Google Gemini",
               "title": "API Key"
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           },
           "required": [
@@ -1807,6 +2002,171 @@
               "secret": true,
               "description": "API key for OpenRouter",
               "title": "API Key"
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
+            },
+            "models": {
+              "type": "array",
+              "title": "Presets & Models",
+              "markdownDescription": "OpenRouter presets and models to show in the model picker. Use `@preset/<slug>` for a [preset](https://openrouter.ai/settings/presets) or an OpenRouter model slug such as `anthropic/claude-sonnet-4.5`. Only these are listed unless `showAllModels` is enabled. Run **Chat: Add OpenRouter Preset or Model...** to add one.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "OpenRouter preset (@preset/<slug>) or model slug (provider/model).",
+                    "pattern": "^(@preset/[^\\s/]+|[^\\s/]+/[^\\s]+)$",
+                    "patternErrorMessage": "Use @preset/<slug> or <provider>/<model>."
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Name shown in the model picker and used to reference the model, e.g. in an agent's model: field. Defaults to \"<Preset Name> (preset)\" or the OpenRouter model name."
+                  },
+                  "baseModel": {
+                    "type": "string",
+                    "description": "For presets: the OpenRouter model slug whose capabilities (context window, vision, tool calling) the preset inherits."
+                  },
+                  "toolCalling": {
+                    "type": "boolean",
+                    "description": "Whether the model supports tool calling. Default: true (or inherited)."
+                  },
+                  "vision": {
+                    "type": "boolean",
+                    "description": "Whether the model accepts images. Default: false (or inherited)."
+                  },
+                  "contextWindow": {
+                    "type": "number",
+                    "description": "Total context window in tokens. Default for presets: 200000 (or inherited)."
+                  },
+                  "maxOutputTokens": {
+                    "type": "number",
+                    "description": "Maximum output tokens. Default for presets: 32000 (or inherited)."
+                  },
+                  "supportsReasoningEffort": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Reasoning effort levels to offer in the picker. Presets usually configure reasoning on OpenRouter, so this is off for presets by default."
+                  },
+                  "requestMetadata": {
+                    "type": "object",
+                    "title": "Request Metadata",
+                    "description": "Metadata for this model only; merged over the group's requestMetadata. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "id"
+                ],
+                "additionalProperties": false
+              },
+              "defaultSnippets": [
+                {
+                  "label": "New OpenRouter preset",
+                  "description": "Add an OpenRouter preset",
+                  "body": [
+                    {
+                      "id": "@preset/$1",
+                      "name": "$2 (preset)"
+                    }
+                  ]
+                },
+                {
+                  "label": "New OpenRouter model",
+                  "description": "Add a single OpenRouter model",
+                  "body": [
+                    {
+                      "id": "$1"
+                    }
+                  ]
+                }
+              ]
+            },
+            "showAllModels": {
+              "type": "boolean",
+              "default": false,
+              "title": "Show All Models",
+              "description": "List every tool-capable OpenRouter model in the model picker, in addition to the configured presets and models."
             }
           },
           "required": [
@@ -1830,6 +2190,71 @@
               "type": "boolean",
               "default": false,
               "markdownDescription": "Whether Zero Data Retention (ZDR) is enabled for this provider group. When `true`, OpenAI Responses requests from this group do not send `previous_response_id`."
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           },
           "required": [
@@ -1851,6 +2276,71 @@
               "description": "The endpoint URL for the Ollama server",
               "default": "http://localhost:11434",
               "title": "URL"
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           },
           "required": [
@@ -1977,6 +2467,28 @@
                     "additionalProperties": {
                       "type": "string"
                     }
+                  },
+                  "requestMetadata": {
+                    "type": "object",
+                    "title": "Request Metadata",
+                    "description": "Metadata for this model only; merged over the group's requestMetadata. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -2000,6 +2512,71 @@
                   }
                 ]
               }
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           }
         }
@@ -2203,6 +2780,28 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  "requestMetadata": {
+                    "type": "object",
+                    "title": "Request Metadata",
+                    "description": "Metadata for this model only; merged over the group's requestMetadata. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -2226,6 +2825,71 @@
                   }
                 ]
               }
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           }
         }
@@ -2333,6 +2997,28 @@
                     "additionalProperties": {
                       "type": "string"
                     }
+                  },
+                  "requestMetadata": {
+                    "type": "object",
+                    "title": "Request Metadata",
+                    "description": "Metadata for this model only; merged over the group's requestMetadata. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -2356,6 +3042,71 @@
                   }
                 ]
               }
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
             }
           }
         }
@@ -3202,12 +3953,12 @@
         "properties": {
           "github.copilot.chat.backgroundAgent.enabled": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "markdownDescription": "%github.copilot.config.backgroundAgent.enabled%"
           },
           "github.copilot.chat.cloudAgent.enabled": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "markdownDescription": "%github.copilot.config.cloudAgent.enabled%"
           },
           "github.copilot.chat.localIndex.enabled": {

@@ -15,6 +15,7 @@ import { ColorThemeData } from '../../../../services/themes/common/colorThemeDat
 import { IWorkbenchThemeService } from '../../../../services/themes/common/workbenchThemeService.js';
 import { workbenchInstantiationService } from '../../../../test/browser/workbenchTestServices.js';
 import { OnboardingVariationA } from '../../browser/onboardingVariationA.js';
+import { OnboardingStepId } from '../../common/onboardingTypes.js';
 
 suite('OnboardingVariationA', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -29,7 +30,8 @@ suite('OnboardingVariationA', () => {
 			instantiationService.stub(IExtensionGalleryService, {});
 			instantiationService.stub(IExtensionManagementService, {});
 			instantiationService.stub(IDefaultAccountService, { resolveGitHubUrl: () => settingsUrl });
-			const onboarding = store.add(instantiationService.createInstance(OnboardingVariationA));
+			// CreaEditor: product onboarding has no sign-in step; render the upstream flow that has one.
+			const onboarding = store.add(instantiationService.createInstance(OnboardingVariationA, [OnboardingStepId.SignIn, OnboardingStepId.Personalize]));
 			onboarding.show();
 
 			const disclaimer = container.querySelector('.onboarding-a-signin-disclaimer');

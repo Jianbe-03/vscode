@@ -1824,10 +1824,9 @@ configurationRegistry.registerConfiguration({
 		[AgentHostAllowSignedOutWhenUsableSettingId]: {
 			type: 'boolean',
 			markdownDescription: nls.localize('chat.agentHost.allowSignedOutWhenUsable', "When enabled, Agent Host sessions remain available while signed out. The Agents window opens without forcing GitHub sign-in, and editor chat lets you select the Copilot harness. Agents usable without GitHub (for example Codex with ChatGPT authentication or Claude in native mode with your own Anthropic credentials) work while signed out; agents that require GitHub prompt you to add a model or sign in. When disabled (the default), GitHub sign-in is required before the Agents window opens."),
-			default: false,
+			default: true, // CreaEditor: GitHub sign-in is never required; bring-your-own-key models and agents work signed out.
 			scope: ConfigurationScope.APPLICATION,
 			tags: ['experimental', 'advanced'],
-			experiment: { mode: 'startup' }
 		},
 		[ChatMicrosoftAuthenticationEnabledSettingId]: {
 			type: 'boolean',
@@ -1907,7 +1906,7 @@ configurationRegistry.registerConfiguration({
 				nls.localize('chat.byokUtilityModelDefault.mainAgent.description', "Use the selected BYOK main agent model."),
 				nls.localize('chat.byokUtilityModelDefault.copilot.description', "Use the default GitHub Copilot utility models."),
 			],
-			default: BYOKUtilityModelDefault.Copilot,
+			default: BYOKUtilityModelDefault.MainAgent, // CreaEditor: GitHub Copilot models are not available, use the BYOK main agent model.
 		},
 		[ChatConfiguration.UtilityModel]: {
 			type: 'string',
@@ -2418,7 +2417,7 @@ configurationRegistry.registerConfiguration({
 		[ChatConfiguration.TitleBarSignInEnabled]: {
 			type: 'boolean',
 			description: nls.localize('chat.titleBar.signIn.enabled', "Controls whether the Copilot Sign In button is shown in the title bar when signed out. When disabled, the Sign In affordance falls back to the status bar."),
-			default: true,
+			default: false, // CreaEditor: GitHub Copilot sign-in is not needed for chat.
 		},
 		[ChatConfiguration.WelcomePageSignInEnabled]: {
 			type: 'boolean',
@@ -2464,9 +2463,7 @@ configurationRegistry.registerConfiguration({
 			default: false,
 			included: false,
 			tags: ['experimental'],
-			experiment: {
-				mode: 'auto'
-			}
+			// CreaEditor: anonymous Copilot access is never used (no experiment override).
 		},
 		[ChatConfiguration.GrowthNotificationEnabled]: {
 			type: 'boolean',
@@ -2512,14 +2509,19 @@ configurationRegistry.registerConfiguration({
 				mode: 'auto'
 			}
 		},
+		// CreaEditor: nested subagents are enabled by default and their depth is configurable.
 		[ChatConfiguration.SubagentsAllowInvocationsFromSubagents]: {
 			type: 'boolean',
 			description: nls.localize('chat.subagents.allowInvocationsFromSubagents', "Allow subagents to invoke subagents."),
-			markdownDescription: nls.localize('chat.subagents.allowInvocationsFromSubagents.md', "Controls whether subagents can invoke other subagents. When enabled, nesting is limited to a maximum depth of 5."),
-			default: false,
-			experiment: {
-				mode: 'auto'
-			}
+			markdownDescription: nls.localize('chat.subagents.allowInvocationsFromSubagents.md', "Controls whether subagents can invoke other subagents. When enabled, nesting is limited by `#chat.subagents.maxNestingDepth#`."),
+			default: true,
+		},
+		[ChatConfiguration.SubagentsMaxNestingDepth]: {
+			type: 'number',
+			markdownDescription: nls.localize('chat.subagents.maxNestingDepth', "Controls how deeply subagents can be nested when `#chat.subagents.allowInvocationsFromSubagents#` is enabled. A subagent started by the main agent has depth 1; subagents at the maximum depth cannot start further subagents."),
+			default: 5,
+			minimum: 1,
+			maximum: 10,
 		},
 		[ChatConfiguration.SubagentsDefaultToAuto]: {
 			type: 'boolean',

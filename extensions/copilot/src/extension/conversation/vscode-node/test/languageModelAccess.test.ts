@@ -182,7 +182,8 @@ suite('CopilotLanguageModelWrapper', () => {
 	});
 });
 
-suite('LanguageModelAccess model info', () => {
+// CreaEditor: GitHub Copilot (CAPI) models are never published, so the upstream expectations no longer apply.
+suite.skip('LanguageModelAccess model info', () => {
 	test('does not wait for utility alias endpoint resolution', async () => {
 		const aliasLookupStarted = new DeferredPromise<void>();
 		const unresolvedAliasEndpoint = new DeferredPromise<IChatEndpoint>();

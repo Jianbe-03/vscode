@@ -2225,6 +2225,28 @@ export interface ISessionCreationReference {
 	readonly session: string;
 	readonly chat?: string;
 	readonly turnId?: string;
+	/**
+	 * CreaEditor: the agent-created session group this session was started in
+	 * (by `create_session_group`). Rides the persisted creation reference so it
+	 * survives restarts and reaches clients, which group the members in the UI.
+	 */
+	readonly sessionGroup?: ISessionGroupReference;
+}
+
+/** CreaEditor: identity of an agent-created session group. */
+export interface ISessionGroupReference {
+	readonly id: string;
+	readonly name: string;
+}
+
+function parseSessionGroupReference(value: unknown): ISessionGroupReference | undefined {
+	if (!value || typeof value !== 'object') {
+		return undefined;
+	}
+	const candidate = value as { [key: string]: unknown };
+	return typeof candidate.id === 'string' && candidate.id.length > 0 && typeof candidate.name === 'string'
+		? { id: candidate.id, name: candidate.name }
+		: undefined;
 }
 
 export function readSessionCreationReference(meta: SessionSummaryMeta | undefined): ISessionCreationReference | undefined {
@@ -2239,10 +2261,12 @@ function parseSessionCreationReferenceValue(value: unknown): ISessionCreationRef
 	if (typeof candidate.session !== 'string') {
 		return undefined;
 	}
+	const sessionGroup = parseSessionGroupReference(candidate.sessionGroup);
 	return {
 		session: candidate.session,
 		...(typeof candidate.chat === 'string' ? { chat: candidate.chat } : {}),
 		...(typeof candidate.turnId === 'string' ? { turnId: candidate.turnId } : {}),
+		...(sessionGroup ? { sessionGroup } : {}),
 	};
 }
 

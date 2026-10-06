@@ -586,7 +586,8 @@ export class ChatStatusDashboard extends DomWidget {
 		const disabled = this.chatEntitlementService.sentiment.disabled || this.chatEntitlementService.sentiment.untrusted;
 		// Keep the Sign-in entry visible even when BYOK models are present so air-gapped
 		// users can still authenticate to unlock the full Copilot experience.
-		const signedOut = this.chatEntitlementService.entitlement === ChatEntitlement.Unknown;
+		// CreaEditor: GitHub Copilot is not used, so a signed-out user is not asked to sign in for Copilot.
+		const signedOut = false;
 		if (!(newUser || signedOut || disabled)) {
 			return;
 		}

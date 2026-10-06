@@ -1342,7 +1342,8 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 			const chat = parsedChat
 				? session.with({ fragment: parsedChat.chatId === DEFAULT_CHAT_ID ? '' : parsedChat.chatId })
 				: undefined;
-			return { session, chat, turnId: creationReference.turnId };
+			// CreaEditor: carry the agent-created session group for grouping in the sessions list.
+			return { session, chat, turnId: creationReference.turnId, ...(creationReference.sessionGroup ? { sessionGroup: creationReference.sessionGroup } : {}) };
 		});
 		this.artifacts = derivedOpts<readonly ISessionArtifact[]>({ owner: this, equalsFn: structuralEquals }, reader => {
 			const meta = this._metaObs.read(reader);

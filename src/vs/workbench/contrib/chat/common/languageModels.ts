@@ -375,7 +375,10 @@ export namespace ILanguageModelChatMetadata {
 	}
 
 	export function matchesQualifiedName(name: string, metadata: ILanguageModelChatMetadata): boolean {
-		if (metadata.vendor === COPILOT_VENDOR_ID && name === metadata.name) {
+		// CreaEditor: accept the bare model name for every vendor (not only Copilot), so agent `model:`
+		// headers and subagent dispatches can say "Programmer Agent (preset)" instead of
+		// "Programmer Agent (preset) (customendpoint)".
+		if (name === metadata.name) {
 			return true;
 		}
 		return name === asQualifiedName(metadata);

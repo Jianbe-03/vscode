@@ -5,7 +5,7 @@
 
 import * as assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { buildCodexLaunchConfig, buildCodexResumeParams, codexPermissionProfile, codexPermissionProfileOverrides, codexPermissionProfileReadRoots } from '../../../node/codex/codexLaunchConfig.js';
+import { buildCodexLaunchConfig, buildCodexResumeParams, CODEX_AGENT_MAX_DEPTH, codexPermissionProfile, codexPermissionProfileOverrides, codexPermissionProfileReadRoots } from '../../../node/codex/codexLaunchConfig.js';
 
 suite('CodexLaunchConfig', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -17,6 +17,7 @@ suite('CodexLaunchConfig', () => {
 		assert.ok(!config.args.some(argument => argument.startsWith('model_provider=')));
 		assert.ok(config.args.includes('model_providers.vscode-proxy.requires_openai_auth=false'));
 		assert.ok(config.args.includes('features.image_generation=false'));
+		assert.ok(config.args.includes(`agents.max_depth=${CODEX_AGENT_MAX_DEPTH}`)); // CreaEditor: nested subagents
 		assert.ok(config.args.includes('shell_environment_policy.set.AI_AGENT="github_copilot_vscode_agent"'));
 		assert.ok(config.args.includes('--log-level=debug'));
 		assert.ok(config.args.indexOf('analytics.enabled=true') < config.args.lastIndexOf('analytics.enabled=false'));

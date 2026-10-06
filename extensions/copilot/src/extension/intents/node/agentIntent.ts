@@ -232,6 +232,12 @@ export const getAgentTools = async (accessor: ServicesAccessor, request: vscode.
 		}
 	}
 
+	// CreaEditor: EditFile relies on the code mapper, whose fast apply path is GitHub Copilot (CAPI) only and
+	// otherwise falls back to an expensive full rewrite. Prefer the string/patch edit tools when available.
+	if (!authenticationService.hasCopilotTokenSource && (allowTools[ToolName.ReplaceString] || allowTools[ToolName.ApplyPatch])) {
+		allowTools[ToolName.EditFile] = false;
+	}
+
 	allowTools[ToolName.CoreRunTest] = await testService.hasAnyTests();
 	allowTools[ToolName.CoreRunTask] = tasksService.getTasks().length > 0;
 

@@ -16,6 +16,11 @@ import { RemoteAgentHostsEnabledSettingId } from '../../../../../platform/agentH
 import { IChatEntitlementService } from '../../../../../workbench/services/chat/common/chatEntitlementService.js';
 
 /**
+ * CreaEditor: GitHub Copilot cloud session types are not offered.
+ */
+const CREAEDITOR_DISABLE_COPILOT_CLOUD_SESSIONS = true;
+
+/**
  * Registers the {@link CopilotChatSessionsProvider} as a sessions provider.
  *
  * The provider only surfaces Copilot Cloud sessions from the Copilot extension;
@@ -31,6 +36,12 @@ class DefaultSessionsProviderContribution extends Disposable implements IWorkben
 		@IChatEntitlementService chatEntitlementService: IChatEntitlementService,
 	) {
 		super();
+
+		// CreaEditor: Copilot Cloud and Cloud Sandbox sessions require GitHub Copilot, which is not used.
+		// Local agent host sessions (Copilot harness with BYOK models, Claude, Codex) remain available.
+		if (CREAEDITOR_DISABLE_COPILOT_CLOUD_SESSIONS) {
+			return;
+		}
 
 		const provider = this._register(instantiationService.createInstance(CopilotChatSessionsProvider, 'default'));
 		this._register(sessionsProvidersService.registerProvider(provider));

@@ -10,6 +10,7 @@ import { runOnChange } from '../../../util/vs/base/common/observable';
 import { AuthProviderId, ConfigKey, IConfigurationService } from '../../configuration/common/configurationService';
 import { ILogService } from '../../log/common/logService';
 import { authProviderId, BaseAuthenticationService, StrictAuthenticationPresentationOptions } from '../common/authentication';
+import { CopilotToken } from '../common/copilotToken';
 import { ICopilotTokenManager } from '../common/copilotTokenManager';
 import { ICopilotTokenStore } from '../common/copilotTokenStore';
 import { authenticationSessionIdentityEquals, resolveGitHubSessionUri } from '../common/enterprise';
@@ -42,6 +43,21 @@ export class AuthenticationService extends BaseAuthenticationService {
 		}));
 
 		void this._handleAuthChangeEvent();
+	}
+
+	/**
+	 * CreaEditor: GitHub Copilot (CAPI) is never used, so there is never a source for a Copilot token.
+	 * GitHub sessions remain available for non-Copilot features (GitHub tools, PRs, MCP, ...).
+	 */
+	override get hasCopilotTokenSource(): boolean {
+		return false;
+	}
+
+	/**
+	 * CreaEditor: there is never a Copilot token, see {@link hasCopilotTokenSource}.
+	 */
+	override get copilotToken(): CopilotToken | undefined {
+		return undefined;
 	}
 
 	override async getGitHubSession(kind: 'permissive' | 'any', options: AuthenticationGetSessionOptions & { createIfNone: StrictAuthenticationPresentationOptions }): Promise<AuthenticationSession>;

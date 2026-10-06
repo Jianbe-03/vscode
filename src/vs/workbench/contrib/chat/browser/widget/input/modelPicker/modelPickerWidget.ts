@@ -41,7 +41,7 @@ import { IInstantiationService } from '../../../../../../../platform/instantiati
 import { IWorkspaceTrustManagementService, IWorkspaceTrustRequestService } from '../../../../../../../platform/workspace/common/workspaceTrust.js';
 import { getCompactCodicon } from '../../../chatIcons.js';
 import { withChatInputPickerMotion } from '../chatInputPickerActionItem.js';
-import { buildModelPickerItems, createManageModelsAction, getModelPickerAccessibilityProvider, getModelPickerControlModels, ModelPickerSection, shouldShowManageModelsAction } from './modelPickerItems.js';
+import { buildModelPickerItems, createAddOpenRouterModelAction, createManageModelsAction, getModelPickerAccessibilityProvider, getModelPickerControlModels, ModelPickerSection, shouldShowManageModelsAction } from './modelPickerItems.js';
 import { ModelPickerConfiguration } from './modelPickerConfiguration.js';
 import { getCompactModelPickerIcon } from './modelProviderIcons.js';
 import { ITabbedModelPickerContext, TabbedModelPicker } from './modelPickerTabbedWidget.js';
@@ -51,6 +51,11 @@ import { IModelPickerProviderPlaceholder } from './modelPickerTabs.js';
 import { getModelPickerUnavailableReason, isAutoModel, isHydraFusionModel, ModelPickerUnavailableReason, modelPickerRequiresSetup, shouldShowCacheBreakHint as computeShouldShowCacheBreakHint } from './modelPickerPresentation.js';
 
 const CACHE_BREAK_HINT_DISMISSED_STORAGE_KEY = 'chat.cacheBreakHintDismissed';
+
+/**
+ * CreaEditor: chat runs on bring-your-own-key models only, so the picker never asks to sign in to Copilot.
+ */
+const CREAEDITOR_NO_COPILOT_SETUP = true;
 
 /** Opt-in setting for the tabbed model picker and its model details page. */
 export const TABBED_MODEL_PICKER_SETTING_ID = 'chat.experimentalModelPicker';
@@ -291,6 +296,11 @@ export class ModelPickerWidget extends Disposable {
 	}
 
 	private _requiresSetup(): boolean {
+		// CreaEditor: GitHub Copilot sign-in is never required to pick a model; without models the picker
+		// shows its "no models" state with "Manage Models" instead.
+		if (CREAEDITOR_NO_COPILOT_SETUP) {
+			return false;
+		}
 		return modelPickerRequiresSetup({
 			entitlement: this._entitlementService.entitlement,
 			anonymous: this._entitlementService.anonymous,
@@ -640,6 +650,7 @@ export class ModelPickerWidget extends Disposable {
 			updateStateType: this._updateService.state.type,
 			manageSettingsUrl,
 			manageModelsAction,
+			addOpenRouterModelAction: manageModelsAction ? createAddOpenRouterModelAction(this._commandService) : undefined,
 			chatEntitlementService: this._entitlementService,
 			languageModelsService: this._languageModelsService,
 			openerService: this._openerService,

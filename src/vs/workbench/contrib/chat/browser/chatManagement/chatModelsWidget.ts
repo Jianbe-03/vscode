@@ -59,6 +59,11 @@ const VENDOR_ROW_HEIGHT = 30;
 const MODEL_ROW_HEIGHT = 26;
 const CLOSE_MODAL_EDITOR_COMMAND_ID = 'workbench.action.closeModalEditor';
 
+/**
+ * CreaEditor: chat runs on bring-your-own-key models only, so adding models never offers a Copilot sign-in.
+ */
+const CREAEDITOR_OFFER_COPILOT_SIGN_IN: boolean = false;
+
 export function getModelHoverContent(model: ILanguageModel): MarkdownString {
 	const markdown = new MarkdownString('', { isTrusted: true, supportThemeIcons: true });
 	markdown.appendMarkdown(`**${model.metadata.name}**`);
@@ -1658,7 +1663,8 @@ export class ChatModelsWidget extends Disposable {
 			configurableVendors,
 			supportsAddingModels,
 			vendor => this.addModelsForVendor(vendor),
-			this.defaultAccountResolved && this.defaultAccountService.currentDefaultAccount === null
+			// CreaEditor: GitHub Copilot models are not used, so don't offer a Copilot sign-in to add models.
+			CREAEDITOR_OFFER_COPILOT_SIGN_IN && this.defaultAccountResolved && this.defaultAccountService.currentDefaultAccount === null
 				? () => this.commandService.executeCommand(CHAT_SETUP_ACTION_ID)
 				: undefined,
 		);

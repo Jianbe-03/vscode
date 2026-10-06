@@ -19,6 +19,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { ChatContextKeys } from '../../common/actions/chatContextKeys.js';
 import { ILanguageModelsProviderGroup } from '../../common/languageModelsConfiguration.js';
+import { AddOpenRouterModelAction } from './chatOpenRouterActions.js';
 
 class ManageLanguageModelAuthenticationAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.manageLanguageModelAuthentication';
@@ -271,4 +272,5 @@ export function registerLanguageModelActions() {
 	registerAction2(ManageLanguageModelAuthenticationAction);
 	registerAction2(ConfigureLanguageModelsGroupAction);
 	registerAction2(MigrateLanguageModelsGroupAction);
+	registerAction2(AddOpenRouterModelAction); // CreaEditor
 }

@@ -316,12 +316,12 @@ suite('buildModelPickerItems', () => {
 	test('showAutoModel=false shows a disabled no-models entry instead of auto', () => {
 		const items = callBuild([], { showAutoModel: false });
 		const actions = getActionItems(items);
-		// Exactly one entry: the early return must suppress Auto and the
-		// standalone "Manage Models" action (the helper always passes one).
-		assert.strictEqual(actions.length, 1);
-		assert.strictEqual(actions.some(a => a.label === 'Auto'), false);
-		assert.strictEqual(actions[0].item?.id, 'noModels');
-		assert.strictEqual(actions[0].item?.enabled, false);
+		// The early return suppresses Auto. CreaEditor: the disabled no-models entry is followed by
+		// "Manage Models" (the helper always passes one) so there is a way to add models.
+		assert.deepStrictEqual(actions.map(a => ({ id: a.item?.id, enabled: a.item?.enabled })), [
+			{ id: 'noModels', enabled: false },
+			{ id: 'manageModels', enabled: true },
+		]);
 	});
 
 	test('showAutoModel=false attaches inline upgrade link for Free users', () => {

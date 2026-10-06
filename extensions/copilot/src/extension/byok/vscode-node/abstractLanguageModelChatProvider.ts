@@ -15,6 +15,7 @@ import { CopilotLanguageModelWrapper } from '../../conversation/vscode-node/lang
 import { BYOKAuthType, BYOKKnownModels, BYOKModelCapabilities, resolveModelInfo } from '../common/byokProvider';
 import { OpenAIEndpoint } from '../node/openAIEndpoint';
 import { byokKnownModelsToAPIInfoWithEffort } from './byokModelInfo';
+import { resolveByokRequestMetadata } from './byokRequestMetadata';
 import { IBYOKStorageService } from './byokStorageService';
 
 export interface LanguageModelChatConfiguration {
@@ -101,12 +102,12 @@ export abstract class AbstractOpenAICompatibleLMProvider<T extends LanguageModel
 	}
 
 	async provideLanguageModelChatResponse(model: OpenAICompatibleLanguageModelChatInformation<T>, messages: Array<LanguageModelChatMessage | LanguageModelChatMessage2>, options: ProvideLanguageModelChatResponseOptions, progress: Progress<LanguageModelResponsePart2>, token: CancellationToken): Promise<void> {
-		const openAIChatEndpoint = await this.createOpenAIEndPoint(model);
+		const openAIChatEndpoint = await this.createRequestEndpoint(model);
 		return this._lmWrapper.provideLanguageModelResponse(openAIChatEndpoint, messages, options, options.requestInitiator, progress, token);
 	}
 
 	async provideTokenCount(model: OpenAICompatibleLanguageModelChatInformation<T>, text: string | LanguageModelChatMessage | LanguageModelChatMessage2, token: CancellationToken): Promise<number> {
-		const openAIChatEndpoint = await this.createOpenAIEndPoint(model);
+		const openAIChatEndpoint = await this.createRequestEndpoint(model);
 		return this._lmWrapper.provideTokenCount(openAIChatEndpoint, text);
 	}
 
@@ -165,6 +166,23 @@ export abstract class AbstractOpenAICompatibleLMProvider<T extends LanguageModel
 		} catch (error) {
 			this._logService.error(error, `Error fetching available OpenRouter models`);
 			throw error;
+		}
+	}
+
+	/**
+	 * Creates the endpoint for a request and attaches the user's configured request metadata
+	 * (group-level `requestMetadata` plus per-model overrides) to it.
+	 */
+	protected async createRequestEndpoint(model: OpenAICompatibleLanguageModelChatInformation<T>): Promise<OpenAIEndpoint> {
+		const endpoint = await this.createOpenAIEndPoint(model);
+		this.attachRequestMetadata(endpoint, model);
+		return endpoint;
+	}
+
+	protected attachRequestMetadata(endpoint: OpenAIEndpoint, model: OpenAICompatibleLanguageModelChatInformation<T>): void {
+		const metadata = resolveByokRequestMetadata(model, this._id);
+		if (metadata) {
+			endpoint.modelMetadata.requestMetadata = metadata;
 		}
 	}
 

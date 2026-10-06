@@ -13,8 +13,9 @@ import { IChatWebSocketManager } from '../../../platform/networking/node/chatWeb
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
 import { ITokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
-import { BYOKModelCapabilities } from '../common/byokProvider';
+import { BYOKKnownModels, BYOKModelCapabilities } from '../common/byokProvider';
 import { OpenAIEndpoint } from '../node/openAIEndpoint';
+import { byokKnownModelsToAPIInfoWithEffort } from './byokModelInfo';
 import { AbstractOpenAICompatibleLMProvider, LanguageModelChatConfiguration, OpenAICompatibleLanguageModelChatInformation } from './abstractLanguageModelChatProvider';
 import { IBYOKStorageService } from './byokStorageService';
 
@@ -42,6 +43,55 @@ interface OpenRouterModelData {
 		supported_efforts?: string[] | null;
 		default_effort?: string;
 	};
+}
+
+/**
+ * CreaEditor: an entry of the `models` array of an OpenRouter provider group in `chatLanguageModels.json`.
+ * The id is either an OpenRouter preset (`@preset/<slug>`) or a regular OpenRouter model slug
+ * (`anthropic/claude-sonnet-4.5`). Only configured entries are shown in the model picker unless
+ * `showAllModels` is set, so the picker does not list every OpenRouter model.
+ */
+interface OpenRouterModelEntry {
+	readonly id: string;
+	readonly name?: string;
+	/** OpenRouter model slug whose capabilities a preset inherits (context window, vision, tools, reasoning). */
+	readonly baseModel?: string;
+	readonly toolCalling?: boolean;
+	readonly vision?: boolean;
+	readonly contextWindow?: number;
+	readonly maxOutputTokens?: number;
+	readonly supportsReasoningEffort?: string[];
+}
+
+interface OpenRouterProviderConfig extends LanguageModelChatConfiguration {
+	readonly models?: readonly OpenRouterModelEntry[];
+	readonly showAllModels?: boolean;
+}
+
+const OPENROUTER_PRESET_PREFIX = '@preset/';
+const DEFAULT_PRESET_CONTEXT_WINDOW = 200_000;
+const DEFAULT_PRESET_MAX_OUTPUT_TOKENS = 32_000;
+
+/**
+ * Normalizes user input such as `programmer-agent`, `@preset/programmer-agent` or
+ * `https://openrouter.ai/settings/presets/programmer-agent` to an OpenRouter model id.
+ */
+export function normalizeOpenRouterModelId(value: string): string {
+	const trimmed = value.trim();
+	const presetUrl = /openrouter\.ai\/(?:settings\/)?presets\/([^/?#\s]+)/i.exec(trimmed);
+	if (presetUrl) {
+		return OPENROUTER_PRESET_PREFIX + presetUrl[1];
+	}
+	if (trimmed.startsWith(OPENROUTER_PRESET_PREFIX) || trimmed.includes('/')) {
+		return trimmed;
+	}
+	return OPENROUTER_PRESET_PREFIX + trimmed;
+}
+
+function defaultPresetName(id: string): string {
+	const slug = id.slice(OPENROUTER_PRESET_PREFIX.length);
+	const title = slug.split(/[-_\s]+/).filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
+	return `${title || slug} (preset)`;
 }
 
 /**
@@ -75,6 +125,58 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 			configurationService,
 			expService
 		);
+	}
+
+	protected override async getAllModels(silent: boolean, apiKey: string | undefined, configuration: LanguageModelChatConfiguration | undefined): Promise<OpenAICompatibleLanguageModelChatInformation<LanguageModelChatConfiguration>[]> {
+		const config = configuration as OpenRouterProviderConfig | undefined;
+		const entries = (config?.models ?? [])
+			.filter(entry => typeof entry?.id === 'string' && entry.id.trim().length > 0)
+			.map(entry => ({ ...entry, id: normalizeOpenRouterModelId(entry.id) }));
+		const needsCatalog = config?.showAllModels === true || entries.some(entry => !entry.id.startsWith(OPENROUTER_PRESET_PREFIX) || entry.baseModel);
+
+		let catalog: OpenAICompatibleLanguageModelChatInformation<LanguageModelChatConfiguration>[] = [];
+		if (needsCatalog) {
+			try {
+				catalog = await super.getAllModels(silent, apiKey, configuration);
+			} catch (error) {
+				// Presets must stay usable when the catalog cannot be fetched (e.g. offline).
+				if (!entries.length) {
+					throw error;
+				}
+				this._logService.warn(`[OpenRouter] Could not fetch the model catalog: ${error}`);
+			}
+		}
+
+		const baseUrl = this.getModelsBaseUrl()!;
+		const configured: BYOKKnownModels = {};
+		for (const entry of entries) {
+			const id = entry.id;
+			const base = (entry.baseModel && this._knownModels?.[entry.baseModel]) || this._knownModels?.[id];
+			const isPreset = id.startsWith(OPENROUTER_PRESET_PREFIX);
+			const contextWindow = entry.contextWindow ?? base?.contextWindow ?? (base ? (base.maxInputTokens ?? 0) + base.maxOutputTokens : DEFAULT_PRESET_CONTEXT_WINDOW);
+			const maxOutputTokens = entry.maxOutputTokens ?? base?.maxOutputTokens ?? Math.min(DEFAULT_PRESET_MAX_OUTPUT_TOKENS, Math.floor(contextWindow / 2));
+			const capabilities: BYOKModelCapabilities = {
+				...base,
+				name: entry.name ?? (isPreset ? defaultPresetName(id) : base?.name ?? id),
+				toolCalling: entry.toolCalling ?? base?.toolCalling ?? true,
+				vision: entry.vision ?? base?.vision ?? false,
+				contextWindow: undefined,
+				maxInputTokens: contextWindow - maxOutputTokens,
+				maxOutputTokens,
+				// A preset owns its reasoning settings on OpenRouter; only expose an effort picker when asked to.
+				supportsReasoningEffort: entry.supportsReasoningEffort ?? (isPreset ? undefined : base?.supportsReasoningEffort),
+				defaultReasoningEffort: isPreset ? undefined : base?.defaultReasoningEffort,
+			};
+			configured[id] = capabilities;
+			this._knownModels = { ...this._knownModels, [id]: capabilities };
+		}
+
+		const configuredModels = byokKnownModelsToAPIInfoWithEffort(this._name, configured).map(model => ({ ...model, url: baseUrl }));
+		if (config?.showAllModels !== true) {
+			return configuredModels;
+		}
+		const configuredIds = new Set(configuredModels.map(model => model.id));
+		return [...configuredModels, ...catalog.filter(model => !configuredIds.has(model.id))];
 	}
 
 	protected override getModelsBaseUrl(): string | undefined {

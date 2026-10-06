@@ -9,6 +9,7 @@ import { ConfigKey, IConfigurationService } from '../../../platform/configuratio
 import { isKimiFamily } from '../../../platform/endpoint/common/chatModelCapabilities';
 import { IDomainService } from '../../../platform/endpoint/common/domainService';
 import { IChatModelInformation } from '../../../platform/endpoint/common/endpointProvider';
+import { applyRequestMetadataToBody, expandRequestMetadata } from '../../../platform/endpoint/common/requestMetadata';
 import { ChatEndpoint, normalizeKimiToolCallIds } from '../../../platform/endpoint/node/chatEndpoint';
 import { ILogService } from '../../../platform/log/common/logService';
 import { isOpenAiFunctionTool } from '../../../platform/networking/common/fetch';
@@ -269,7 +270,23 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		return trimmed;
 	}
 
+	/**
+	 * Per-request values for `${sessionId}` / `${requestId}` placeholders in the configured
+	 * request metadata. Captured when the body is built and reused for the headers of that request.
+	 */
+	private _requestMetadataVariables: Record<string, string | undefined> = {};
+
 	override createRequestBody(options: ICreateEndpointBodyOptions): IEndpointBody {
+		const body = this._createRequestBodyCore(options);
+		const metadata = this.modelMetadata.requestMetadata;
+		if (!metadata?.body) {
+			return body;
+		}
+		this._requestMetadataVariables = { sessionId: options.conversationId, requestId: options.requestId };
+		return applyRequestMetadataToBody(body, expandRequestMetadata(metadata, this._requestMetadataVariables).body);
+	}
+
+	private _createRequestBodyCore(options: ICreateEndpointBodyOptions): IEndpointBody {
 		if (this.useResponsesApi) {
 			// Handle Responses API: customize the body directly
 			const zdr = !!this.modelMetadata.zeroDataRetentionEnabled;
@@ -422,6 +439,13 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		}
 		for (const [key, value] of Object.entries(this._customHeaders)) {
 			headers[key] = value;
+		}
+		const metadataHeaders = this.modelMetadata.requestMetadata?.headers;
+		if (metadataHeaders) {
+			const expanded = expandRequestMetadata({ headers: metadataHeaders }, this._requestMetadataVariables).headers;
+			for (const [key, value] of Object.entries(this._sanitizeCustomHeaders(expanded))) {
+				headers[key] = value;
+			}
 		}
 		return headers;
 	}

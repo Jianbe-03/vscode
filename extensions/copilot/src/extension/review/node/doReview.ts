@@ -231,8 +231,9 @@ export class ReviewSession {
 		tokenSource: CancellationTokenSource
 	): Promise<FeedbackResult> {
 		try {
-			const copilotToken = await this.authService.getCopilotToken();
-			const canUseGitHubAgent = copilotToken.isCopilotCodeReviewEnabled;
+			// CreaEditor: without a Copilot token source, always use the legacy (language model based) review.
+			const copilotToken = this.authService.hasCopilotTokenSource ? await this.authService.getCopilotToken() : undefined;
+			const canUseGitHubAgent = !!copilotToken?.isCopilotCodeReviewEnabled;
 
 			if (canUseGitHubAgent) {
 				return await githubReview(
@@ -397,6 +398,10 @@ export async function reviewFileChanges(
 	const fileSystemService = accessor.get(IFileSystemService);
 	const customInstructionsService = accessor.get(ICustomInstructionsService);
 
+	// CreaEditor: this review flow is GitHub Copilot (CAPI) only; don't attempt to mint a Copilot token.
+	if (!authService.hasCopilotTokenSource) {
+		return { type: 'error', reason: 'Code review is not available without GitHub Copilot.' };
+	}
 	const copilotToken = await authService.getCopilotToken();
 	if (!copilotToken.isCopilotCodeReviewEnabled) {
 		return { type: 'error', reason: 'Code review is not enabled for this account.' };

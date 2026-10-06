@@ -1691,7 +1691,8 @@ export class ChatMLFetcherImpl extends AbstractChatMLFetcher {
 			if (response.status === 402) {
 				// When we receive a 402, we have exceed a quota
 				// This is stored on the token so let's refresh it
-				if (!this._authenticationService.copilotToken?.isChatQuotaExceeded) {
+				// CreaEditor: a BYOK provider can also answer 402 (e.g. out of credits); there is no Copilot token to refresh.
+				if (this._authenticationService.hasCopilotTokenSource && !this._authenticationService.copilotToken?.isChatQuotaExceeded) {
 					this._authenticationService.resetCopilotToken(response.status);
 					await this._authenticationService.getCopilotToken();
 				}

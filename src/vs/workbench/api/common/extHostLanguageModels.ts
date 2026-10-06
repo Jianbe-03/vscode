@@ -406,7 +406,34 @@ export class ExtHostLanguageModels implements ExtHostLanguageModelsShape {
 			// Maybe the default wasn't cached so we will try again with resolving the models too
 			return this.getDefaultLanguageModel(extension, true);
 		}
+		if (!defaultModelId) {
+			// CreaEditor: GitHub Copilot models are not available, fall back to a bring-your-own-key model.
+			defaultModelId = this._findNonCopilotDefaultLanguageModel();
+		}
 		return this.getLanguageModelByIdentifier(extension, defaultModelId);
+	}
+
+	/**
+	 * CreaEditor: picks a default from the non-Copilot models: one marked as default for chat if any,
+	 * otherwise the first user-selectable model, preferring models that support tool calling.
+	 */
+	private _findNonCopilotDefaultLanguageModel(): string | undefined {
+		let firstSelectable: string | undefined;
+		let firstSelectableWithTools: string | undefined;
+		for (const [modelIdentifier, modelData] of this._localModels) {
+			const metadata = modelData.metadata;
+			if (metadata.vendor === COPILOT_VENDOR_ID || metadata.isUserSelectable === false || metadata.targetChatSessionType) {
+				continue;
+			}
+			if (metadata.isDefaultForLocation[ChatAgentLocation.Chat]) {
+				return modelIdentifier;
+			}
+			firstSelectable ??= modelIdentifier;
+			if (metadata.capabilities?.toolCalling) {
+				firstSelectableWithTools ??= modelIdentifier;
+			}
+		}
+		return firstSelectableWithTools ?? firstSelectable;
 	}
 
 	async getLanguageModelByIdentifier(extension: IExtensionDescription, modelId: string | undefined): Promise<vscode.LanguageModelChat | undefined> {

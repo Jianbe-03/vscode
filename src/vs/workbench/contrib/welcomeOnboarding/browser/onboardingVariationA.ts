@@ -116,7 +116,6 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private _footerSignInBtn: HTMLButtonElement | undefined;
 
 	private currentStepIndex = 0;
-	private readonly steps = ONBOARDING_STEPS;
 	private readonly disposables = this._register(new DisposableStore());
 	private readonly stepDisposables = this._register(new DisposableStore());
 	private previouslyFocusedElement: HTMLElement | undefined;
@@ -134,6 +133,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 	private enterpriseSignInWatch: StopWatch | undefined;
 
 	constructor(
+		private readonly steps: readonly OnboardingStepId[] = ONBOARDING_STEPS,
 		@ILayoutService private readonly layoutService: ILayoutService,
 		@IWorkbenchThemeService private readonly themeService: IWorkbenchThemeService,
 		@IDefaultAccountService private readonly defaultAccountService: IDefaultAccountService,
@@ -179,7 +179,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		this.overlay = append(container, $('.onboarding-a-overlay'));
 		this.overlay.setAttribute('role', 'dialog');
 		this.overlay.setAttribute('aria-modal', 'true');
-		this.overlay.setAttribute('aria-label', localize('onboarding.a.aria', "Welcome to Visual Studio Code"));
+		this.overlay.setAttribute('aria-label', localize('onboarding.a.aria', "Welcome to CreaEditor"));
 
 		// Card
 		this.card = append(this.overlay, $('.onboarding-a-card'));
@@ -227,7 +227,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._dismiss('skip');
 		}));
 		this.disposables.add(addDisposableListener(this.backButton, EventType.CLICK, () => {
-			if (this.currentStepIndex === 0 && this.enterpriseSignInUiState === 'instance') {
+			if (this._isSignInStep() && this.enterpriseSignInUiState === 'instance') {
 				this._logAction('cancelEnterpriseInstancePrompt');
 				this.enterpriseSignInWatch = undefined;
 				this._setEnterpriseSignInUiState('options');
@@ -242,7 +242,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 				this._applyStepSelections(this.steps[this.currentStepIndex]);
 				this._logAction('complete');
 				this._dismiss('complete');
-			} else if (this.currentStepIndex === 0) {
+			} else if (this._isSignInStep()) {
 				this._logAction('continueWithoutSignIn');
 				this._nextStep();
 			} else {
@@ -354,6 +354,10 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		return this.currentStepIndex === this.steps.length - 1;
 	}
 
+	private _isSignInStep(): boolean {
+		return this.steps[this.currentStepIndex] === OnboardingStepId.SignIn;
+	}
+
 	private _renderProgress(): void {
 		if (!this.progressContainer || !this.stepLabelEl) {
 			return;
@@ -423,11 +427,11 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 
 	private _updateButtonStates(): void {
 		if (this.backButton) {
-			const showEnterpriseBack = this.currentStepIndex === 0 && this.enterpriseSignInUiState === 'instance';
+			const showEnterpriseBack = this._isSignInStep() && this.enterpriseSignInUiState === 'instance';
 			this.backButton.style.display = (this.currentStepIndex === 0 && !showEnterpriseBack) ? 'none' : '';
 		}
 		if (this.nextButton) {
-			if (this.currentStepIndex === 0) {
+			if (this._isSignInStep()) {
 				if (this._userSignedIn) {
 					this.nextButton.className = 'onboarding-a-btn onboarding-a-btn-primary';
 					this.nextButton.textContent = localize('onboarding.continue', "Continue");
@@ -445,7 +449,8 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			}
 		}
 		if (this.footerLeft) {
-			if (this._isLastStep()) {
+			// CreaEditor: only nudge to sign in when the flow has a sign-in step.
+			if (this._isLastStep() && this.steps.includes(OnboardingStepId.SignIn)) {
 				// Show sign-in nudge in footer
 				if (!this._footerSignInBtn && !this._userSignedIn) {
 					this._footerSignInBtn = append(this.footerLeft, $<HTMLButtonElement>('button.onboarding-a-signin-nudge-btn'));
@@ -482,7 +487,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 		const content = append(wrapper, $('.onboarding-a-signin-content'));
 		const contentMain = append(content, $('.onboarding-a-signin-content-main'));
 		const title = append(contentMain, $('h2.onboarding-a-signin-title'));
-		title.textContent = localize('onboarding.signIn.heroTitle', "Welcome to VS Code");
+		title.textContent = localize('onboarding.signIn.heroTitle', "Welcome to CreaEditor");
 
 		const subtitle = append(contentMain, $('p.onboarding-a-signin-subtitle'));
 		subtitle.textContent = localize('onboarding.signIn.heroSubtitle', "Sign in to use GitHub Copilot.");
@@ -902,7 +907,7 @@ export class OnboardingVariationA extends Disposable implements IOnboardingServi
 			this._createKbd(localize('onboarding.personalize.tip.shift', "Shift")),
 			'+',
 			this._createKbd(localize('onboarding.personalize.tip.p', "P")),
-			localize('onboarding.personalize.tip.suffix', " to access all VS Code commands."),
+			localize('onboarding.personalize.tip.suffix', " to access all CreaEditor commands."),
 		);
 	}
 

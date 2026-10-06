@@ -558,6 +558,11 @@ export const AgentHostMarkdownPlanRichLinksEnabledConfigKey = 'markdownPlanRichL
 export const AgentHostAgentOrchestrationLimitsConfigKey = 'agentOrchestrationLimits';
 export type AgentHostAgentOrchestrationLimits = 'on' | 'off';
 
+/** CreaEditor: root config key for the maximum agent session spawn (nesting) depth. */
+export const AgentHostMaxSessionSpawnDepthConfigKey = 'maxSessionSpawnDepth';
+/** CreaEditor: default for {@link AgentHostMaxSessionSpawnDepthConfigKey}. */
+export const AgentHostMaxSessionSpawnDepthDefault = 3;
+
 /** Root config key forwarded from the renderer for the artifact tools and their instruction. */
 export const AgentHostArtifactToolsConfigKey = 'artifactTools';
 
@@ -818,7 +823,7 @@ export const platformRootSchema = createSchema({
 		type: 'boolean',
 		title: localize('agentHost.config.byokModelsEnabled.title', "BYOK Models"),
 		description: localize('agentHost.config.byokModelsEnabled.description', "Whether extension-provided BYOK models are enabled."),
-		default: false,
+		default: true, // CreaEditor: BYOK models are the only models available.
 	}),
 	[AgentHostCodexEnabledConfigKey]: schemaProperty<boolean>({
 		type: 'boolean',
@@ -898,6 +903,13 @@ export const platformRootSchema = createSchema({
 			localize('agentHost.config.agentOrchestrationLimits.off', "Do not enforce agent orchestration safety limits."),
 		],
 		default: 'on',
+	}),
+	// CreaEditor: configurable session spawn depth for agent orchestration tools.
+	[AgentHostMaxSessionSpawnDepthConfigKey]: schemaProperty<number>({
+		type: 'number',
+		title: localize('agentHost.config.maxSessionSpawnDepth.title', "Maximum Session Spawn Depth"),
+		description: localize('agentHost.config.maxSessionSpawnDepth.description', "How many levels deep agent-created sessions may themselves create sessions or session groups."),
+		default: AgentHostMaxSessionSpawnDepthDefault,
 	}),
 	[AgentHostArtifactToolsConfigKey]: schemaProperty<boolean>({
 		type: 'boolean',
