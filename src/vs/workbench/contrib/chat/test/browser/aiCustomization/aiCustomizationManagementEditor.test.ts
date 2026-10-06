@@ -506,7 +506,7 @@ suite('aiCustomizationManagementEditor', () => {
 
 		assert.deepStrictEqual(calls, [{
 			commandId: 'workbench.action.chat.openNewSessionSidebar.agent-host-copilotcli',
-			args: [{ prompt: 'Review this change', noWorkspace: true }],
+			args: [{ prompt: 'Review this change' }],
 		}]);
 	});
 
