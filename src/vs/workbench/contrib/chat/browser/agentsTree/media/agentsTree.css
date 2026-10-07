@@ -15,7 +15,7 @@
 	--agents-tree-indent: 20px;
 	--agents-tree-guide-x: 10px;
 	--agents-tree-gap: 2px;
-	--agents-tree-line: var(--vscode-tree-inactiveIndentGuidesStroke, color-mix(in srgb, var(--vscode-descriptionForeground) 35%, transparent));
+	--agents-tree-line: color-mix(in srgb, var(--vscode-descriptionForeground) 50%, transparent);
 	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size80) var(--vscode-spacing-size120);
 }
 
@@ -163,11 +163,17 @@
 	font-style: italic;
 }
 
+/* The details give way before the label, which says what the agent works on. */
+.agents-tree-view .agents-tree-meta {
+	flex-shrink: 4;
+	max-width: 45%;
+}
+
 /*
  * An agent that ended (finished, failed, cancelled) or whose chat was closed or session archived is
  * turned off: its row goes quiet, while running agents keep their color.
  */
-.agents-tree-view .agents-tree-node[data-activity="ended"] > .agents-tree-card :is(.agents-tree-label, .agents-tree-icon) {
+.agents-tree-view .agents-tree-node[data-activity="ended"] > .agents-tree-card :is(.agents-tree-label, .agents-tree-icon, .agents-tree-meta) {
 	color: var(--vscode-disabledForeground);
 }
 
