@@ -9,12 +9,28 @@
 /** The kind of LLM gateway a BYOK endpoint talks to. */
 export type GatewayKind = 'openrouter' | 'litellm';
 
-/** A GitHub (or other forge) issue a chat is working on. */
-export interface IChatIssue {
+/**
+ * A GitHub (or other forge) issue a chat is working on. `kind` is left out by detection, and cost
+ * entries persisted before Jira support never have it, so a missing `kind` means a GitHub issue.
+ */
+export interface IGitHubIssue {
+	readonly kind?: 'github';
 	readonly number: number;
 	/** `owner/repo`, when known. */
 	readonly repo?: string;
 }
+
+/** A Jira (Atlassian Cloud) issue a chat is working on. */
+export interface IJiraIssue {
+	readonly kind: 'jira';
+	/** Upper case issue key, e.g. `PROJ-123`. */
+	readonly key: string;
+	/** Host of the Jira site, e.g. `acme.atlassian.net`, when known. */
+	readonly site?: string;
+}
+
+/** The issue a chat is working on. */
+export type IChatIssue = IGitHubIssue | IJiraIssue;
 
 /** Where the issue of a chat came from. */
 export type ChatIssueSource = 'agent' | 'prompt' | 'branch';
@@ -66,35 +82,117 @@ export function normalizeGatewayRoot(url: string): string {
 }
 
 /**
- * Detects an issue number in a git branch name, e.g. `123-fix-login`, `issue/123`, `feature/GH-45-x`,
+ * Upper case prefixes of `WORD-123` tokens that are not Jira project keys: standards, encodings,
+ * hashes, model and protocol names, and words used in branch names (`issue-12`, `gh-7`, `fix-2`).
+ */
+const NON_JIRA_PREFIXES = new Set([
+	'UTF', 'UCS', 'ISO', 'IEC', 'IEEE', 'ECMA', 'ES', 'RFC', 'CVE', 'CWE', 'GHSA', 'PEP', 'JSR', 'KB', 'MS',
+	'SHA', 'MD', 'AES', 'RSA', 'ECDSA', 'HMAC', 'CRC', 'BASE', 'HTTP', 'HTTPS', 'TLS', 'SSL', 'IPV', 'IP', 'TCP', 'UDP',
+	'GPT', 'CLAUDE', 'GEMINI', 'LLAMA', 'PHI', 'QWEN', 'MISTRAL', 'WIN', 'WINDOWS', 'MACOS', 'IOS', 'ANDROID', 'ARM', 'ARM64', 'X86', 'X64',
+	'COVID', 'MP', 'PCI', 'SOC', 'GDPR', 'GPL', 'LGPL', 'AGPL', 'CC', 'BSD', 'APACHE', 'MIT',
+	'ISSUE', 'ISSUES', 'GH', 'PR', 'FIX', 'FIXES', 'BUG', 'BUGFIX', 'HOTFIX', 'FEAT', 'FEATURE', 'RELEASE', 'CHORE', 'REFACTOR', 'DOCS', 'TEST', 'TESTS', 'WIP',
+	'UPDATE', 'ADD', 'REMOVE', 'BUMP', 'VERSION', 'STEP', 'PHASE', 'PART', 'TOP', 'LEVEL', 'DAY', 'WEEK', 'SPRINT', 'NODE', 'PYTHON', 'JAVA', 'VUE', 'PHP', 'LARAVEL',
+]);
+
+/**
+ * Jira project key and issue number: the key is 2-10 letters, digits or underscores starting with a
+ * letter, the number has no leading zero.
+ */
+const JIRA_KEY = '[A-Za-z][A-Za-z0-9_]{1,9}-[1-9]\\d{0,6}';
+
+/**
+ * A Jira issue for a key, normalized to upper case. Returns `undefined` when the project key is a known
+ * non-ticket prefix such as the `UTF` of `UTF-8`, unless the key comes from an explicit Jira URL.
+ */
+function jiraIssue(key: string, site?: string, fromUrl = false): IJiraIssue | undefined {
+	const upper = key.toUpperCase();
+	if (!fromUrl && NON_JIRA_PREFIXES.has(upper.slice(0, upper.lastIndexOf('-')))) {
+		return undefined;
+	}
+	return site ? { kind: 'jira', key: upper, site: site.toLowerCase() } : { kind: 'jira', key: upper };
+}
+
+/** Returns `true` when the issue is a Jira issue (anything else, including persisted legacy entries, is GitHub). */
+export function isJiraIssue(issue: IChatIssue | undefined): issue is IJiraIssue {
+	return issue?.kind === 'jira';
+}
+
+/**
+ * Detects an issue in a git branch name.
+ *
+ * A Jira key wins over a number, since `PROJ-123` contains one. Keys are matched case-insensitively
+ * (branches are often lower case) and normalized to upper case, but only at the start of the branch or
+ * of a path segment (`PROJ-123-fix-login`, `feature/PROJ-123`, `jibbe/abc-42-foo`); an upper case key is
+ * also found after a `-` or `_` (`fix-PROJ-7`). Prefixes in {@link NON_JIRA_PREFIXES} never count.
+ *
+ * Otherwise a GitHub issue number is detected, e.g. `123-fix-login`, `issue/123`, `feature/GH-45-x`,
  * `jibbe/issue-45-foo` or `fix/#12`. Version-like segments (`release/1.2`) are ignored.
  */
-export function detectIssueFromBranch(branch: string | undefined): number | undefined {
+export function detectIssueFromBranch(branch: string | undefined): IChatIssue | undefined {
 	if (!branch) {
 		return undefined;
+	}
+	const jiraPatterns = [
+		new RegExp(`(?:^|\\/)(?<key>${JIRA_KEY})(?=$|[\\/_.-])`, 'gi'),
+		new RegExp(`(?:^|[\\/_-])(?<key>[A-Z][A-Z0-9_]{1,9}-[1-9]\\d{0,6})(?=$|[\\/_.-])`, 'g'),
+	];
+	for (const pattern of jiraPatterns) {
+		for (const match of branch.matchAll(pattern)) {
+			const issue = match.groups && jiraIssue(match.groups.key);
+			if (issue) {
+				return issue;
+			}
+		}
 	}
 	const match = /(?:^|[\/_-])(?:issues?[-_\/]?|gh[-_]?|#)?(?<number>\d{1,7})(?=$|[\/_-])/i.exec(branch);
 	if (!match?.groups) {
 		return undefined;
 	}
 	const value = Number(match.groups.number);
-	return value > 0 ? value : undefined;
+	return value > 0 ? { number: value } : undefined;
 }
 
+/** A GitHub issue or pull request URL. */
+const GITHUB_URL = /github\.com\/(?<repo>[\w.-]+\/[\w.-]+)\/(?:issues|pull)\/(?<number>\d+)/i;
+
 /**
- * Detects an issue referenced in a prompt: a GitHub issue or pull request URL, `owner/repo#123`, or `#123`.
+ * A Jira issue URL: `https://<site>/browse/PROJ-1`, `.../issues/PROJ-1` or a board/search URL with
+ * `selectedIssue=PROJ-1`.
+ */
+const JIRA_URL = new RegExp(`https?:\\/\\/(?<site>[\\w.-]+(?::\\d+)?)(?:\\/[^\\s?#]*)?(?:\\/browse\\/|\\/issues\\/|\\?(?:[^\\s#]*&)?selectedIssue=)(?<key>${JIRA_KEY})(?![\\w-])`, 'i');
+
+/** An upper case Jira key in prose, not part of a path, URL, longer word or version (`GPT-5.1`). */
+const JIRA_KEY_IN_TEXT = /(?<![\w\/.:#-])(?<key>[A-Z][A-Z0-9_]{1,9}-[1-9]\d{0,6})(?![\w-]|\.\d)/g;
+
+/**
+ * Detects an issue referenced in a prompt, in this order of precedence:
+ * 1. the first GitHub issue/pull request URL or Jira issue URL (`/browse/PROJ-1`, `selectedIssue=PROJ-1`),
+ * 2. `owner/repo#123`,
+ * 3. an upper case Jira key such as `PROJ-123` (keys with a prefix in {@link NON_JIRA_PREFIXES}, like
+ *    `UTF-8` or `SHA-256`, are ignored),
+ * 4. `#123`.
  */
 export function detectIssueFromText(text: string | undefined): IChatIssue | undefined {
 	if (!text) {
 		return undefined;
 	}
-	const url = /github\.com\/(?<repo>[\w.-]+\/[\w.-]+)\/(?:issues|pull)\/(?<number>\d+)/i.exec(text);
-	if (url?.groups) {
-		return { number: Number(url.groups.number), repo: url.groups.repo };
+	const githubUrl = GITHUB_URL.exec(text);
+	const jiraUrl = JIRA_URL.exec(text);
+	if (jiraUrl?.groups && (!githubUrl || jiraUrl.index < githubUrl.index)) {
+		return jiraIssue(jiraUrl.groups.key, jiraUrl.groups.site, true);
+	}
+	if (githubUrl?.groups) {
+		return { number: Number(githubUrl.groups.number), repo: githubUrl.groups.repo };
 	}
 	const qualified = /(?:^|[\s(])(?<repo>[\w.-]+\/[\w.-]+)#(?<number>\d+)\b/.exec(text);
 	if (qualified?.groups) {
 		return { number: Number(qualified.groups.number), repo: qualified.groups.repo };
+	}
+	for (const match of text.matchAll(JIRA_KEY_IN_TEXT)) {
+		const issue = match.groups && jiraIssue(match.groups.key);
+		if (issue) {
+			return issue;
+		}
 	}
 	const plain = /(?:^|[\s(])#(?<number>\d+)\b/.exec(text);
 	if (plain?.groups) {
@@ -123,7 +221,10 @@ export function extractUserRequestText(text: string | undefined): string | undef
 	return stripped || undefined;
 }
 
-/** Parses user or agent input such as `123`, `#123`, `owner/repo#123` or an issue URL. */
+/**
+ * Parses user or agent input such as `123`, `#123`, `owner/repo#123`, a GitHub issue URL, a Jira key
+ * (`PROJ-123`, any case, not a {@link NON_JIRA_PREFIXES} token) or a Jira issue URL.
+ */
 export function parseIssueReference(value: string | number | undefined): IChatIssue | undefined {
 	if (typeof value === 'number') {
 		return Number.isInteger(value) && value > 0 ? { number: value } : undefined;
@@ -134,6 +235,9 @@ export function parseIssueReference(value: string | number | undefined): IChatIs
 	const trimmed = value.trim();
 	if (/^\d+$/.test(trimmed)) {
 		return { number: Number(trimmed) };
+	}
+	if (new RegExp(`^${JIRA_KEY}$`).test(trimmed)) {
+		return jiraIssue(trimmed);
 	}
 	return detectIssueFromText(` ${trimmed}`);
 }
@@ -147,13 +251,21 @@ export function repoFromRemoteUrl(remoteUrl: string | undefined): string | undef
 	return match?.groups?.repo;
 }
 
-/** Human readable issue label, e.g. `creacoon/bliep#123` or `#123`. */
+/** Human readable issue label, e.g. `creacoon/bliep#123`, `#123` or `PROJ-123`. */
 export function formatIssue(issue: IChatIssue | undefined, fallbackRepo?: string): string | undefined {
 	if (!issue) {
 		return undefined;
 	}
+	if (isJiraIssue(issue)) {
+		return issue.key;
+	}
 	const repo = issue.repo ?? fallbackRepo;
 	return repo ? `${repo}#${issue.number}` : `#${issue.number}`;
+}
+
+/** Web URL of an issue, when known: `https://<site>/browse/<KEY>` for a Jira issue whose site is known. */
+export function getIssueUrl(issue: IChatIssue | undefined): string | undefined {
+	return isJiraIssue(issue) && issue.site ? `https://${issue.site}/browse/${encodeURIComponent(issue.key)}` : undefined;
 }
 
 const MAX_METADATA_VALUE_LENGTH = 512;

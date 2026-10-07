@@ -1289,7 +1289,7 @@
         "displayName": "Set Chat Issue",
         "icon": "$(issues)",
         "userDescription": "Track this chat's model usage and cost under an issue",
-        "modelDescription": "Declares which issue (GitHub issue or pull request) the current chat is working on. CreaEditor attaches the issue to every model request so the cost of the work can be attributed per issue. Call this once at the start of work on an issue, e.g. when asked to implement or fix issue #123. The issue is detected automatically from the branch name or a #123 in the first prompt, so only call it when the issue differs or was not mentioned. Pass an empty string to clear it.",
+        "modelDescription": "Declares which issue (a GitHub issue or pull request, or a Jira issue) the current chat is working on. CreaEditor attaches the issue to every model request so the cost of the work can be attributed per issue. Call this once at the start of work on an issue, e.g. when asked to implement or fix issue #123 or Jira issue PROJ-123. The issue is detected automatically from the branch name (e.g. PROJ-123-fix-login or 123-fix-login) or from a #123, PROJ-123 or issue URL in the first prompt, so only call it when the issue differs or was not mentioned. Pass an empty string to clear it.",
         "canBeReferencedInPrompt": true,
         "tags": [],
         "inputSchema": {
@@ -1297,7 +1297,7 @@
           "properties": {
             "issue": {
               "type": "string",
-              "description": "The issue: 123, #123, owner/repo#123, or an issue URL. Empty to clear."
+              "description": "The issue: a GitHub issue as 123, #123, owner/repo#123 or an issue URL, or a Jira issue as its key (PROJ-123) or URL (https://acme.atlassian.net/browse/PROJ-123). Empty to clear."
             }
           },
           "required": [

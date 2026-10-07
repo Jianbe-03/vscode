@@ -14,7 +14,7 @@ import { Emitter } from '../../../util/vs/base/common/event';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { URI } from '../../../util/vs/base/common/uri';
-import { BACKGROUND_CHAT_ID, detectIssueFromBranch, detectIssueFromText, IChatIssue, IChatWorkContext, repoFromRemoteUrl } from '../common/gatewayTracking';
+import { BACKGROUND_CHAT_ID, detectIssueFromBranch, detectIssueFromText, IChatIssue, IChatWorkContext, isJiraIssue, repoFromRemoteUrl } from '../common/gatewayTracking';
 import { GatewayCostEntryUpdate, IGatewayCostEntry, IGatewayTrackingService } from '../common/gatewayTrackingService';
 
 const LEDGER_FILE = 'creaeditor-gateway-costs.jsonl';
@@ -88,18 +88,15 @@ export class GatewayTrackingService extends Disposable implements IGatewayTracki
 			issue = root.promptIssue;
 			issueSource = 'prompt';
 		} else if (!root.cleared) {
-			const branchIssue = detectIssueFromBranch(branch);
-			if (branchIssue) {
-				issue = { number: branchIssue };
-				issueSource = 'branch';
-			}
+			issue = detectIssueFromBranch(branch);
+			issueSource = issue ? 'branch' : undefined;
 		}
 
 		return {
 			chatId,
 			rootChatId,
 			chatTitle: root.title,
-			issue: issue && !issue.repo && repo ? { ...issue, repo } : issue,
+			issue: issue && !isJiraIssue(issue) && !issue.repo && repo ? { ...issue, repo } : issue,
 			issueSource,
 			repo,
 			branch,

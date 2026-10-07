@@ -16,7 +16,7 @@ import { ToolRegistry } from '../common/toolsRegistry';
 import { checkCancellation } from './toolUtils';
 
 interface ISetChatIssueParams {
-	/** `123`, `#123`, `owner/repo#123` or an issue URL. Empty to clear. */
+	/** `123`, `#123`, `owner/repo#123`, a Jira key such as `PROJ-123`, or a GitHub or Jira issue URL. Empty to clear. */
 	readonly issue: string;
 }
 
@@ -45,7 +45,7 @@ class SetChatIssueTool implements vscode.LanguageModelTool<ISetChatIssueParams> 
 		}
 		const issue = parseIssueReference(value);
 		if (!issue) {
-			return new LanguageModelToolResult([new LanguageModelTextPart(`"${value}" is not an issue reference. Use 123, #123, owner/repo#123 or an issue URL.`)]);
+			return new LanguageModelToolResult([new LanguageModelTextPart(`"${value}" is not an issue reference. Use 123, #123, owner/repo#123, a Jira key such as PROJ-123, or a GitHub or Jira issue URL.`)]);
 		}
 		// The issue applies to the whole chat, including its subagents.
 		this._gatewayTrackingService.setIssue(chatId, issue);

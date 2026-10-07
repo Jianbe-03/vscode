@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, test } from 'vitest';
-import { detectIssueFromBranch, detectIssueFromText, extractUserRequestText, gatewayKindFromUrl, getCostFromHeaders, getCostFromUsage, getGatewayTrackingBody, getGatewayTrackingHeaders, IChatWorkContext, normalizeGatewayRoot, parseIssueReference, repoFromRemoteUrl } from '../gatewayTracking';
+import { detectIssueFromBranch, detectIssueFromText, extractUserRequestText, formatIssue, gatewayKindFromUrl, getCostFromHeaders, getCostFromUsage, getGatewayTrackingBody, getGatewayTrackingHeaders, getIssueUrl, getTrackingMetadata, IChatIssue, IChatWorkContext, isJiraIssue, normalizeGatewayRoot, parseIssueReference, repoFromRemoteUrl } from '../gatewayTracking';
 
 describe('gatewayTracking (CreaEditor)', () => {
 	test('detects issues from branches, prompts and references', () => {
@@ -18,11 +18,21 @@ describe('gatewayTracking (CreaEditor)', () => {
 		}).toMatchInlineSnapshot(`
 			{
 			  "branches": [
-			    123,
-			    45,
-			    7,
-			    12,
-			    9,
+			    {
+			      "number": 123,
+			    },
+			    {
+			      "number": 45,
+			    },
+			    {
+			      "number": 7,
+			    },
+			    {
+			      "number": 12,
+			    },
+			    {
+			      "number": 9,
+			    },
 			    undefined,
 			    undefined,
 			    undefined,
@@ -73,6 +83,153 @@ describe('gatewayTracking (CreaEditor)', () => {
 			    },
 			    undefined,
 			  ],
+			}
+		`);
+	});
+
+	test('detects Jira issues and ignores non-ticket tokens', () => {
+		expect({
+			branches: ['PROJ-123-fix-login', 'feature/PROJ-123', 'jibbe/abc-42-foo', 'fix-PROJ-7-login', 'feature/utf-8-names', 'chore/gpt-5-models', 'issue-12-PROJ-3', 'fix/update-2-files'].map(detectIssueFromBranch),
+			texts: [
+				'Fix PROJ-123 please',
+				'See https://acme.atlassian.net/browse/proj-77 for details, also #5',
+				'https://acme.atlassian.net/jira/software/c/projects/PROJ/boards/1?selectedIssue=PROJ-8',
+				'https://github.com/creacoon/bliep/issues/88 and https://acme.atlassian.net/browse/PROJ-9',
+				'creacoon/bliep#5 relates to PROJ-1',
+				'PROJ-2 and #31',
+				'Use UTF-8, ISO-8601, SHA-256, GPT-5.1, ES-2022 and RFC-9110 for #4',
+				'Bump to GPT-5 and X-1, see src/PROJ-1/file.ts',
+			].map(detectIssueFromText),
+			references: ['PROJ-42', 'abc-7', 'https://acme.atlassian.net/browse/ABC-1', 'utf-8', 'PROJ-0'].map(parseIssueReference),
+		}).toMatchInlineSnapshot(`
+			{
+			  "branches": [
+			    {
+			      "key": "PROJ-123",
+			      "kind": "jira",
+			    },
+			    {
+			      "key": "PROJ-123",
+			      "kind": "jira",
+			    },
+			    {
+			      "key": "ABC-42",
+			      "kind": "jira",
+			    },
+			    {
+			      "key": "PROJ-7",
+			      "kind": "jira",
+			    },
+			    {
+			      "number": 8,
+			    },
+			    {
+			      "number": 5,
+			    },
+			    {
+			      "key": "PROJ-3",
+			      "kind": "jira",
+			    },
+			    {
+			      "number": 2,
+			    },
+			  ],
+			  "references": [
+			    {
+			      "key": "PROJ-42",
+			      "kind": "jira",
+			    },
+			    {
+			      "key": "ABC-7",
+			      "kind": "jira",
+			    },
+			    {
+			      "key": "ABC-1",
+			      "kind": "jira",
+			      "site": "acme.atlassian.net",
+			    },
+			    undefined,
+			    undefined,
+			  ],
+			  "texts": [
+			    {
+			      "key": "PROJ-123",
+			      "kind": "jira",
+			    },
+			    {
+			      "key": "PROJ-77",
+			      "kind": "jira",
+			      "site": "acme.atlassian.net",
+			    },
+			    {
+			      "key": "PROJ-8",
+			      "kind": "jira",
+			      "site": "acme.atlassian.net",
+			    },
+			    {
+			      "number": 88,
+			      "repo": "creacoon/bliep",
+			    },
+			    {
+			      "number": 5,
+			      "repo": "creacoon/bliep",
+			    },
+			    {
+			      "key": "PROJ-2",
+			      "kind": "jira",
+			    },
+			    {
+			      "number": 4,
+			    },
+			    undefined,
+			  ],
+			}
+		`);
+	});
+
+	test('formats, links and loads issues', () => {
+		// Ledger entries persisted before Jira support have no `kind` and stay GitHub issues.
+		const persisted: IChatIssue[] = [JSON.parse('{"number":12,"repo":"creacoon/bliep"}'), JSON.parse('{"number":7}')];
+		const issues: IChatIssue[] = [...persisted, { kind: 'jira', key: 'PROJ-123', site: 'acme.atlassian.net' }, { kind: 'jira', key: 'PROJ-9' }];
+		const jiraContext: IChatWorkContext = { chatId: 'chat-1', rootChatId: 'chat-1', issue: issues[2], issueSource: 'prompt', repo: 'creacoon/bliep' };
+		expect({
+			issues: issues.map(issue => ({ jira: isJiraIssue(issue), label: formatIssue(issue, 'fallback/repo'), url: getIssueUrl(issue) })),
+			metadata: getTrackingMetadata(jiraContext, 'req-1'),
+			headers: getGatewayTrackingHeaders('litellm', jiraContext),
+		}).toMatchInlineSnapshot(`
+			{
+			  "headers": {
+			    "x-litellm-tags": "creaeditor,chat:chat-1,issue:PROJ-123,repo:creacoon/bliep",
+			  },
+			  "issues": [
+			    {
+			      "jira": false,
+			      "label": "creacoon/bliep#12",
+			      "url": undefined,
+			    },
+			    {
+			      "jira": false,
+			      "label": "fallback/repo#7",
+			      "url": undefined,
+			    },
+			    {
+			      "jira": true,
+			      "label": "PROJ-123",
+			      "url": "https://acme.atlassian.net/browse/PROJ-123",
+			    },
+			    {
+			      "jira": true,
+			      "label": "PROJ-9",
+			      "url": undefined,
+			    },
+			  ],
+			  "metadata": {
+			    "creaeditor_chat": "chat-1",
+			    "creaeditor_issue": "PROJ-123",
+			    "creaeditor_issue_source": "prompt",
+			    "creaeditor_repo": "creacoon/bliep",
+			    "creaeditor_request": "req-1",
+			  },
 			}
 		`);
 	});

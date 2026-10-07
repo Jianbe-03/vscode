@@ -5,6 +5,7 @@
 
 import * as l10n from '@vscode/l10n';
 import { commands, Uri, ViewColumn, WebviewPanel, window, workspace } from 'vscode';
+import { formatIssue, getIssueUrl } from '../../../platform/endpoint/common/gatewayTracking';
 import { IGatewayCostEntry, IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
 import { Disposable, DisposableStore } from '../../../util/vs/base/common/lifecycle';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
@@ -65,7 +66,9 @@ export class GatewayCostsPanel extends Disposable {
 	}
 
 	private _postEntries(): void {
-		void this._panel?.webview.postMessage({ type: 'entries', entries: this._trackingService.entries });
+		// The issue label (`owner/repo#123`, `#123` or `PROJ-123`) groups the entries; the URL links Jira issues.
+		const entries = this._trackingService.entries.map(entry => ({ ...entry, issueLabel: formatIssue(entry.issue, entry.repo), issueUrl: getIssueUrl(entry.issue) }));
+		void this._panel?.webview.postMessage({ type: 'entries', entries });
 	}
 
 	private async _exportCsv(): Promise<void> {
@@ -140,6 +143,8 @@ export class GatewayCostsPanel extends Disposable {
 	details.issue > summary { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; background: var(--vscode-sideBar-background, transparent); list-style: none; }
 	details.issue > summary::-webkit-details-marker { display: none; }
 	.issue-name { font-weight: 600; flex: 1; }
+	.issue-name a { color: var(--vscode-textLink-foreground); text-decoration: none; }
+	.issue-name a:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
 	.muted { color: var(--vscode-descriptionForeground); }
 	.badge { font-size: 0.8em; padding: 1px 6px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
 	.amount { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 80px; text-align: right; }
@@ -172,7 +177,7 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const money = v => v === undefined ? '–' : '$' + (v < 10 && v > 0 ? v.toFixed(4) : v.toFixed(2));
 const tokens = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : String(v);
-const issueLabel = e => e.issue ? ((e.issue.repo || e.repo) ? (e.issue.repo || e.repo) + '#' + e.issue.number : '#' + e.issue.number) : '';
+const issueLabel = e => e.issueLabel || '';
 function filtered() {
 	const days = Number($('period').value);
 	const since = days ? Date.now() - days * 864e5 : 0;
@@ -204,6 +209,8 @@ function render() {
 		const byChat = new Map();
 		for (const e of items) { if (!byChat.has(e.rootChatId)) byChat.set(e.rootChatId, []); byChat.get(e.rootChatId).push(e); }
 		const sourceOf = items.find(e => e.issueSource)?.issueSource;
+		const url = items.find(e => e.issueUrl)?.issueUrl;
+		const name = issue ? (url ? '<a href="' + esc(url) + '">' + esc(issue) + '</a>' : esc(issue)) : esc(S.noIssue);
 		const via = sourceOf === 'branch' ? S.viaBranch : sourceOf === 'prompt' ? S.viaPrompt : sourceOf === 'agent' ? S.viaAgent : '';
 		const rows = [...byChat.values()].sort((a, b) => sum(b, e => e.cost) - sum(a, e => e.cost)).map(chat => {
 			const models = [...new Set(chat.map(e => e.model))].join(', ');
@@ -216,7 +223,7 @@ function render() {
 				+ '<td>' + esc(last.toLocaleString()) + '</td>'
 				+ '<td class="num"><b>' + money(sum(chat, e => e.cost)) + '</b></td></tr>';
 		}).join('');
-		return '<details class="issue" open><summary><span class="issue-name">' + esc(issue || S.noIssue) + '</span>'
+		return '<details class="issue" open><summary><span class="issue-name">' + name + '</span>'
 			+ (via ? '<span class="badge">' + esc(via) + '</span>' : '')
 			+ '<span class="muted">' + esc((byChat.size === 1 ? S.oneChat : S.manyChats).replace('{0}', byChat.size)) + '</span>'
 			+ '<span class="amount">' + money(sum(items, e => e.cost)) + '</span></summary>'
@@ -249,7 +256,7 @@ export function toCsv(entries: readonly IGatewayCostEntry[]): string {
 	const header = ['time', 'issue', 'issue_source', 'repo', 'branch', 'chat', 'chat_title', 'subchat', 'gateway', 'gateway_host', 'model', 'gateway_request_id', 'prompt_tokens', 'completion_tokens', 'cached_tokens', 'cost_usd', 'cost_source'];
 	const rows = entries.map(entry => [
 		new Date(entry.time).toISOString(),
-		entry.issue ? `${entry.issue.repo ?? entry.repo ?? ''}#${entry.issue.number}` : undefined,
+		formatIssue(entry.issue, entry.repo),
 		entry.issueSource,
 		entry.repo,
 		entry.branch,
