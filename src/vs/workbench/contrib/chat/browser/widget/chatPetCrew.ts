@@ -285,7 +285,8 @@ class ChatPetCrewMember extends Disposable {
 		const frameCount = Math.max(1, sheet.frameDurations.length);
 		const stripWidth = sheet.frameWidth * frameCount * pixel;
 		this.element.dataset.activity = entry.activity;
-		this.element.style.width = `${size}px`;
+		// Wide poses (the typing keyboard) take their full width, so they don't overlap the next pet.
+		this.element.style.width = `${sheet.frameWidth * pixel}px`;
 		this.element.style.height = `${size}px`;
 		this._sprite.style.width = `${sheet.frameWidth * pixel}px`;
 		this._sprite.style.height = `${sheet.frameHeight * pixel}px`;

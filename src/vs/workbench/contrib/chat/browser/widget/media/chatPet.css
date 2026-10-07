@@ -625,18 +625,17 @@
 .chat-pet-crew-sprite {
 	position: absolute;
 	bottom: 0;
-	left: 50%;
+	left: 0;
 	/* CreaEditor: each subagent's pet has its own tint (see CHAT_PET_CREW_HUES). */
 	filter: hue-rotate(var(--chat-pet-crew-hue, 0deg));
 	background-position: 0 0;
 	background-repeat: no-repeat;
 	image-rendering: pixelated;
-	transform: translateX(-50%);
 	pointer-events: none;
 }
 
 .chat-pet-crew[data-side='right'] .chat-pet-crew-sprite {
-	transform: translateX(-50%) scaleX(-1);
+	transform: scaleX(-1);
 }
 
 .chat-pet-crew-sprite.animated {
