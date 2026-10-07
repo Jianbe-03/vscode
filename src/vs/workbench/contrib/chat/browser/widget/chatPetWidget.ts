@@ -82,7 +82,7 @@ const TRANSIENT_STATE_DURATION = 2_000;
 const COMPLETE_STATE_DURATION = 960;
 const BUTTON_PRESS_STATE_DURATION = 2_850;
 const SPLAT_STATE_DURATION = 520;
-const LOVE_STATE_DURATION = 3_560;
+const LOVE_STATE_DURATION = 3_450;
 const COOL_STATE_DURATION = 3_000;
 const SING_STATE_DURATION = 2_880;
 const SPEECHLESS_STATE_DURATION = 2_720;
@@ -156,8 +156,9 @@ const SPEECH_FRAME_DURATIONS = [220, 220, 220, 100, 160, 180];
 const CLAPPING_FRAME_DURATIONS = [80, 40, 40, 40, 80, 40, 40, 40, 40, 80, 40, 40, 80];
 // CreaEditor: the mark folds into two antennae step by step (five frames), they curl into the
 // heart as in the original art (six frames), and unfold back into the mark (five frames).
-// The frames add up to LOVE_STATE_DURATION.
-const LOVE_FRAME_DURATIONS = [110, 110, 110, 110, 110, 200, 200, 380, 100, 80, 1_500, 110, 110, 110, 110, 110];
+// Every frame takes the same short step except the filled heart, which is held. The frames
+// add up to LOVE_STATE_DURATION.
+const LOVE_FRAME_DURATIONS = [110, 110, 110, 110, 110, 110, 110, 110, 110, 110, 1_800, 110, 110, 110, 110, 110];
 const COOL_FRAME_DURATIONS = [600, 120, 120, 120, 160, 80, 80, 80, 1_640];
 const SING_FRAME_DURATIONS = [180, 180, 180, 180];
 const SPEECHLESS_FRAME_DURATIONS = [400, 120, 1_000, 120, 1_080];
