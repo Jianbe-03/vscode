@@ -33,7 +33,7 @@ import { IChatModel } from '../../common/model/chatModel.js';
 import { CHAT_PET_OPEN_ACHIEVEMENTS_COMMAND_ID, ChatPetAccessoryId, getChatPetAccessory, getChatPetAchievement } from '../chatPetAchievements.js';
 import { CHAT_PET_DEFAULT_SCALE, ChatPetVariant, IChatPetService } from '../chatPetService.js';
 import { drawChatPetComposite, drawChatPetEyeAccessory, getChatPetAccessoryImageSource, hasChatPetAccessoryImageDimensions, hasChatPetBodyImageDimensions, IChatPetAccessoryImageSource, IChatPetFixedOrientationDecoration } from './chatPetAccessoryRenderer.js';
-import { getChatPetAccessoryRigFrame, getChatPetReducedMotionRigFrame } from './chatPetAccessoryRig.js';
+import { CHAT_PET_HEADROOM, getChatPetAccessoryRigFrame, getChatPetReducedMotionRigFrame } from './chatPetAccessoryRig.js';
 import { ChatPetAgentActivityTracker, ChatPetCrew, ChatPetCrewPose, getChatPetActivityIcon, getChatPetAgentHover, IChatPetSpriteSheet } from './chatPetCrew.js';
 
 export type ChatPetState = 'idle' | 'sleep' | 'waking' | 'typing' | 'rendering' | 'achievementUnlocked' | 'buttonPress' | 'complete' | 'love' | 'clapping' | 'jump' | 'cool' | 'yapping' | 'yappingMouthOpen' | 'sing' | 'speechless' | 'worry' | 'dizzy' | 'falling' | 'wallImpact' | 'splat' | 'onTheRun' | 'searching' | 'searchingDown';
@@ -383,10 +383,12 @@ function createSpriteSources(name: string, state: ChatPetState, tracksCursor = t
 		: state === 'buttonPress'
 			? CHAT_PET_BUTTON_PRESS_SOURCE_WIDTH
 			: CHAT_PET_SOURCE_SIZE);
+	// CreaEditor: body frames carry headroom on top for the Creacoon mark antenna.
+	const frameHeight = sourceHeight + CHAT_PET_HEADROOM;
 	const staticSource = {
 		url: FileAccess.asBrowserUri(`${root}/${name}${suffix}.png`).toString(true),
 		frameWidth,
-		frameHeight: sourceHeight,
+		frameHeight,
 		fixedOrientationDecorations,
 		frameDurations: [],
 		iterations: 1,
@@ -396,7 +398,7 @@ function createSpriteSources(name: string, state: ChatPetState, tracksCursor = t
 		animated: frameDurations.length === 0 ? staticSource : {
 			url: FileAccess.asBrowserUri(`${root}/${name}${suffix}.spritesheet.png`).toString(true),
 			frameWidth,
-			frameHeight: sourceHeight,
+			frameHeight,
 			fixedOrientationDecorations,
 			frameDurations,
 			iterations: state === 'waking' || state === 'buttonPress' || state === 'cool' || state === 'splat' || state === 'jump' ? 1 : Infinity,

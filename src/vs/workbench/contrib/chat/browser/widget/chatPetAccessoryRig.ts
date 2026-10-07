@@ -40,6 +40,12 @@ interface IChatPetAccessoryTrackSpan {
 const defaultHeadAnchor: IChatPetAccessoryAnchor = { x: 48, y: 32 };
 const defaultRightEyeAnchor: IChatPetAccessoryAnchor = { x: 56, y: 56 };
 export const CHAT_PET_HEAD_WEAR_OFFSET = 8;
+/**
+ * CreaEditor: transparent source pixels on top of every pet body frame, which make room for the
+ * Creacoon mark antenna. Rig anchors below are measured from the top of the original art, so
+ * they are moved down by this much.
+ */
+export const CHAT_PET_HEADROOM = 48;
 
 const trackSpans: Partial<Record<ChatPetAccessoryTrack, readonly IChatPetAccessoryTrackSpan[]>> = {
 	idle: [
@@ -156,6 +162,10 @@ export function getChatPetAccessoryRigPose(state: ChatPetState, frameIndex = 0):
 	return span?.pose ?? getDefaultChatPetAccessoryRigPose(state);
 }
 
+function withHeadroom(anchor: IChatPetAccessoryAnchor): IChatPetAccessoryAnchor {
+	return { x: anchor.x, y: anchor.y + CHAT_PET_HEADROOM };
+}
+
 export function getChatPetAccessoryRigFrame(state: ChatPetState, frameIndex: number): IChatPetAccessoryRigFrame {
 	const spans = trackSpans[getChatPetAccessoryTrack(state)];
 	const span = spans?.find(candidate => frameIndex >= candidate.firstFrame && frameIndex <= candidate.lastFrame);
@@ -165,9 +175,9 @@ export function getChatPetAccessoryRigFrame(state: ChatPetState, frameIndex: num
 		pose: span?.pose ?? getDefaultChatPetAccessoryRigPose(state),
 		head: state === 'love' || state === 'complete' || state === 'dizzy' ? undefined : {
 			x: trackedHead.x,
-			y: trackedHead.y + CHAT_PET_HEAD_WEAR_OFFSET,
+			y: trackedHead.y + CHAT_PET_HEAD_WEAR_OFFSET + CHAT_PET_HEADROOM,
 		},
-		rightEye: hideEyeAccessory ? undefined : span?.rightEye ?? defaultRightEyeAnchor,
+		rightEye: hideEyeAccessory ? undefined : withHeadroom(span?.rightEye ?? defaultRightEyeAnchor),
 		...(span?.mirrorsHeadAccessory ? { mirrorsHeadAccessory: true } : {}),
 	};
 }
@@ -180,16 +190,17 @@ export function getChatPetAntennaeOcclusionBounds(state: ChatPetState, frameInde
 	if (rigFrame.pose === 'impact') {
 		return {
 			x: 16,
-			y: 24,
+			y: 24 + CHAT_PET_HEADROOM,
 			width: 64,
 			height: 8,
 		};
 	}
+	// CreaEditor: the mark antenna reaches into the headroom and sways sideways.
 	return {
-		x: rigFrame.head.x - 32,
-		y: rigFrame.head.y - 48,
-		width: 64,
-		height: 40,
+		x: rigFrame.head.x - 40,
+		y: Math.max(0, rigFrame.head.y - 48 - CHAT_PET_HEADROOM),
+		width: 80,
+		height: 40 + CHAT_PET_HEADROOM,
 	};
 }
 

@@ -64,12 +64,12 @@ suite('ChatPetCrew', () => {
 			baseWhileWorking: 'searching',
 			baseWhileIdle: 'typing',
 			sheets: [
-				'buddy-idle-stable-96.spritesheet.png 96x96 x50',
-				'buddy-typing-stable-96.spritesheet.png 168x96 x2',
-				'buddy-search-stable-96.spritesheet.png 96x96 x4',
-				'buddy-worry-stable-96.spritesheet.png 96x96 x2',
-				'buddy-love-stable-96.spritesheet.png 96x96 x6',
-				'buddy-dizzy-stable-128.spritesheet.png 96x128 x8',
+				'buddy-idle-stable-96.spritesheet.png 96x144 x50',
+				'buddy-typing-stable-96.spritesheet.png 168x144 x2',
+				'buddy-search-stable-96.spritesheet.png 96x144 x4',
+				'buddy-worry-stable-96.spritesheet.png 96x144 x2',
+				'buddy-love-stable-96.spritesheet.png 96x144 x6',
+				'buddy-dizzy-stable-128.spritesheet.png 96x176 x8',
 			],
 		});
 	});
