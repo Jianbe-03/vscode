@@ -349,23 +349,73 @@ def planning_frames(variant):
 	return frames
 
 
+ADDED = (0x00, 0xbd, 0x8b)
+REMOVED = (0xff, 0x5c, 0x8a)
+
+
 def reviewing_frames(variant):
-	"""Reading glasses and a page, eyes scanning the lines from left to right."""
+	"""Reading glasses and a code diff page beside the head (green added and pink removed lines),
+	the eyes moving over it."""
 	frames = []
-	for step, dx in enumerate((-4, 0, 4, 4, 0, -4)):
-		frame = activity_body(variant, bob=0, eyes_dx=dx, lean=dx // 2)
+	for step, dx in enumerate((0, 4, 4, 0, 4, 4)):
+		frame = activity_body(variant, bob=0, eyes_dx=dx, lean=-4 if step % 3 == 0 else 0)
 		px = frame.load()
 		w, h = frame.size
-		# Glasses: navy frames around both eyes and a bridge.
+		# Glasses: navy rims around both eyes and a bridge.
 		for ex, ey in EYES:
 			for (x, y, width, height) in ((ex - 4, ey - 4, 16, 4), (ex - 4, ey + 16, 16, 4), (ex - 4, ey - 4, 4, 24), (ex + 8, ey - 4, 4, 24)):
 				rect(px, w, h, x, y, width, height, INK)
 		rect(px, w, h, EYES[0][0] + 12, EYES[0][1] + 4, 12, 4, INK)
-		# A page held in front, with lines of text.
-		x0, y0 = 20, 76 + HEADROOM
-		rect(px, w, h, x0, y0, 56, 20, PAPER)
-		for row in range(3):
-			rect(px, w, h, x0 + 6, y0 + 4 + row * 5, 44 - (row % 2) * 14, 2, INK)
+		# Lenses with a small pupil reading from left to right.
+		for ex, ey in EYES:
+			rect(px, w, h, ex, ey, 8, 16, PALETTES[variant]['highlight'])
+			rect(px, w, h, ex + (4 if dx else 0), ey + 4, 4, 8, INK)
+		# The diff page beside the head; the line being read is marked.
+		x0, y0 = 70, 22 + HEADROOM
+		rect(px, w, h, x0, y0, 24, 34, PAPER)
+		lines = [(ADDED, 16), (INK, 12), (REMOVED, 14), (ADDED, 10), (INK, 16)]
+		for row, (color, length) in enumerate(lines):
+			rect(px, w, h, x0 + 4, y0 + 4 + row * 6, length, 3, color)
+		rect(px, w, h, x0 - 4, y0 + 4 + (step % 5) * 6, 4, 3, INK)   # reading marker
+		frames.append(frame)
+	return frames
+
+
+def done_frames(variant):
+	"""A happy bounce with closed, smiling eyes and sparkles: the subagent is done."""
+	frames = []
+	for step, bob in enumerate((0, -8, -4, 0, 0, 0)):
+		frame = activity_body(variant, bob=max(0, bob), spread=1.0)
+		if bob < 0:
+			lifted = Image.new('RGBA', frame.size)
+			lifted.paste(frame.crop((0, -bob, frame.width, frame.height)), (0, 0))
+			frame = lifted
+		px = frame.load()
+		w, h = frame.size
+		pal = PALETTES[variant]
+		for ex, ey in EYES:
+			ey += bob
+			rect(px, w, h, ex - 4, ey, 16, 16, pal['light'])
+			# A smiling, closed eye: an upside-down V.
+			for (x, y) in ((ex - 4, ey + 8), (ex, ey + 4), (ex + 4, ey + 4), (ex + 8, ey + 8)):
+				rect(px, w, h, x, y, 4, 4, pal['eye'])
+		if step in (1, 2, 3):
+			for (x, y) in ((8, 40), (84, 52), (16, 72)):
+				rect(px, w, h, x + (step - 2) * 4, y, 4, 4, pal['highlight'])
+		frames.append(frame)
+	return frames
+
+
+def crew_typing_frames(variant):
+	"""The typing sheet with eyes looking at the keyboard drawn in. The main pet draws its
+	typing eyes as separate elements so they can blink; the smaller crew pets have none."""
+	sheet = Image.open(f'{SPRITE_DIR}/buddy-typing-{variant}-96.spritesheet.png').convert('RGBA')
+	frames = []
+	for x in range(0, sheet.width, 168):
+		frame = sheet.crop((x, 0, x + 168, sheet.height))
+		px = frame.load()
+		for ex, ey in EYES:
+			rect(px, 168, frame.height, ex + 4, ey + 4, 8, 12, PALETTES[variant]['eye'])
 		frames.append(frame)
 	return frames
 
@@ -393,20 +443,28 @@ def testing_frames(variant):
 ACTIVITY_SHEETS = {
 	'planning': planning_frames,
 	'reviewing': reviewing_frames,
+	'done': done_frames,
 	'testing': testing_frames,
 }
 
 
+def write_sheet(name, frames):
+	"""Writes a sprite sheet and its static first frame."""
+	width = frames[0].width
+	sheet = Image.new('RGBA', (width * len(frames), frames[0].height))
+	for i, frame in enumerate(frames):
+		sheet.paste(frame, (i * width, 0))
+	sheet.save(f'{SPRITE_DIR}/{name}.spritesheet.png', optimize=True)
+	frames[0].save(f'{SPRITE_DIR}/{name}.png', optimize=True)
+
+
 def write_activity_sheets():
-	"""Writes buddy-<activity>-<variant>-96.spritesheet.png and its static first frame."""
+	"""Writes buddy-<activity>-<variant>-96 sheets, and the crew's typing sheet with eyes."""
 	for name, make_frames in ACTIVITY_SHEETS.items():
 		for variant in PALETTES:
-			frames = make_frames(variant)
-			sheet = Image.new('RGBA', (96 * len(frames), frames[0].height))
-			for i, frame in enumerate(frames):
-				sheet.paste(frame, (i * 96, 0))
-			sheet.save(f'{SPRITE_DIR}/buddy-{name}-{variant}-96.spritesheet.png', optimize=True)
-			frames[0].save(f'{SPRITE_DIR}/buddy-{name}-{variant}-96.png', optimize=True)
+			write_sheet(f'buddy-{name}-{variant}-96', make_frames(variant))
+	for variant in PALETTES:
+		write_sheet(f'buddy-typing-crew-{variant}-96', crew_typing_frames(variant))
 
 
 def main():

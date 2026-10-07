@@ -40,7 +40,7 @@ export const CHAT_PET_CREW_HUES = [35, -35, 70, -70, 105, 150];
 const ACTIVITY_POLL_INTERVAL = 750;
 
 /** A body pose a crew pet can take. */
-export type ChatPetCrewPose = 'idle' | 'typing' | 'search' | 'worry' | 'love' | 'dizzy' | 'planning' | 'reviewing' | 'thinking' | 'testing';
+export type ChatPetCrewPose = 'idle' | 'typing' | 'search' | 'worry' | 'done' | 'dizzy' | 'planning' | 'reviewing' | 'thinking' | 'testing';
 
 /**
  * A horizontal sprite strip: `frameDurations.length` frames of `frameWidth` by `frameHeight`
@@ -105,7 +105,7 @@ export function getChatPetCrewPose(activity: ChatAgentActivity): ChatPetCrewPose
 		case ChatAgentActivity.WaitingForInput:
 			return 'worry';
 		case ChatAgentActivity.Done:
-			return 'love';
+			return 'done';
 		case ChatAgentActivity.Failed:
 			return 'dizzy';
 		default:

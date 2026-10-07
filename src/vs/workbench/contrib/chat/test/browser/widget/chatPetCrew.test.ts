@@ -55,7 +55,7 @@ suite('ChatPetCrew', () => {
 			})].map(activity => getChatPetActivityState(activity)),
 			baseWhileWorking: getChatPetBaseState(true, false, false, true, false, ChatAgentActivity.Researching),
 			baseWhileIdle: getChatPetBaseState(false, false, false, true, false, ChatAgentActivity.Researching),
-			sheets: (['idle', 'typing', 'search', 'worry', 'love', 'dizzy', 'planning', 'reviewing', 'thinking', 'testing'] as const).map(pose => {
+			sheets: (['idle', 'typing', 'search', 'worry', 'done', 'dizzy', 'planning', 'reviewing', 'thinking', 'testing'] as const).map(pose => {
 				const sheet = getChatPetCrewSpriteSheet(pose, 'stable', false);
 				return `${sheet.url.slice(sheet.url.lastIndexOf('/') + 1)} ${sheet.frameWidth}x${sheet.frameHeight} x${sheet.frameDurations.length}`;
 			}),
@@ -65,10 +65,10 @@ suite('ChatPetCrew', () => {
 			baseWhileIdle: 'typing',
 			sheets: [
 				'buddy-idle-stable-96.spritesheet.png 96x144 x50',
-				'buddy-typing-stable-96.spritesheet.png 168x144 x2',
+				'buddy-typing-crew-stable-96.spritesheet.png 168x144 x2',
 				'buddy-search-stable-96.spritesheet.png 96x144 x4',
 				'buddy-worry-stable-96.spritesheet.png 96x144 x2',
-				'buddy-love-stable-96.spritesheet.png 96x144 x6',
+				'buddy-done-stable-96.spritesheet.png 96x144 x6',
 				'buddy-dizzy-stable-128.spritesheet.png 96x176 x8',
 				'buddy-planning-stable-96.spritesheet.png 96x144 x4',
 				'buddy-reviewing-stable-96.spritesheet.png 96x144 x6',

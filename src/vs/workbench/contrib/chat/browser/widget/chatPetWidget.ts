@@ -165,6 +165,7 @@ const SEARCH_FRAME_DURATIONS = [500, 500, 500, 500];
 const PLANNING_FRAME_DURATIONS = [700, 700, 700, 1_200];
 const REVIEWING_FRAME_DURATIONS = [400, 300, 600, 300, 400, 600];
 const TESTING_FRAME_DURATIONS = [300, 300, 300, 300];
+const CREW_DONE_FRAME_DURATIONS = [200, 160, 160, 200, 400, 600];
 
 interface ChatPetSpriteSource {
 	readonly url: string;
@@ -569,6 +570,19 @@ export function getChatPetActivityState(activity: ChatAgentActivity | undefined)
  * CreaEditor: returns the sprite sheet for a crew pet pose, reusing the main pet's sheets.
  */
 export function getChatPetCrewSpriteSheet(pose: ChatPetCrewPose, variant: ChatPetVariant, motionReduced: boolean): IChatPetSpriteSheet {
+	// Crew-only sheets: crew pets have no separate eye elements, so their typing sheet has the
+	// eyes drawn in, and they celebrate with a happy bounce instead of the main pet's poses.
+	if (pose === 'typing' || pose === 'done') {
+		const name = pose === 'typing' ? `buddy-typing-crew-${variant}-96` : `buddy-done-${variant}-96`;
+		const durations = pose === 'typing' ? TYPING_FRAME_DURATIONS : CREW_DONE_FRAME_DURATIONS;
+		const root = 'vs/workbench/contrib/chat/browser/widget/media/chatPet';
+		return {
+			url: FileAccess.asBrowserUri(`${root}/${name}${motionReduced ? '' : '.spritesheet'}.png`).toString(true),
+			frameWidth: pose === 'typing' ? CHAT_PET_TYPING_SOURCE_WIDTH : CHAT_PET_SOURCE_SIZE,
+			frameHeight: CHAT_PET_SOURCE_SIZE + CHAT_PET_HEADROOM,
+			frameDurations: motionReduced ? [] : durations,
+		};
+	}
 	// A thinking crew pet stands idle under its speech bubble (see getChatPetCrewSpeechSheet).
 	const state: ChatPetState = pose === 'idle' || pose === 'thinking' ? 'complete' : pose === 'search' ? 'searching' : pose;
 	const sources = getSpriteSources(variant)[state];
