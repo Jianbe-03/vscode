@@ -621,7 +621,7 @@ suite('ChatPetWidget', () => {
 		const duringFall = button.getBoundingClientRect().top;
 		button.dispatchEvent(new mainWindow.MouseEvent('click', { bubbles: true }));
 		await waitForPetAnimation(() => !overlay.classList.contains('relocating'), 'the fall must finish at the new host');
-		await waitForPetAnimation(() => button.dataset.state === 'rendering', 'the pet must resume the active request after landing');
+		await waitForPetAnimation(() => button.dataset.state === 'thinking', 'the pet must resume the active request after landing');
 		const target = secondParent.getBoundingClientRect();
 
 		assert.deepStrictEqual({

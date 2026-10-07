@@ -6,7 +6,7 @@
 import type { ChatPetState } from './chatPetWidget.js';
 
 export type ChatPetAccessoryRigPose = 'upright' | 'sleeping' | 'airborne' | 'impact' | 'splat';
-export type ChatPetAccessoryTrack = 'idle' | 'sleep' | 'waking' | 'typing' | 'rendering' | 'buttonPress' | 'love' | 'clapping' | 'jump' | 'cool' | 'yapping' | 'sing' | 'speechless' | 'worry' | 'dizzy' | 'falling' | 'wallImpact' | 'splat' | 'search';
+export type ChatPetAccessoryTrack = 'idle' | 'sleep' | 'waking' | 'typing' | 'rendering' | 'buttonPress' | 'love' | 'clapping' | 'jump' | 'cool' | 'yapping' | 'sing' | 'speechless' | 'worry' | 'dizzy' | 'falling' | 'wallImpact' | 'splat' | 'search' | 'activity';
 
 export interface IChatPetAccessoryAnchor {
 	readonly x: number;
@@ -135,6 +135,11 @@ export function getChatPetAccessoryTrack(state: ChatPetState): ChatPetAccessoryT
 		case 'yapping':
 		case 'idle':
 			return 'idle';
+		case 'planning':
+		case 'reviewing':
+		case 'thinking':
+		case 'testing':
+			return 'activity';
 	}
 }
 
@@ -233,7 +238,9 @@ export function getChatPetReducedMotionRigFrame(state: ChatPetState): number {
 }
 
 function doesChatPetStateHideEyeAccessory(state: ChatPetState): boolean {
-	return state === 'love'
+	// CreaEditor: the reviewing pose wears its own reading glasses.
+	return state === 'reviewing'
+		|| state === 'love'
 		|| state === 'complete'
 		|| state === 'cool'
 		|| state === 'speechless'

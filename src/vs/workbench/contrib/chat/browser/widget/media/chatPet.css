@@ -669,6 +669,8 @@
 	position: absolute;
 	bottom: 0;
 	left: 50%;
+	/* CreaEditor: each subagent's pet has its own tint (see CHAT_PET_CREW_HUES). */
+	filter: hue-rotate(var(--chat-pet-crew-hue, 0deg));
 	background-position: 0 0;
 	background-repeat: no-repeat;
 	image-rendering: pixelated;

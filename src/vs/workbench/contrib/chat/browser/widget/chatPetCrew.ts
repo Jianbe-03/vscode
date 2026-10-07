@@ -34,10 +34,15 @@ const CHAT_PET_CREW_NESTED_SIZE = 26;
 const CHAT_PET_CREW_SOURCE_SIZE = 96;
 const CHAT_PET_CREW_GAP = 4;
 const ACTIVITY_REFRESH_DELAY = 100;
+/**
+ * Hue rotations that give each crew pet its own tint around the brand green (teal, lime,
+ * cyan, yellow-green, ...), so subagents working at the same time are easy to tell apart.
+ */
+export const CHAT_PET_CREW_HUES = [35, -35, 70, -70, 105, 150];
 const ACTIVITY_POLL_INTERVAL = 750;
 
 /** A body pose a crew pet can take. */
-export type ChatPetCrewPose = 'idle' | 'typing' | 'search' | 'worry' | 'love' | 'dizzy';
+export type ChatPetCrewPose = 'idle' | 'typing' | 'search' | 'worry' | 'love' | 'dizzy' | 'planning' | 'reviewing' | 'thinking' | 'testing';
 
 /**
  * A horizontal sprite strip: `frameDurations.length` frames of `frameWidth` by `frameHeight`
@@ -83,10 +88,17 @@ export interface IChatPetCrewLayout {
 export function getChatPetCrewPose(activity: ChatAgentActivity): ChatPetCrewPose {
 	switch (activity) {
 		case ChatAgentActivity.Programming:
-		case ChatAgentActivity.Testing:
 			return 'typing';
+		case ChatAgentActivity.Testing:
+			return 'testing';
 		case ChatAgentActivity.Researching:
 			return 'search';
+		case ChatAgentActivity.Planning:
+			return 'planning';
+		case ChatAgentActivity.Reviewing:
+			return 'reviewing';
+		case ChatAgentActivity.Thinking:
+			return 'thinking';
 		case ChatAgentActivity.WaitingForInput:
 			return 'worry';
 		case ChatAgentActivity.Done:
@@ -240,10 +252,12 @@ class ChatPetCrewMember extends Disposable {
 		private readonly _getSpriteSheet: ChatPetCrewSpriteSheetProvider,
 		onDidLeave: () => void,
 		hoverService: IHoverService,
+		readonly hue: number,
 	) {
 		super();
 		this._entry = entry;
 		this.element = dom.$('.chat-pet-crew-member', { 'aria-hidden': 'true' });
+		this.element.style.setProperty('--chat-pet-crew-hue', `${hue}deg`);
 		this._sprite = dom.append(this.element, dom.$('.chat-pet-crew-sprite'));
 		this._badge = dom.append(this.element, dom.$('span.chat-pet-crew-badge'));
 		this._register(toDisposable(() => this.element.remove()));
@@ -357,7 +371,7 @@ export class ChatPetCrew extends Disposable {
 			if (member) {
 				member.update(entry, options);
 			} else if (!isFinished(entry.status)) {
-				const created = new ChatPetCrewMember(entry, options, this._getSpriteSheet, () => this._removeMember(entry.id), this._hoverService);
+				const created = new ChatPetCrewMember(entry, options, this._getSpriteSheet, () => this._removeMember(entry.id), this._hoverService, this._pickHue());
 				this._members.set(entry.id, created);
 			}
 		}
@@ -377,6 +391,12 @@ export class ChatPetCrew extends Disposable {
 		this.element.dataset.side = leftSide ? 'left' : 'right';
 		this.element.style.left = `${leftSide ? layout.petLeft - CHAT_PET_CREW_GAP - width : layout.petRight + CHAT_PET_CREW_GAP}px`;
 		this.element.style.top = `${layout.platformTop - this.element.offsetHeight}px`;
+	}
+
+	/** The first tint no current crew pet has, cycling once all are in use. */
+	private _pickHue(): number {
+		const used = new Set([...this._members].map(([, member]) => member.hue));
+		return CHAT_PET_CREW_HUES.find(hue => !used.has(hue)) ?? CHAT_PET_CREW_HUES[this._members.size % CHAT_PET_CREW_HUES.length];
 	}
 
 	private _removeMember(id: string): void {

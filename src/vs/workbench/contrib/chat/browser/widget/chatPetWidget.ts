@@ -36,7 +36,9 @@ import { drawChatPetComposite, drawChatPetEyeAccessory, getChatPetAccessoryImage
 import { CHAT_PET_HEADROOM, getChatPetAccessoryRigFrame, getChatPetReducedMotionRigFrame } from './chatPetAccessoryRig.js';
 import { ChatPetAgentActivityTracker, ChatPetCrew, ChatPetCrewPose, getChatPetActivityIcon, getChatPetAgentHover, IChatPetSpriteSheet } from './chatPetCrew.js';
 
-export type ChatPetState = 'idle' | 'sleep' | 'waking' | 'typing' | 'rendering' | 'achievementUnlocked' | 'buttonPress' | 'complete' | 'love' | 'clapping' | 'jump' | 'cool' | 'yapping' | 'yappingMouthOpen' | 'sing' | 'speechless' | 'worry' | 'dizzy' | 'falling' | 'wallImpact' | 'splat' | 'onTheRun' | 'searching' | 'searchingDown';
+export type ChatPetState = 'idle' | 'sleep' | 'waking' | 'typing' | 'rendering' | 'achievementUnlocked' | 'buttonPress' | 'complete' | 'love' | 'clapping' | 'jump' | 'cool' | 'yapping' | 'yappingMouthOpen' | 'sing' | 'speechless' | 'worry' | 'dizzy' | 'falling' | 'wallImpact' | 'splat' | 'onTheRun' | 'searching' | 'searchingDown' | ChatPetActivityPose;
+/** CreaEditor: poses for agent activities that have their own animation. */
+export type ChatPetActivityPose = 'planning' | 'reviewing' | 'thinking' | 'testing';
 export type ChatPetClickInteraction = Extract<ChatPetState, 'buttonPress' | 'complete' | 'love' | 'cool' | 'yapping' | 'sing' | 'speechless' | 'worry'>;
 
 export interface IChatPetWidgetHost {
@@ -160,6 +162,11 @@ const SPEECHLESS_FRAME_DURATIONS = [400, 120, 1_000, 120, 1_080];
 const WORRY_FRAME_DURATIONS = [600, 600];
 const DIZZY_FRAME_DURATIONS = Array.from({ length: 8 }, () => 120);
 const SEARCH_FRAME_DURATIONS = [500, 500, 500, 500];
+// CreaEditor: agent activity animations (see scripts/creaeditor/chat-pet-sprites.py).
+const PLANNING_FRAME_DURATIONS = [700, 700, 700, 1_200];
+const REVIEWING_FRAME_DURATIONS = [400, 300, 600, 300, 400, 600];
+const THINKING_FRAME_DURATIONS = [350, 350, 350, 350, 350, 350];
+const TESTING_FRAME_DURATIONS = [300, 300, 300, 300];
 
 interface ChatPetSpriteSource {
 	readonly url: string;
@@ -273,8 +280,13 @@ const spriteSources = new Map<ChatPetVariant, Record<ChatPetState, ChatPetSprite
 const speechSpriteSources = new Map<ChatPetVariant, ChatPetSpriteSources>();
 const respawnSpriteSources = new Map<ChatPetVariant, ChatPetSpriteSources>();
 
+/** CreaEditor: whether a state is one of the agent activity poses. */
+export function isChatPetActivityPose(state: ChatPetState | undefined): state is ChatPetActivityPose {
+	return state === 'planning' || state === 'reviewing' || state === 'thinking' || state === 'testing';
+}
+
 export function doesChatPetStateTrackCursor(state: ChatPetState | undefined): boolean {
-	return state !== undefined && state !== 'sleep' && state !== 'waking' && state !== 'typing' && state !== 'buttonPress' && state !== 'complete' && state !== 'jump' && state !== 'love' && state !== 'cool' && state !== 'yappingMouthOpen' && state !== 'sing' && state !== 'speechless' && state !== 'worry' && state !== 'dizzy' && state !== 'falling' && state !== 'wallImpact' && state !== 'splat' && state !== 'onTheRun' && state !== 'searching' && state !== 'searchingDown';
+	return state !== undefined && state !== 'sleep' && state !== 'waking' && state !== 'typing' && state !== 'buttonPress' && state !== 'complete' && state !== 'jump' && state !== 'love' && state !== 'cool' && state !== 'yappingMouthOpen' && state !== 'sing' && state !== 'speechless' && state !== 'worry' && state !== 'dizzy' && state !== 'falling' && state !== 'wallImpact' && state !== 'splat' && state !== 'onTheRun' && state !== 'searching' && state !== 'searchingDown' && !isChatPetActivityPose(state);
 }
 
 export function doesChatPetStateBlink(state: ChatPetState | undefined, frameIndex?: number): boolean {
@@ -321,6 +333,10 @@ export function getChatPetSpriteName(state: ChatPetState, quality: string | unde
 		case 'sing':
 		case 'speechless':
 		case 'worry':
+		case 'planning':
+		case 'reviewing':
+		case 'thinking':
+		case 'testing':
 			return `buddy-${state}-${variant}`;
 		default:
 			return getChatPetBuddyName(quality);
@@ -362,6 +378,14 @@ export function getChatPetFrameDurations(state: ChatPetState): readonly number[]
 			return DIZZY_FRAME_DURATIONS;
 		case 'searching':
 			return SEARCH_FRAME_DURATIONS;
+		case 'planning':
+			return PLANNING_FRAME_DURATIONS;
+		case 'reviewing':
+			return REVIEWING_FRAME_DURATIONS;
+		case 'thinking':
+			return THINKING_FRAME_DURATIONS;
+		case 'testing':
+			return TESTING_FRAME_DURATIONS;
 		case 'onTheRun':
 		case 'wallImpact':
 		case 'searchingDown':
@@ -444,6 +468,10 @@ function getSpriteSources(variant: ChatPetVariant): Record<ChatPetState, ChatPet
 			onTheRun: createStateSpriteSources('onTheRun'),
 			searching: createStateSpriteSources('searching'),
 			searchingDown: createStateSpriteSources('searchingDown'),
+			planning: createStateSpriteSources('planning'),
+			reviewing: createStateSpriteSources('reviewing'),
+			thinking: createStateSpriteSources('thinking'),
+			testing: createStateSpriteSources('testing'),
 		};
 		spriteSources.set(variant, sources);
 	}
@@ -527,13 +555,17 @@ export function isChatPetImageSource(image: Pick<HTMLImageElement, 'getAttribute
 export function getChatPetActivityState(activity: ChatAgentActivity | undefined): ChatPetState {
 	switch (activity) {
 		case ChatAgentActivity.Programming:
-		case ChatAgentActivity.Testing:
 			return 'typing';
+		case ChatAgentActivity.Testing:
+			return 'testing';
 		case ChatAgentActivity.Researching:
 			return 'searching';
+		case ChatAgentActivity.Planning:
+			return 'planning';
 		case ChatAgentActivity.Reviewing:
-			// Idle with tracking eyes: the pet looks over the code.
-			return 'idle';
+			return 'reviewing';
+		case ChatAgentActivity.Thinking:
+			return 'thinking';
 		case ChatAgentActivity.WaitingForInput:
 			return 'clapping';
 		default:

@@ -282,6 +282,153 @@ def write_creacoon_look():
 				creacoon_sheet(source, frame_width, variant).save(f'{SPRITE_DIR}/{name}{suffix}', optimize=True)
 
 
+# --- Agent activity sheets ---------------------------------------------------------------
+
+PAPER = (0xf8, 0xf7, 0xfa)
+INK = (0x1b, 0x1a, 0x36)
+# Eye blocks of the idle body (frame 0), in padded source coordinates.
+EYES = [(40, 64 + HEADROOM), (64, 64 + HEADROOM)]
+EYE_SIZE = (8, 16)
+
+
+def rect(px, w, h, x, y, width, height, color):
+	for yy in range(y, y + height):
+		for xx in range(x, x + width):
+			if 0 <= xx < w and 0 <= yy < h:
+				px[xx, yy] = color + (255,)
+
+
+def activity_body(variant, bob, lean=0, spread=1.0, eyes_dx=0, eyes_closed=False):
+	"""The idle body with the Creacoon mark antenna, optionally bobbing, swaying and with its
+	eyes moved (looking sideways) or closed."""
+	sheet = read_source(f'buddy-idle-{variant}-96.spritesheet.png')
+	frame = pad(sheet.crop((0, 0, 96, 96)))
+	body = source_body_colors(variant)
+	y0, cx, mask = find_apex(frame, body)
+	px = frame.load()
+	w, h = frame.size
+	pal = PALETTES[variant]
+	for y in range(0, y0):
+		for x in range(w):
+			if mask[y][x]:
+				px[x, y] = (0, 0, 0, 0)
+	# Eyes: repaint them where the agent looks.
+	for ex, ey in EYES:
+		rect(px, w, h, ex, ey, *EYE_SIZE, pal['light'])
+	for ex, ey in EYES:
+		if eyes_closed:
+			rect(px, w, h, ex + eyes_dx, ey + 8, EYE_SIZE[0], 4, pal['eye'])
+		else:
+			rect(px, w, h, ex + eyes_dx, ey, *EYE_SIZE, pal['eye'])
+	draw_asterisk_antenna(frame, cx - PIXEL // 2, y0, 1, lean, spread, pal)
+	if bob:
+		moved = Image.new('RGBA', frame.size)
+		moved.paste(frame.crop((0, 0, w, h - bob)), (0, bob))
+		frame = moved
+	return frame
+
+
+def planning_frames(variant):
+	"""Holding a clipboard and ticking its boxes one by one."""
+	frames = []
+	for step in range(4):
+		frame = activity_body(variant, bob=4 if step % 2 else 0, eyes_dx=4, lean=0)
+		px = frame.load()
+		w, h = frame.size
+		pal = PALETTES[variant]
+		x0, y0 = 66, 26 + HEADROOM                                # beside the head, above the eyes
+		rect(px, w, h, x0, y0, 28, 34, pal['shadow'])            # board
+		rect(px, w, h, x0 + 10, y0 - 4, 8, 4, INK)                # clip
+		rect(px, w, h, x0 + 4, y0 + 4, 20, 26, PAPER)             # paper
+		for row in range(3):
+			by = y0 + 8 + row * 7
+			rect(px, w, h, x0 + 7, by, 4, 4, INK if row >= step else pal['mid'])   # box, green when ticked
+			rect(px, w, h, x0 + 13, by + 1, 8, 2, INK)                              # line
+		frames.append(frame)
+	return frames
+
+
+def reviewing_frames(variant):
+	"""Reading glasses and a page, eyes scanning the lines from left to right."""
+	frames = []
+	for step, dx in enumerate((-4, 0, 4, 4, 0, -4)):
+		frame = activity_body(variant, bob=0, eyes_dx=dx, lean=dx // 2)
+		px = frame.load()
+		w, h = frame.size
+		# Glasses: navy frames around both eyes and a bridge.
+		for ex, ey in EYES:
+			for (x, y, width, height) in ((ex - 4, ey - 4, 16, 4), (ex - 4, ey + 16, 16, 4), (ex - 4, ey - 4, 4, 24), (ex + 8, ey - 4, 4, 24)):
+				rect(px, w, h, x, y, width, height, INK)
+		rect(px, w, h, EYES[0][0] + 12, EYES[0][1] + 4, 12, 4, INK)
+		# A page held in front, with lines of text.
+		x0, y0 = 20, 76 + HEADROOM
+		rect(px, w, h, x0, y0, 56, 20, PAPER)
+		for row in range(3):
+			rect(px, w, h, x0 + 6, y0 + 4 + row * 5, 44 - (row % 2) * 14, 2, INK)
+		frames.append(frame)
+	return frames
+
+
+def thinking_frames(variant):
+	"""A thought cloud whose dots appear one by one, while the antenna sways slowly."""
+	frames = []
+	for step in range(6):
+		lean = (-4, -2, 0, 2, 4, 2)[step]
+		frame = activity_body(variant, bob=4 if step in (2, 3) else 0, lean=lean, eyes_dx=4)
+		px = frame.load()
+		w, h = frame.size
+		pal = PALETTES[variant]
+		# Cloud in the top right, with two small puffs leading to it.
+		rect(px, w, h, 76, 52, 4, 4, PAPER)
+		rect(px, w, h, 80, 40, 8, 8, PAPER)
+		rect(px, w, h, 68, 4, 28, 28, PAPER)
+		rect(px, w, h, 64, 8, 4, 20, PAPER)
+		for dot in range(min(3, step if step < 4 else 3)):
+			rect(px, w, h, 70 + dot * 8, 16, 4, 4, INK)
+		frames.append(frame)
+	return frames
+
+
+def testing_frames(variant):
+	"""A small terminal with a growing line and a blinking cursor."""
+	frames = []
+	for step in range(4):
+		frame = activity_body(variant, bob=0, eyes_dx=4)
+		px = frame.load()
+		w, h = frame.size
+		pal = PALETTES[variant]
+		x0, y0 = 48, 58 + HEADROOM
+		rect(px, w, h, x0, y0, 44, 32, pal['shadow'])             # bezel
+		rect(px, w, h, x0 + 4, y0 + 4, 36, 24, INK)               # screen
+		rect(px, w, h, x0 + 8, y0 + 8, 4, 4, pal['light'])        # prompt '>'
+		rect(px, w, h, x0 + 16, y0 + 9, 4 * (step + 1), 2, pal['light'])
+		if step % 2 == 0:
+			rect(px, w, h, x0 + 18 + 4 * (step + 1), y0 + 8, 4, 6, pal['light'])   # cursor
+		rect(px, w, h, x0 + 8, y0 + 18, 20 if step > 1 else 8, 2, pal['mid'])  # output
+		frames.append(frame)
+	return frames
+
+
+ACTIVITY_SHEETS = {
+	'planning': planning_frames,
+	'reviewing': reviewing_frames,
+	'thinking': thinking_frames,
+	'testing': testing_frames,
+}
+
+
+def write_activity_sheets():
+	"""Writes buddy-<activity>-<variant>-96.spritesheet.png and its static first frame."""
+	for name, make_frames in ACTIVITY_SHEETS.items():
+		for variant in PALETTES:
+			frames = make_frames(variant)
+			sheet = Image.new('RGBA', (96 * len(frames), frames[0].height))
+			for i, frame in enumerate(frames):
+				sheet.paste(frame, (i * 96, 0))
+			sheet.save(f'{SPRITE_DIR}/buddy-{name}-{variant}-96.spritesheet.png', optimize=True)
+			frames[0].save(f'{SPRITE_DIR}/buddy-{name}-{variant}-96.png', optimize=True)
+
+
 def main():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--preview', help='only write a preview of a few frames to this file')
@@ -299,6 +446,7 @@ def main():
 		preview.resize((preview.width * 3, preview.height * 3), Image.NEAREST).save(args.preview)
 		return
 	write_creacoon_look()
+	write_activity_sheets()
 
 
 if __name__ == '__main__':
