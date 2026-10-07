@@ -212,6 +212,12 @@
 			"type": "dark"
 		},
 		{
+			"id": "creacoon-night",
+			"label": "Creacoon Night",
+			"themeId": "Creacoon Night",
+			"type": "dark"
+		},
+		{
 			"id": "creacoon-light",
 			"label": "Creacoon Light",
 			"themeId": "Creacoon Light",
@@ -234,12 +240,6 @@
 			"label": "Light High Contrast",
 			"themeId": "Default High Contrast Light",
 			"type": "hcLight"
-		},
-		{
-			"id": "solarized-light",
-			"label": "Solarized Light",
-			"themeId": "Solarized Light",
-			"type": "light"
 		}
 	],
 	"builtInExtensionsEnabledWithAutoUpdates": [],
