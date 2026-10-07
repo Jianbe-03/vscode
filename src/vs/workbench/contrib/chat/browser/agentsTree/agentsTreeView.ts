@@ -467,8 +467,7 @@ class AgentsBlockTree extends Disposable {
 		entry.node.dataset.status = status ?? '';
 		entry.node.dataset.activity = getElementActivity(element);
 		entry.card.setAttribute('aria-label', getAriaLabel(element));
-		// Subagents show they ended through their icon and grey row; only chats and sessions spell it out.
-		entry.state.textContent = element.kind === 'subagent' ? '' : endedLabel ?? '';
+		entry.state.textContent = endedLabel ?? '';
 		entry.icon.className = `agents-tree-icon ${ThemeIcon.asClassName(getElementIcon(element))}`;
 
 		const label = getElementLabel(element);
