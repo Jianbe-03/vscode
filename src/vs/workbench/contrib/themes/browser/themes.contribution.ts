@@ -464,22 +464,25 @@ registerAction2(class extends Action2 {
 		const themes = await themeService.getColorThemes();
 		const currentTheme = themeService.getColorTheme();
 
-		const lightEntries = toEntries(themes.filter(t => t.type === ColorScheme.LIGHT), localize('themes.category.light', "light themes"));
-		const darkEntries = toEntries(themes.filter(t => t.type === ColorScheme.DARK), localize('themes.category.dark', "dark themes"));
-		const hcEntries = toEntries(themes.filter(t => isHighContrast(t.type)), localize('themes.category.hc', "high contrast themes"));
+		// CreaEditor: the Creacoon themes always come first, ahead of the light, dark and high contrast groups.
+		const creacoonEntries = toCreacoonEntries(themes.filter(isCreacoonTheme), preferredColorScheme);
+		const otherThemes = themes.filter(t => !isCreacoonTheme(t));
+		const lightEntries = toEntries(otherThemes.filter(t => t.type === ColorScheme.LIGHT), localize('themes.category.light', "light themes"));
+		const darkEntries = toEntries(otherThemes.filter(t => t.type === ColorScheme.DARK), localize('themes.category.dark', "dark themes"));
+		const hcEntries = toEntries(otherThemes.filter(t => isHighContrast(t.type)), localize('themes.category.hc', "high contrast themes"));
 
 		let picks;
 		switch (preferredColorScheme) {
 			case ColorScheme.DARK:
-				picks = [...darkEntries, ...lightEntries, ...hcEntries];
+				picks = [...creacoonEntries, ...darkEntries, ...lightEntries, ...hcEntries];
 				break;
 			case ColorScheme.HIGH_CONTRAST_DARK:
 			case ColorScheme.HIGH_CONTRAST_LIGHT:
-				picks = [...hcEntries, ...lightEntries, ...darkEntries];
+				picks = [...creacoonEntries, ...hcEntries, ...lightEntries, ...darkEntries];
 				break;
 			case ColorScheme.LIGHT:
 			default:
-				picks = [...lightEntries, ...darkEntries, ...hcEntries];
+				picks = [...creacoonEntries, ...lightEntries, ...darkEntries, ...hcEntries];
 				break;
 		}
 		await picker.openQuickPick(picks, currentTheme);
@@ -708,6 +711,33 @@ function toEntry(theme: IWorkbenchTheme): ThemeItem {
 		item.buttons = [configureButton];
 	}
 	return item;
+}
+
+/** The built-in Creacoon color themes, in the order they are listed in the theme picker. */
+const creacoonThemeSettingsIds = ['Creacoon Dark', 'Creacoon Night', 'Creacoon Light'];
+
+function isCreacoonTheme(theme: IWorkbenchColorTheme): boolean {
+	return creacoonThemeSettingsIds.includes(theme.settingsId ?? '');
+}
+
+/**
+ * Lists the Creacoon themes under their own heading. The themes matching the
+ * preferred color scheme come first, then the others in their fixed order.
+ */
+function toCreacoonEntries(themes: IWorkbenchColorTheme[], preferredColorScheme: ColorScheme | undefined): QuickPickInput<ThemeItem>[] {
+	const matchesScheme = (theme: IWorkbenchColorTheme) => preferredColorScheme === ColorScheme.LIGHT ? theme.type === ColorScheme.LIGHT : theme.type !== ColorScheme.LIGHT;
+	const sorted = [...themes].sort((t1, t2) => {
+		const match1 = matchesScheme(t1);
+		if (match1 !== matchesScheme(t2)) {
+			return match1 ? -1 : 1;
+		}
+		return creacoonThemeSettingsIds.indexOf(t1.settingsId) - creacoonThemeSettingsIds.indexOf(t2.settingsId);
+	});
+	const entries: QuickPickInput<ThemeItem>[] = sorted.map(toEntry);
+	if (entries.length > 0) {
+		entries.unshift({ type: 'separator', label: localize('themes.category.creacoon', "creacoon themes") });
+	}
+	return entries;
 }
 
 function toEntries(themes: Array<IWorkbenchTheme>, label?: string): QuickPickInput<ThemeItem>[] {

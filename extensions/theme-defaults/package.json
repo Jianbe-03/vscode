@@ -20,6 +20,12 @@
         "path": "./themes/creacoon-dark.json"
       },
       {
+        "id": "Creacoon Night",
+        "label": "%creacoonNightThemeLabel%",
+        "uiTheme": "vs-dark",
+        "path": "./themes/creacoon-night.json"
+      },
+      {
         "id": "Creacoon Light",
         "label": "%creacoonLightThemeLabel%",
         "uiTheme": "vs",
