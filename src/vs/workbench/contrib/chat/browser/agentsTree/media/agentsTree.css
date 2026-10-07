@@ -47,6 +47,34 @@
 	--agents-tree-status: var(--vscode-errorForeground);
 }
 
+/*
+ * An agent that ended (finished, failed, cancelled) or whose chat was closed or session archived is
+ * turned off: its accent, icon and line go quiet, and its card recedes, while running agents stay vivid.
+ */
+.agents-tree-view .agents-tree-node[data-activity="ended"] {
+	--agents-tree-status: var(--vscode-disabledForeground);
+}
+
+.agents-tree-view .agents-tree-node[data-activity="ended"] > .agents-tree-card {
+	opacity: 0.8;
+	filter: grayscale(1);
+	border-left-style: dashed;
+	background-color: transparent;
+}
+
+.agents-tree-view .agents-tree-node[data-activity="ended"] > .agents-tree-card:is(:hover, :focus) {
+	opacity: 1;
+}
+
+.agents-tree-view .agents-tree-node[data-activity="ended"] > .agents-tree-card .agents-tree-label {
+	color: var(--vscode-disabledForeground);
+	font-weight: normal;
+}
+
+.agents-tree-view .agents-tree-children > .agents-tree-node[data-activity="ended"]::before {
+	border-style: dashed;
+}
+
 .agents-tree-view .agents-tree > .agents-tree-node + .agents-tree-node {
 	margin-top: var(--vscode-spacing-size160);
 }
@@ -136,6 +164,10 @@
 	color: var(--vscode-foreground);
 }
 
+.agents-tree-view .agents-tree-node[data-activity="ended"] > .agents-tree-card .agents-tree-icon {
+	color: var(--vscode-disabledForeground);
+}
+
 .agents-tree-view .agents-tree-label {
 	flex: 1;
 	min-width: 0;
@@ -143,6 +175,17 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.agents-tree-view .agents-tree-state {
+	flex-shrink: 0;
+	padding: 0 var(--vscode-spacing-size60);
+	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: var(--vscode-cornerRadius-circle);
+	color: var(--vscode-disabledForeground);
+	font-size: var(--vscode-fontSize-label2);
+	line-height: 16px;
+	white-space: nowrap;
 }
 
 .agents-tree-view .agents-tree-duration {
@@ -198,6 +241,7 @@
 	color: var(--vscode-badge-foreground);
 }
 
+.agents-tree-view .agents-tree-state:empty,
 .agents-tree-view .agents-tree-duration:empty,
 .agents-tree-view .agents-tree-description:empty,
 .agents-tree-view .agents-tree-model:empty,

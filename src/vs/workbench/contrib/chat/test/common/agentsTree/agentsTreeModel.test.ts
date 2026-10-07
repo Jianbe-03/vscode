@@ -8,8 +8,8 @@
 import assert from 'assert';
 import { constObservable, observableValue } from '../../../../../../base/common/observable.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
-import { buildSubagentNodes, IAgentsTreeSubagentNode } from '../../../common/agentsTree/agentsTreeModel.js';
-import { IChatSubagentToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../../../common/chatService/chatService.js';
+import { AgentsTreeStatus, buildSubagentNodes, getAgentsTreeActivity, getClosedChatStatus, IAgentsTreeRootInfo, IAgentsTreeSubagentNode, orderAgentsTreeRoots } from '../../../common/agentsTree/agentsTreeModel.js';
+import { IChatSubagentToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ResponseModelState, ToolConfirmKind } from '../../../common/chatService/chatService.js';
 import { ToolDataSource } from '../../../common/tools/languageModelToolsService.js';
 
 /** A tool invocation from a restored chat. */
@@ -116,5 +116,38 @@ suite('AgentsTreeModel', () => {
 			{ id: 'unavailable', name: undefined, description: 'Detached work', modelName: undefined, status: 'done', duration: undefined, chatResource: undefined, children: [] },
 			{ id: 'orphan', name: undefined, description: 'Orphan work', modelName: undefined, status: 'done', duration: undefined, chatResource: undefined, children: [] },
 		]);
+	});
+
+	test('tells active, idle and ended (turned off) entries apart', () => {
+		const statuses = [AgentsTreeStatus.Running, AgentsTreeStatus.WaitingForConfirmation, AgentsTreeStatus.Done, AgentsTreeStatus.Failed, AgentsTreeStatus.Cancelled, undefined];
+		assert.deepStrictEqual({
+			open: statuses.map(status => getAgentsTreeActivity(status, false)),
+			closed: statuses.map(status => getAgentsTreeActivity(status, true)),
+			closedChatStatus: [ResponseModelState.Complete, ResponseModelState.Failed, ResponseModelState.Cancelled, ResponseModelState.Pending, ResponseModelState.NeedsInput].map(getClosedChatStatus),
+		}, {
+			open: ['active', 'active', 'ended', 'ended', 'ended', 'idle'],
+			closed: ['active', 'active', 'ended', 'ended', 'ended', 'ended'],
+			closedChatStatus: ['done', 'failed', 'cancelled', 'cancelled', 'cancelled'],
+		});
+	});
+
+	test('orders roots running first, then by recency, and keeps only the most recent closed ones', () => {
+		const roots: (IAgentsTreeRootInfo & { id: string })[] = [
+			{ id: 'old-done', status: AgentsTreeStatus.Done, closed: false, lastActivity: 1 },
+			{ id: 'closed-new', status: AgentsTreeStatus.Done, closed: true, lastActivity: 9 },
+			{ id: 'idle', status: undefined, closed: false, lastActivity: 2 },
+			{ id: 'closed-old', status: AgentsTreeStatus.Failed, closed: true, lastActivity: 3 },
+			{ id: 'running', status: AgentsTreeStatus.Running, closed: false, lastActivity: 0 },
+			{ id: 'closed-oldest', status: undefined, closed: true, lastActivity: 1 },
+			{ id: 'waiting', status: AgentsTreeStatus.WaitingForConfirmation, closed: false, lastActivity: 5 },
+			{ id: 'new-failed', status: AgentsTreeStatus.Failed, closed: false, lastActivity: 8 },
+		];
+		assert.deepStrictEqual({
+			all: orderAgentsTreeRoots(roots, root => root).map(root => root.id),
+			twoClosed: orderAgentsTreeRoots(roots, root => root, 2).map(root => root.id),
+		}, {
+			all: ['waiting', 'running', 'idle', 'closed-new', 'new-failed', 'closed-old', 'old-done', 'closed-oldest'],
+			twoClosed: ['waiting', 'running', 'idle', 'closed-new', 'new-failed', 'closed-old', 'old-done'],
+		});
 	});
 });

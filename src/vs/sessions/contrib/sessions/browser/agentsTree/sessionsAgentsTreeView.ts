@@ -3,7 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: the Agents view of the Agents window: sessions, their subagents and the sessions they created.
+// CreaEditor: the Agents view of the Agents window: sessions, their subagents and the sessions they created,
+// including the most recently archived sessions, shown as turned off.
 
 import { autorun, observableFromEvent } from '../../../../../base/common/observable.js';
 import { localize } from '../../../../../nls.js';
@@ -20,7 +21,7 @@ import { IViewPaneOptions } from '../../../../../workbench/browser/parts/views/v
 import { IViewDescriptorService } from '../../../../../workbench/common/views.js';
 import { AgentsTreeElement, AgentsTreeViewPane, buildChatModelSubagentElements, IAgentsTreeChatElement, IAgentsTreeGroupElement, IAgentsTreeSubagentElement } from '../../../../../workbench/contrib/chat/browser/agentsTree/agentsTreeView.js';
 import { IChatWidget, IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
-import { AgentsTreeStatus } from '../../../../../workbench/contrib/chat/common/agentsTree/agentsTreeModel.js';
+import { AgentsTreeStatus, orderAgentsTreeRoots } from '../../../../../workbench/contrib/chat/common/agentsTree/agentsTreeModel.js';
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ISessionGroupsService } from '../../../../services/sessions/browser/sessionGroupsService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
@@ -42,6 +43,7 @@ function getSessionStatus(status: SessionStatus): AgentsTreeStatus | undefined {
 /**
  * Shows the sessions of the Agents window with the subagents of their loaded chats, and the
  * sessions they created (`create_session`), grouped by their agent-created session group.
+ * Archived sessions stay visible as turned off; at the top level only the most recent ones are kept.
  */
 export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 
@@ -80,7 +82,7 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 	}
 
 	protected computeRoots(now: number): AgentsTreeElement[] {
-		const sessions = this._sessionsManagementService.getSessions().filter(session => !session.isArchived.get());
+		const sessions = this._sessionsManagementService.getSessions();
 		const sessionKeys = new Set(sessions.map(session => session.resource.toString()));
 		const createdByCreator = new Map<string, ISession[]>();
 		const roots: ISession[] = [];
@@ -144,13 +146,17 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 				label: session.title.get() || localize('sessionsAgentsTree.untitledSession', "New Session"),
 				status: getSessionStatus(session.status.get()),
 				resource: session.resource,
+				closed: session.isArchived.get() ? 'archived' : undefined,
 				children,
 			};
 		};
 
-		return roots
-			.sort((a, b) => b.updatedAt.get().getTime() - a.updatedAt.get().getTime())
-			.map(toElement);
+		const ordered = orderAgentsTreeRoots(roots, session => ({
+			status: getSessionStatus(session.status.get()),
+			closed: session.isArchived.get(),
+			lastActivity: session.updatedAt.get().getTime(),
+		}));
+		return ordered.map(toElement);
 	}
 
 	protected async openChat(element: IAgentsTreeChatElement, preserveFocus: boolean): Promise<void> {

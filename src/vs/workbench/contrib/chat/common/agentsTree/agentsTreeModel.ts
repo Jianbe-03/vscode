@@ -5,7 +5,7 @@
 
 // CreaEditor: model for the live Agents tree (chats -> subagents -> nested subagents).
 
-import { getSubagentIsActive, IChatSubagentToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ToolConfirmKind } from '../chatService/chatService.js';
+import { getSubagentIsActive, IChatSubagentToolInvocationData, IChatToolInvocation, IChatToolInvocationSerialized, ResponseModelState, ToolConfirmKind } from '../chatService/chatService.js';
 
 /**
  * Status of an entry in the Agents tree.
@@ -16,6 +16,83 @@ export const enum AgentsTreeStatus {
 	Done = 'done',
 	Failed = 'failed',
 	Cancelled = 'cancelled',
+}
+
+/**
+ * Whether an entry of the Agents tree is still working, idle, or turned off.
+ */
+export const enum AgentsTreeActivity {
+	/** Running or waiting for the user. */
+	Active = 'active',
+	/** Open, but not doing anything (for example a chat without a running request). */
+	Idle = 'idle',
+	/** Finished, failed or cancelled, or its chat or session was closed or archived. */
+	Ended = 'ended',
+}
+
+/**
+ * Returns whether an entry is active, idle or has ended.
+ * @param closed whether the entry's chat was closed or its session archived.
+ */
+export function getAgentsTreeActivity(status: AgentsTreeStatus | undefined, closed: boolean): AgentsTreeActivity {
+	switch (status) {
+		case AgentsTreeStatus.Running:
+		case AgentsTreeStatus.WaitingForConfirmation:
+			return AgentsTreeActivity.Active;
+		case AgentsTreeStatus.Done:
+		case AgentsTreeStatus.Failed:
+		case AgentsTreeStatus.Cancelled:
+			return AgentsTreeActivity.Ended;
+		default:
+			return closed ? AgentsTreeActivity.Ended : AgentsTreeActivity.Idle;
+	}
+}
+
+/**
+ * Returns the status of a closed chat from the state of its last response.
+ * A response that never finished was stopped when the chat closed.
+ */
+export function getClosedChatStatus(lastResponseState: ResponseModelState): AgentsTreeStatus {
+	switch (lastResponseState) {
+		case ResponseModelState.Complete: return AgentsTreeStatus.Done;
+		case ResponseModelState.Failed: return AgentsTreeStatus.Failed;
+		default: return AgentsTreeStatus.Cancelled;
+	}
+}
+
+/** The most closed chats or archived sessions shown at the top level of the Agents tree. */
+export const AGENTS_TREE_MAX_CLOSED_ROOTS = 20;
+
+/**
+ * What decides the order of an entry at the top level of the Agents tree.
+ */
+export interface IAgentsTreeRootInfo {
+	readonly status: AgentsTreeStatus | undefined;
+	/** Whether the chat was closed or the session archived. */
+	readonly closed: boolean;
+	/** Time of the last activity, in milliseconds since the epoch. */
+	readonly lastActivity: number;
+}
+
+/**
+ * Orders the top-level entries of the Agents tree: active ones first, then idle ones, then the ones
+ * that ended, each by most recent activity. Keeps only the `maxClosed` most recent closed entries.
+ */
+export function orderAgentsTreeRoots<T>(roots: readonly T[], getInfo: (root: T) => IAgentsTreeRootInfo, maxClosed = AGENTS_TREE_MAX_CLOSED_ROOTS): T[] {
+	const rank = (info: IAgentsTreeRootInfo): number => {
+		switch (getAgentsTreeActivity(info.status, info.closed)) {
+			case AgentsTreeActivity.Active: return 0;
+			case AgentsTreeActivity.Idle: return 1;
+			case AgentsTreeActivity.Ended: return 2;
+		}
+	};
+	const entries = roots.map(root => ({ root, info: getInfo(root) }));
+	const closed = entries.filter(entry => entry.info.closed).sort((a, b) => b.info.lastActivity - a.info.lastActivity);
+	const hidden = new Set(closed.slice(Math.max(0, maxClosed)).map(entry => entry.root));
+	return entries
+		.filter(entry => !hidden.has(entry.root))
+		.sort((a, b) => rank(a.info) - rank(b.info) || b.info.lastActivity - a.info.lastActivity)
+		.map(entry => entry.root);
 }
 
 /**

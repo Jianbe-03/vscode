@@ -12,6 +12,7 @@ import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/ho
 import { StandardKeyboardEvent } from '../../../../../base/browser/keyboardEvent.js';
 import { RunOnceScheduler } from '../../../../../base/common/async.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
+import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { KeyCode } from '../../../../../base/common/keyCodes.js';
 import { getDurationString } from '../../../../../base/common/date.js';
 import { Disposable, DisposableMap, DisposableStore, MutableDisposable } from '../../../../../base/common/lifecycle.js';
@@ -30,8 +31,8 @@ import { IOpenerService } from '../../../../../platform/opener/common/opener.js'
 import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
 import { IViewPaneOptions, ViewPane } from '../../../../browser/parts/views/viewPane.js';
 import { IViewDescriptorService } from '../../../../common/views.js';
-import { AgentsTreeStatus, buildSubagentNodes, IAgentsTreeSubagentNode } from '../../common/agentsTree/agentsTreeModel.js';
-import { IChatService, IChatToolInvocation } from '../../common/chatService/chatService.js';
+import { AgentsTreeActivity, AgentsTreeStatus, buildSubagentNodes, getAgentsTreeActivity, getClosedChatStatus, IAgentsTreeSubagentNode, orderAgentsTreeRoots } from '../../common/agentsTree/agentsTreeModel.js';
+import { IChatDetail, IChatService, IChatToolInvocation } from '../../common/chatService/chatService.js';
 import { ChatAgentLocation, CHAT_OPEN_AGENT_HOST_CHAT_COMMAND_ID } from '../../common/constants.js';
 import { IChatModel } from '../../common/model/chatModel.js';
 import { isResponseVM } from '../../common/model/chatViewModel.js';
@@ -52,6 +53,8 @@ export interface IAgentsTreeChatElement {
 	readonly status: AgentsTreeStatus | undefined;
 	/** The chat session resource, or the Agents window session resource. */
 	readonly resource: URI;
+	/** Set when the chat was closed (no longer loaded) or the Agents window session was archived. */
+	readonly closed?: 'closed' | 'archived';
 	readonly children: readonly AgentsTreeElement[];
 }
 
@@ -246,6 +249,38 @@ function getElementStatus(element: AgentsTreeElement): AgentsTreeStatus | undefi
 	}
 }
 
+/**
+ * Returns whether an element is active, idle or has ended. A session group is active while one of its sessions is.
+ */
+function getElementActivity(element: AgentsTreeElement): AgentsTreeActivity {
+	switch (element.kind) {
+		case 'chat': return getAgentsTreeActivity(element.status, !!element.closed);
+		case 'subagent': return getAgentsTreeActivity(element.node.status, false);
+		case 'group': {
+			const activities = element.children.map(getElementActivity);
+			return activities.includes(AgentsTreeActivity.Active) ? AgentsTreeActivity.Active
+				: activities.length > 0 && activities.every(activity => activity === AgentsTreeActivity.Ended) ? AgentsTreeActivity.Ended
+					: AgentsTreeActivity.Idle;
+		}
+	}
+}
+
+/**
+ * Returns the label that tells an element is turned off: closed, archived or ended.
+ */
+function getEndedLabel(element: AgentsTreeElement): string | undefined {
+	if (getElementActivity(element) !== AgentsTreeActivity.Ended) {
+		return undefined;
+	}
+	if (element.kind === 'chat' && element.closed === 'archived') {
+		return localize('agentsTree.state.archived', "Archived");
+	}
+	if (element.kind === 'chat' && element.closed === 'closed') {
+		return localize('agentsTree.state.closed', "Closed");
+	}
+	return localize('agentsTree.state.ended', "Ended");
+}
+
 function getElementIcon(element: AgentsTreeElement): ThemeIcon {
 	switch (element.kind) {
 		case 'chat': return getStatusIcon(element.status) ?? Codicon.commentDiscussion;
@@ -263,6 +298,12 @@ function countDescendants(element: AgentsTreeElement): number {
 }
 
 function getAriaLabel(element: AgentsTreeElement): string {
+	const label = getElementAriaLabel(element);
+	const ended = getEndedLabel(element);
+	return ended ? localize('agentsTree.ended.ariaLabel', "{0}, {1}", label, ended) : label;
+}
+
+function getElementAriaLabel(element: AgentsTreeElement): string {
 	switch (element.kind) {
 		case 'subagent': {
 			const node = element.node;
@@ -289,6 +330,8 @@ interface IRenderedAgentCard {
 	readonly card: HTMLElement;
 	readonly icon: HTMLElement;
 	readonly label: HTMLElement;
+	/** Pill that tells the agent is turned off. */
+	readonly state: HTMLElement;
 	readonly duration: HTMLElement;
 	readonly description: HTMLElement;
 	readonly model: HTMLElement;
@@ -393,6 +436,7 @@ class AgentsBlockTree extends Disposable {
 		const header = dom.append(card, dom.$('.agents-tree-card-header'));
 		const icon = dom.append(header, dom.$('.agents-tree-icon'));
 		const label = dom.append(header, dom.$('.agents-tree-label'));
+		const state = dom.append(header, dom.$('.agents-tree-state'));
 		const duration = dom.append(header, dom.$('.agents-tree-duration'));
 		if (hasChildren) {
 			const twistie = dom.append(header, dom.$(`.agents-tree-twistie${ThemeIcon.asCSSSelector(collapsed ? Codicon.chevronRight : Codicon.chevronDown)}`));
@@ -408,7 +452,7 @@ class AgentsBlockTree extends Disposable {
 		const hiddenCount = dom.append(footer, dom.$('.agents-tree-hidden-count'));
 		const hover = this._renderStore.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), card, ''));
 
-		const entry: IRenderedAgentCard = { id, parentId, element, node, card, icon, label, duration, description, model, hiddenCount, hover };
+		const entry: IRenderedAgentCard = { id, parentId, element, node, card, icon, label, state, duration, description, model, hiddenCount, hover };
 		this._cards.push(entry);
 		this._updateCard(entry, element);
 		this._renderStore.add(dom.addDisposableListener(card, dom.EventType.CLICK, () => this._open(entry.element, true)));
@@ -424,8 +468,11 @@ class AgentsBlockTree extends Disposable {
 	private _updateCard(entry: IRenderedAgentCard, element: AgentsTreeElement): void {
 		entry.element = element;
 		const status = getElementStatus(element);
+		const endedLabel = getEndedLabel(element);
 		entry.node.dataset.status = status ?? '';
+		entry.node.dataset.activity = getElementActivity(element);
 		entry.card.setAttribute('aria-label', getAriaLabel(element));
+		entry.state.textContent = endedLabel ?? '';
 		entry.icon.className = `agents-tree-icon ${ThemeIcon.asClassName(getElementIcon(element))}`;
 
 		const label = getElementLabel(element);
@@ -446,6 +493,13 @@ class AgentsBlockTree extends Disposable {
 		}
 		if (statusLabel) {
 			hoverLines.push(duration ? localize('agentsTree.hover.statusDuration', "{0} ({1})", statusLabel, duration) : statusLabel);
+		}
+		if (endedLabel) {
+			hoverLines.push(element.kind === 'chat' && element.closed === 'archived'
+				? localize('agentsTree.hover.archived', "Archived: this session is turned off")
+				: element.kind === 'chat' && element.closed === 'closed'
+					? localize('agentsTree.hover.closed', "Closed: this chat is turned off")
+					: localize('agentsTree.hover.ended', "Ended: this agent is turned off"));
 		}
 		entry.hover.update(hoverLines.join('\n'));
 	}
@@ -678,20 +732,86 @@ export abstract class AgentsTreeViewPane extends ViewPane {
 }
 
 /**
- * The Agents view of the editor window: the chats of the Chat view and chat editors, with their subagents.
+ * Turns a closed chat from the chat history into a (childless) element of the Agents tree.
+ */
+export function toClosedChatElement(detail: IChatDetail): IAgentsTreeChatElement {
+	return {
+		kind: 'chat',
+		id: detail.sessionResource.toString(),
+		label: detail.title || localize('agentsTree.untitledChat', "New Chat"),
+		status: getClosedChatStatus(detail.lastResponseState),
+		resource: detail.sessionResource,
+		closed: 'closed',
+		children: [],
+	};
+}
+
+/**
+ * The Agents view of the editor window: the chats of the Chat view and chat editors, with their subagents,
+ * and the most recently closed chats, shown as turned off.
  */
 export class ChatAgentsTreeViewPane extends AgentsTreeViewPane {
 
+	private _closedChats: readonly IChatDetail[] = [];
+	private _isDisposed = false;
+	private readonly _closedChatsScheduler = this._register(new RunOnceScheduler(() => void this._loadClosedChats(), 250));
+
+	constructor(
+		options: IViewPaneOptions,
+		@IKeybindingService keybindingService: IKeybindingService,
+		@IContextMenuService contextMenuService: IContextMenuService,
+		@IConfigurationService configurationService: IConfigurationService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
+		@IInstantiationService instantiationService: IInstantiationService,
+		@IOpenerService openerService: IOpenerService,
+		@IThemeService themeService: IThemeService,
+		@IHoverService hoverService: IHoverService,
+		@IChatService chatService: IChatService,
+		@IChatWidgetService chatWidgetService: IChatWidgetService,
+		@ICommandService commandService: ICommandService,
+	) {
+		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService, chatService, chatWidgetService, commandService);
+		// A chat that closes moves to the chat history; a deleted one leaves it.
+		this._register(autorun(reader => {
+			chatService.chatModels.read(reader);
+			this._closedChatsScheduler.schedule();
+		}));
+		this._register(chatService.onDidDisposeSession(() => this._closedChatsScheduler.schedule()));
+	}
+
+	private async _loadClosedChats(): Promise<void> {
+		let closedChats: IChatDetail[];
+		try {
+			closedChats = await this.chatService.getHistorySessionItems();
+		} catch (error) {
+			onUnexpectedError(error);
+			return;
+		}
+		if (this._isDisposed) {
+			return;
+		}
+		this._closedChats = closedChats;
+		this.scheduleRefresh();
+	}
+
+	override dispose(): void {
+		this._isDisposed = true;
+		super.dispose();
+	}
+
 	protected computeRoots(now: number): AgentsTreeElement[] {
 		const referencedChats = new Set<string>();
-		const roots: { model: IChatModel; element: IAgentsTreeChatElement }[] = [];
+		const loadedChats = new Set<string>();
+		const roots: { element: IAgentsTreeChatElement; lastActivity: number }[] = [];
 		for (const model of this.chatService.chatModels.get()) {
+			loadedChats.add(model.sessionResource.toString());
 			if (model.initialLocation !== ChatAgentLocation.Chat || !model.hasRequests) {
 				continue;
 			}
 			const children = buildChatModelSubagentElements(this.chatService, model, now, referencedChats);
 			roots.push({
-				model,
+				lastActivity: model.lastMessageDate,
 				element: {
 					kind: 'chat',
 					id: model.sessionResource.toString(),
@@ -702,10 +822,14 @@ export class ChatAgentsTreeViewPane extends AgentsTreeViewPane {
 				}
 			});
 		}
+		for (const detail of this._closedChats) {
+			if (!loadedChats.has(detail.sessionResource.toString())) {
+				roots.push({ element: toClosedChatElement(detail), lastActivity: detail.lastMessageDate });
+			}
+		}
 		// Subagents that run as their own chat are shown under the chat that started them.
-		return roots
-			.filter(root => !referencedChats.has(root.element.id))
-			.sort((a, b) => b.model.lastMessageDate - a.model.lastMessageDate)
+		const visibleRoots = roots.filter(root => !referencedChats.has(root.element.id));
+		return orderAgentsTreeRoots(visibleRoots, root => ({ status: root.element.status, closed: !!root.element.closed, lastActivity: root.lastActivity }))
 			.map(root => root.element);
 	}
 
