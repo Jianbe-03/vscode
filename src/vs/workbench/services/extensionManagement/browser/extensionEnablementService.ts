@@ -178,15 +178,9 @@ export class ExtensionEnablementService extends Disposable implements IWorkbench
 							.catch(err => this.logService.error('Failed to update chat.disableAIFeatures setting during builtin chat extension enablement migration', err));
 					}
 				}
-			} else {
-				try {
-					// User has not used chat features before so avoid activating the chat extension by disabling it
-					this.logService.debug('Disabling builtin chat extension as chat set up is not completed');
-					this._disableExtension({ id: this._chatExtensionId });
-				} catch (error) {
-					this.logService.error('Failed to disable builtin chat extension during enablement migration', error);
-				}
 			}
+			// CreaEditor: there is no GitHub Copilot setup to complete; chat runs on bring-your-own-key models,
+			// so the built-in chat extension stays enabled for new users.
 		}
 	}
 

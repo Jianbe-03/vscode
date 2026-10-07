@@ -30,6 +30,7 @@ export enum ToolName {
 	GetErrors = 'get_errors',
 	GetScmChanges = 'get_changed_files',
 	ReadProjectStructure = 'read_project_structure',
+	SetChatIssue = 'set_chat_issue', // CreaEditor
 	CreateNewWorkspace = 'create_new_workspace',
 	CreateNewJupyterNotebook = 'create_new_jupyter_notebook',
 	SearchWorkspaceSymbols = 'search_workspace_symbols',
@@ -116,6 +117,7 @@ export enum ContributedToolName {
 	GetErrors = 'copilot_getErrors',
 	GetScmChanges = 'copilot_getChangedFiles',
 	ReadProjectStructure = 'copilot_readProjectStructure',
+	SetChatIssue = 'creaeditor_setChatIssue', // CreaEditor
 	CreateNewWorkspace = 'copilot_createNewWorkspace',
 	CreateNewJupyterNotebook = 'copilot_createNewJupyterNotebook',
 	EditFile = 'copilot_insertEdit',
@@ -202,6 +204,7 @@ export const toolCategories: Record<ToolName, ToolCategory> = {
 	[ToolName.FindFiles]: ToolCategory.Core,
 	[ToolName.CreateDirectory]: ToolCategory.Core,
 	[ToolName.ReadProjectStructure]: ToolCategory.Core,
+	[ToolName.SetChatIssue]: ToolCategory.Core, // CreaEditor
 	[ToolName.CoreRunSubagent]: ToolCategory.Core,
 	[ToolName.SearchSubagent]: ToolCategory.Core,
 	[ToolName.ExploreSubagent]: ToolCategory.Core,

@@ -197,6 +197,27 @@ registerAction2(class extends Action2 {
 	}
 });
 
+// CreaEditor: the tour of what CreaEditor adds to VS Code (walkthrough of the built-in `creaeditor-features` extension).
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'creaeditor.showFeatures',
+			title: localize2('creaeditor.showFeatures', 'CreaEditor Features'),
+			category: Categories.Help,
+			f1: true,
+			menu: {
+				id: MenuId.MenubarHelpMenu,
+				group: '1_welcome',
+				order: 2,
+			},
+		});
+	}
+
+	run(accessor: ServicesAccessor): Promise<unknown> {
+		return accessor.get(ICommandService).executeCommand('workbench.action.openWalkthrough', 'vscode.creaeditor-features#creaeditor.features', { toSide: false });
+	}
+});
+
 registerAction2(class extends Action2 {
 	constructor() {
 		super({

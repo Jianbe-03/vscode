@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 
+import { IGatewayTrackingService, NullGatewayTrackingService } from '../../endpoint/common/gatewayTrackingService';
 import type { CancellationToken, OpenDialogOptions, QuickPickItem, QuickPickOptions, Selection, TextEditor, Uri } from 'vscode';
 import { IInstantiationServiceBuilder, ServiceIdentifier } from '../../../util/common/services';
 import { DisposableStore, IDisposable } from '../../../util/vs/base/common/lifecycle';
@@ -284,6 +285,7 @@ export function createPlatformServices(disposables: Pick<DisposableStore, 'add'>
 	}));
 	testingServiceCollection.define(ISnippyService, new SyncDescriptor(NullSnippyService));
 	testingServiceCollection.define(IChatWebSocketManager, new SyncDescriptor(NullChatWebSocketManager));
+	testingServiceCollection.define(IGatewayTrackingService, new SyncDescriptor(NullGatewayTrackingService)); // CreaEditor
 	testingServiceCollection.define(IInteractiveSessionService, new SyncDescriptor(class implements IInteractiveSessionService {
 		_serviceBrand: undefined;
 		async transferActiveChat(workspaceUri: Uri): Promise<void> {

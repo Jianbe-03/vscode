@@ -1282,6 +1282,28 @@
             "description"
           ]
         }
+      },
+      {
+        "name": "creaeditor_setChatIssue",
+        "toolReferenceName": "chatIssue",
+        "displayName": "Set Chat Issue",
+        "icon": "$(issues)",
+        "userDescription": "Track this chat's model usage and cost under an issue",
+        "modelDescription": "Declares which issue (GitHub issue or pull request) the current chat is working on. CreaEditor attaches the issue to every model request so the cost of the work can be attributed per issue. Call this once at the start of work on an issue, e.g. when asked to implement or fix issue #123. The issue is detected automatically from the branch name or a #123 in the first prompt, so only call it when the issue differs or was not mentioned. Pass an empty string to clear it.",
+        "canBeReferencedInPrompt": true,
+        "tags": [],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "issue": {
+              "type": "string",
+              "description": "The issue: 123, #123, owner/repo#123, or an issue URL. Empty to clear."
+            }
+          },
+          "required": [
+            "issue"
+          ]
+        }
       }
     ],
     "languageModelToolSets": [
@@ -1303,7 +1325,8 @@
         "description": "",
         "tools": [
           "runNotebookCell",
-          "executionSubagent"
+          "executionSubagent",
+          "chatIssue"
         ]
       },
       {
@@ -1344,7 +1367,8 @@
           "runCommand",
           "switchAgent",
           "toolSearch",
-          "vscodeAPI"
+          "vscodeAPI",
+          "chatIssue"
         ]
       },
       {
@@ -2170,6 +2194,134 @@
             }
           },
           "required": [
+            "apiKey"
+          ]
+        }
+      },
+      {
+        "vendor": "litellm",
+        "displayName": "LiteLLM",
+        "configuration": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "title": "Proxy URL",
+              "markdownDescription": "URL of the LiteLLM proxy, e.g. `http://litellm.your-tailnet.ts.net:4000`. The models the key may use are discovered automatically."
+            },
+            "apiKey": {
+              "type": "string",
+              "secret": true,
+              "title": "API Key",
+              "description": "LiteLLM virtual key"
+            },
+            "requestMetadata": {
+              "type": "object",
+              "title": "Request Metadata",
+              "markdownDescription": "Metadata sent with every request made with this API key: extra HTTP `headers` and JSON `body` fields. Use `models` to override or extend it for individual models (keyed by model id).\n\nStrings may use `${sessionId}`, `${requestId}`, `${model}`, `${modelName}`, `${provider}`, `${workspaceFolder}`, `${workspaceFolderName}`, `${user}`, `${hostname}`, `${appName}`, `${date}` and `${env:NAME}`.",
+              "properties": {
+                "headers": {
+                  "type": "object",
+                  "title": "Headers",
+                  "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "type": "object",
+                  "title": "Body fields",
+                  "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                  "additionalProperties": true
+                },
+                "models": {
+                  "type": "object",
+                  "title": "Per-model overrides",
+                  "description": "Per-model metadata keyed by model id (e.g. \"@preset/programmer-agent\" or \"gpt-5\"). Headers override the group headers; body fields are deep-merged over the group body.",
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "headers": {
+                        "type": "object",
+                        "title": "Headers",
+                        "description": "Extra HTTP headers sent with every request, e.g. {\"X-Title\": \"CreaEditor\", \"HTTP-Referer\": \"https://creacoon.nl\"}. Reserved headers (authorization, content-type, ...) are ignored. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "body": {
+                        "type": "object",
+                        "title": "Body fields",
+                        "description": "Extra JSON fields deep-merged into every request body, e.g. OpenRouter's {\"user\": \"${user}\", \"session_id\": \"${sessionId}\", \"metadata\": {...}, \"provider\": {...}}. A null value removes a field. The prompt payload (messages, input, tools, model, stream) cannot be overridden. Strings may use ${sessionId}, ${requestId}, ${model}, ${modelName}, ${provider}, ${workspaceFolder}, ${workspaceFolderName}, ${user}, ${hostname}, ${appName}, ${date} and ${env:NAME}.",
+                        "additionalProperties": true
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "defaultSnippets": [
+                {
+                  "label": "Request metadata",
+                  "body": {
+                    "headers": {
+                      "X-Title": "${1:CreaEditor}"
+                    },
+                    "body": {
+                      "user": "^\"\\${user}\"",
+                      "session_id": "^\"\\${sessionId}\"",
+                      "metadata": {
+                        "workspace": "^\"\\${workspaceFolderName}\""
+                      }
+                    },
+                    "models": {}
+                  }
+                }
+              ]
+            },
+            "models": {
+              "type": "array",
+              "markdownDescription": "Optional display names and capability overrides for discovered models.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "LiteLLM model name"
+                  },
+                  "name": {
+                    "type": "string",
+                    "description": "Display name in the model picker"
+                  },
+                  "toolCalling": {
+                    "type": "boolean"
+                  },
+                  "vision": {
+                    "type": "boolean"
+                  },
+                  "contextWindow": {
+                    "type": "number"
+                  },
+                  "maxOutputTokens": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "id"
+                ]
+              }
+            },
+            "hiddenModels": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Model names to hide from the model picker."
+            }
+          },
+          "required": [
+            "url",
             "apiKey"
           ]
         }
@@ -3944,6 +4096,12 @@
         "enablement": "!chatSessionRequestInProgress",
         "icon": "$(repo)",
         "category": "GitHub Copilot"
+      },
+      {
+        "command": "creaeditor.showAiCosts",
+        "title": "Show AI Costs per Issue and Chat",
+        "category": "CreaEditor",
+        "icon": "$(credit-card)"
       }
     ],
     "configuration": [
@@ -7257,166 +7415,6 @@
         "command": "github.copilot.nes.captureExpected.abort",
         "key": "escape",
         "when": "copilotNesCaptureMode && editorTextFocus"
-      }
-    ],
-    "walkthroughs": [
-      {
-        "id": "copilotWelcome",
-        "title": "%github.copilot.walkthrough.title%",
-        "description": "%github.copilot.walkthrough.description%",
-        "when": "!isWeb",
-        "steps": [
-          {
-            "id": "copilot.setup.signIn",
-            "title": "%github.copilot.walkthrough.setup.signIn.title%",
-            "description": "%github.copilot.walkthrough.setup.signIn.description%",
-            "when": "chatEntitlementSignedOut && !view.workbench.panel.chat.view.copilot.visible && !github.copilot-chat.activated && !github.copilot.offline && !github.copilot.interactiveSession.individual.disabled && !github.copilot.interactiveSession.individual.expired && !github.copilot.interactiveSession.enterprise.disabled && !github.copilot.interactiveSession.contactSupport && !github.copilot.interactiveSession.invalidToken && !github.copilot.interactiveSession.rateLimited && !github.copilot.interactiveSession.gitHubLoginFailed",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.panelChat.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.setup.signInNoAction",
-            "title": "%github.copilot.walkthrough.setup.signIn.title%",
-            "description": "%github.copilot.walkthrough.setup.noAction.description%",
-            "when": "chatEntitlementSignedOut && view.workbench.panel.chat.view.copilot.visible && !github.copilot-chat.activated && !github.copilot.offline && !github.copilot.interactiveSession.individual.disabled && !github.copilot.interactiveSession.individual.expired && !github.copilot.interactiveSession.enterprise.disabled && !github.copilot.interactiveSession.contactSupport && !github.copilot.interactiveSession.invalidToken && !github.copilot.interactiveSession.rateLimited && !github.copilot.interactiveSession.gitHubLoginFailed",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.panelChat.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.setup.signUp",
-            "title": "%github.copilot.walkthrough.setup.signUp.title%",
-            "description": "%github.copilot.walkthrough.setup.signUp.description%",
-            "when": "chatPlanCanSignUp && !view.workbench.panel.chat.view.copilot.visible && !github.copilot-chat.activated && !github.copilot.offline && (github.copilot.interactiveSession.individual.disabled || github.copilot.interactiveSession.individual.expired) && !github.copilot.interactiveSession.enterprise.disabled && !github.copilot.interactiveSession.contactSupport && !github.copilot.interactiveSession.invalidToken && !github.copilot.interactiveSession.rateLimited && !github.copilot.interactiveSession.gitHubLoginFailed",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.panelChat.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.setup.signUpNoAction",
-            "title": "%github.copilot.walkthrough.setup.signUp.title%",
-            "description": "%github.copilot.walkthrough.setup.noAction.description%",
-            "when": "chatPlanCanSignUp && view.workbench.panel.chat.view.copilot.visible && !github.copilot-chat.activated && !github.copilot.offline && (github.copilot.interactiveSession.individual.disabled || github.copilot.interactiveSession.individual.expired) && !github.copilot.interactiveSession.enterprise.disabled && !github.copilot.interactiveSession.contactSupport && !github.copilot.interactiveSession.invalidToken && !github.copilot.interactiveSession.rateLimited && !github.copilot.interactiveSession.gitHubLoginFailed",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.panelChat.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.panelChat",
-            "title": "%github.copilot.walkthrough.panelChat.title%",
-            "description": "%github.copilot.walkthrough.panelChat.description%",
-            "when": "!chatEntitlementSignedOut || chatIsEnabled ",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/workspace-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.panelChat.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.edits",
-            "title": "%github.copilot.walkthrough.edits.title%",
-            "description": "%github.copilot.walkthrough.edits.description%",
-            "when": "!chatEntitlementSignedOut || chatIsEnabled ",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/edits.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/edits-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/edits-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/edits-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.edits.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.firstSuggest",
-            "title": "%github.copilot.walkthrough.firstSuggest.title%",
-            "description": "%github.copilot.walkthrough.firstSuggest.description%",
-            "when": "!chatEntitlementSignedOut || chatIsEnabled ",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/ghost-text.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/ghost-text-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/ghost-text-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/ghost-text-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.firstSuggest.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.inlineChatNotMac",
-            "title": "%github.copilot.walkthrough.inlineChatNotMac.title%",
-            "description": "%github.copilot.walkthrough.inlineChatNotMac.description%",
-            "when": "!isMac && (!chatEntitlementSignedOut || chatIsEnabled )",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.inlineChatNotMac.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.inlineChatMac",
-            "title": "%github.copilot.walkthrough.inlineChatMac.title%",
-            "description": "%github.copilot.walkthrough.inlineChatMac.description%",
-            "when": "isMac && (!chatEntitlementSignedOut || chatIsEnabled )",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/inline-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.inlineChatMac.media.altText%"
-            }
-          },
-          {
-            "id": "copilot.sparkle",
-            "title": "%github.copilot.walkthrough.sparkle.title%",
-            "description": "%github.copilot.walkthrough.sparkle.description%",
-            "when": "!chatEntitlementSignedOut || chatIsEnabled",
-            "media": {
-              "video": {
-                "dark": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/git-commit.mp4",
-                "light": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/git-commit-light.mp4",
-                "hc": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/git-commit-hc.mp4",
-                "hcLight": "https://vscodewalkthroughs.z1.web.core.windows.net/v0.26/git-commit-hclight.mp4"
-              },
-              "altText": "%github.copilot.walkthrough.sparkle.media.altText%"
-            }
-          }
-        ]
       }
     ],
     "jsonValidation": [

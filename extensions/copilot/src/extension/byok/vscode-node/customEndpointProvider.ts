@@ -8,6 +8,7 @@ import { IConfigurationService } from '../../../platform/configuration/common/co
 import { IDomainService } from '../../../platform/endpoint/common/domainService';
 import { EndpointEditToolName, IChatModelInformation, IChatModelRequestOptions, ModelSupportedEndpoint } from '../../../platform/endpoint/common/endpointProvider';
 import { ILogService } from '../../../platform/log/common/logService';
+import { IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
 import { ICreateEndpointBodyOptions, IEndpointBody } from '../../../platform/networking/common/networking';
 import { IChatWebSocketManager } from '../../../platform/networking/node/chatWebSocketManager';
@@ -248,8 +249,10 @@ export class CustomEndpointOAIEndpoint extends OpenAIEndpoint {
 		@IExperimentationService expService: IExperimentationService,
 		@IChatWebSocketManager chatWebSocketService: IChatWebSocketManager,
 		@ILogService logService: ILogService,
+		@IGatewayTrackingService gatewayTrackingService: IGatewayTrackingService,
+		@IFetcherService fetcherService: IFetcherService,
 	) {
-		super(modelMetadata, apiKey, modelUrl, domainService, chatMLFetcher, tokenizerProvider, instantiationService, configurationService, expService, chatWebSocketService, logService);
+		super(modelMetadata, apiKey, modelUrl, domainService, chatMLFetcher, tokenizerProvider, instantiationService, configurationService, expService, chatWebSocketService, logService, gatewayTrackingService, fetcherService);
 	}
 
 	protected override get useMessagesApi(): boolean {

@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { BYOKModelCapabilities } from '../../common/byokProvider';
-import { OpenRouterLMProvider } from '../openRouterProvider';
+import { lastOpenRouterDiscovery, OpenRouterLMProvider } from '../openRouterProvider';
 
 /**
  * Tests for issue #324671:
@@ -191,6 +191,9 @@ describe('OpenRouterLMProvider presets (CreaEditor)', () => {
 		public listModels(configuration: unknown) {
 			return this.getAllModels(true, 'key', configuration as never);
 		}
+		public listModelsWithoutKey(configuration: unknown) {
+			return this.getAllModels(true, undefined, configuration as never);
+		}
 	}
 
 	function createPresetProvider(fetch = vi.fn()): PresetTestProvider {
@@ -205,21 +208,37 @@ describe('OpenRouterLMProvider presets (CreaEditor)', () => {
 		);
 	}
 
-	it('lists only configured presets without fetching the catalog', async () => {
-		const fetch = vi.fn();
-		const models = await createPresetProvider(fetch).listModels({ apiKey: 'key', models: [{ id: '@preset/programmer-agent' }, { id: 'review-agent', name: 'Review Agent (preset)' }] });
-		expect(fetch).not.toHaveBeenCalled();
-		expect(models.map(m => [m.id, m.name])).toEqual([
-			['@preset/programmer-agent', 'Programmer Agent (preset)'],
-			['@preset/review-agent', 'Review Agent (preset)'],
-		]);
-		expect(models[0].maxInputTokens + models[0].maxOutputTokens).toBe(200_000);
-		expect(models[0].url).toBe('https://openrouter.ai/api/v1');
+	function jsonResponse(data: unknown) {
+		return { ok: true, status: 200, json: async () => data };
+	}
+
+	it('lists configured presets and discovers the account presets and guardrail-allowed models', async () => {
+		const fetch = vi.fn(async (url: string) => url.includes('/presets')
+			? jsonResponse({ data: [{ slug: 'programmer-agent', name: 'programmer-agent', status: 'active' }, { slug: 'design-review', name: 'Design Review', status: 'active' }, { slug: 'old', status: 'archived' }] })
+			: jsonResponse({ data: [{ id: 'anthropic/claude-sonnet-4.5', name: 'Claude Sonnet 4.5', supported_parameters: ['tools'], context_length: 1_000_000, top_provider: { context_length: 1_000_000 } }, { id: 'no/tools', name: 'No Tools', supported_parameters: [], context_length: 8000, top_provider: { context_length: 8000 } }] }));
+		const models = await createPresetProvider(fetch).listModels({ apiKey: 'key', models: [{ id: '@preset/programmer-agent' }, { id: 'review-agent', name: 'Review Agent (preset)' }], hiddenModels: ['review-agent'] });
+		expect({
+			urls: fetch.mock.calls.map(call => call[0]),
+			models: models.map(m => [m.id, m.name]),
+			contextWindow: models[0].maxInputTokens + models[0].maxOutputTokens,
+			url: models[0].url,
+			discovered: lastOpenRouterDiscovery.models.map(m => [m.id, m.isPreset]),
+		}).toEqual({
+			urls: ['https://openrouter.ai/api/v1/presets?limit=100', 'https://openrouter.ai/api/v1/models/user?supported_parameters=tools'],
+			models: [
+				['@preset/programmer-agent', 'Programmer Agent (preset)'],
+				['@preset/design-review', 'Design Review (preset)'],
+			],
+			contextWindow: 200_000,
+			url: 'https://openrouter.ai/api/v1',
+			discovered: [['@preset/programmer-agent', true], ['@preset/design-review', true], ['anthropic/claude-sonnet-4.5', false]],
+		});
 	});
 
-	it('lists nothing when no presets or models are configured', async () => {
+	it('does not fetch anything without an API key', async () => {
 		const fetch = vi.fn();
-		expect(await createPresetProvider(fetch).listModels({ apiKey: 'key' })).toEqual([]);
+		const provider = createPresetProvider(fetch);
+		expect(await provider.listModelsWithoutKey({ models: [{ id: '@preset/fast' }] })).toEqual([expect.objectContaining({ id: '@preset/fast' })]);
 		expect(fetch).not.toHaveBeenCalled();
 	});
 

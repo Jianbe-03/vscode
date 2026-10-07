@@ -2,7 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { LanguageModelChatInformation, LanguageModelChatProvider, lm } from 'vscode';
+import { commands, LanguageModelChatInformation, LanguageModelChatProvider, lm } from 'vscode';
 import { IAuthenticationService } from '../../../platform/authentication/common/authentication';
 import { IVSCodeExtensionContext } from '../../../platform/extContext/common/extensionContext';
 import { ILogService } from '../../../platform/log/common/logService';
@@ -17,10 +17,13 @@ import { AzureBYOKModelProvider } from './azureProvider';
 import { BYOKStorageService, IBYOKStorageService } from './byokStorageService';
 import { CustomEndpointBYOKModelProvider } from './customEndpointProvider';
 import { CustomOAIBYOKModelProvider } from './customOAIProvider';
+import { GatewayCostsPanel } from './gatewayCostsPanel';
+import { detectGatewayKind } from './gatewayDetection';
 import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
+import { LiteLLMLMProvider } from './liteLLMProvider';
 import { OllamaLMProvider } from './ollamaProvider';
 import { OAIBYOKLMProvider } from './openAIProvider';
-import { OpenRouterLMProvider } from './openRouterProvider';
+import { lastOpenRouterDiscovery, OpenRouterLMProvider } from './openRouterProvider';
 import { XAIBYOKLMProvider } from './xAIProvider';
 
 export class BYOKContrib extends Disposable implements IExtensionContribution {
@@ -43,6 +46,11 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		this._byokStorageService = new BYOKStorageService(extensionContext);
 		this._applyPolicy();
 		this._register(this._authService.onDidAuthenticationChange(() => this._applyPolicy()));
+
+		// CreaEditor: used by the "Add OpenRouter or LiteLLM Models" flow in the workbench.
+		this._register(commands.registerCommand('creaeditor.gateway.detect', (url: string) => detectGatewayKind(url, this._fetcherService)));
+		this._register(commands.registerCommand('creaeditor.gateway.openRouterModels', () => lastOpenRouterDiscovery.models));
+		this._register(this._instantiationService.createInstance(GatewayCostsPanel));
 	}
 
 	private _buildProviders(): void {
@@ -59,6 +67,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		this._providers.set(XAIBYOKLMProvider.providerId, xai);
 		this._providers.set(OAIBYOKLMProvider.providerId, openai);
 		this._providers.set(OpenRouterLMProvider.providerId, instantiationService.createInstance(OpenRouterLMProvider, this._byokStorageService));
+		this._providers.set(LiteLLMLMProvider.providerId, instantiationService.createInstance(LiteLLMLMProvider, this._byokStorageService)); // CreaEditor
 		this._providers.set(AzureBYOKModelProvider.providerId, instantiationService.createInstance(AzureBYOKModelProvider, this._byokStorageService));
 		this._providers.set(CustomOAIBYOKModelProvider.providerId, instantiationService.createInstance(CustomOAIBYOKModelProvider, this._byokStorageService));
 		this._providers.set(CustomEndpointBYOKModelProvider.providerId, instantiationService.createInstance(CustomEndpointBYOKModelProvider, this._byokStorageService));

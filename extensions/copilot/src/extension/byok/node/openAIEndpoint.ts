@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { Raw } from '@vscode/prompt-tsx';
 import type { CancellationToken } from 'vscode';
 import { IChatMLFetcher } from '../../../platform/chat/common/chatMLFetcher';
 import { ChatFetchResponseType, ChatResponse } from '../../../platform/chat/common/commonTypes';
@@ -9,15 +10,22 @@ import { ConfigKey, IConfigurationService } from '../../../platform/configuratio
 import { isKimiFamily } from '../../../platform/endpoint/common/chatModelCapabilities';
 import { IDomainService } from '../../../platform/endpoint/common/domainService';
 import { IChatModelInformation } from '../../../platform/endpoint/common/endpointProvider';
+import { BACKGROUND_CHAT_ID, extractUserRequestText, GatewayKind, gatewayKindFromUrl, getCostFromHeaders, getCostFromUsage, getGatewayTrackingBody, getGatewayTrackingHeaders, IChatWorkContext, normalizeGatewayRoot } from '../../../platform/endpoint/common/gatewayTracking';
+import { IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
 import { applyRequestMetadataToBody, expandRequestMetadata } from '../../../platform/endpoint/common/requestMetadata';
 import { ChatEndpoint, normalizeKimiToolCallIds } from '../../../platform/endpoint/node/chatEndpoint';
 import { ILogService } from '../../../platform/log/common/logService';
-import { isOpenAiFunctionTool } from '../../../platform/networking/common/fetch';
+import { FinishedCallback, isOpenAiFunctionTool } from '../../../platform/networking/common/fetch';
+import { IFetcherService, Response } from '../../../platform/networking/common/fetcherService';
 import { createCapiRequestBody, IChatEndpoint, ICreateEndpointBodyOptions, IEndpointBody, IMakeChatRequestOptions } from '../../../platform/networking/common/networking';
-import { RawMessageConversionCallback } from '../../../platform/networking/common/openai';
+import { ChatCompletion, RawMessageConversionCallback } from '../../../platform/networking/common/openai';
 import { IChatWebSocketManager } from '../../../platform/networking/node/chatWebSocketManager';
+import { getCurrentCapturingToken } from '../../../platform/requestLogger/node/requestLogger';
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
+import { ITelemetryService } from '../../../platform/telemetry/common/telemetry';
+import { TelemetryData } from '../../../platform/telemetry/common/telemetryData';
 import { ITokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
+import { AsyncIterableObject, timeout } from '../../../util/vs/base/common/async';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 
 function hydrateBYOKErrorMessages(response: ChatResponse): ChatResponse {
@@ -126,7 +134,9 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		@IConfigurationService configurationService: IConfigurationService,
 		@IExperimentationService expService: IExperimentationService,
 		@IChatWebSocketManager chatWebSocketService: IChatWebSocketManager,
-		@ILogService protected logService: ILogService
+		@ILogService protected logService: ILogService,
+		@IGatewayTrackingService private readonly _gatewayTrackingService: IGatewayTrackingService,
+		@IFetcherService private readonly _gatewayFetcherService: IFetcherService,
 	) {
 		super(
 			_modelMetadata,
@@ -276,13 +286,43 @@ export class OpenAIEndpoint extends ChatEndpoint {
 	 */
 	private _requestMetadataVariables: Record<string, string | undefined> = {};
 
+	/** CreaEditor: the LLM gateway this endpoint talks to, if any (set by the provider or derived from the URL). */
+	private _gatewayKind: GatewayKind | undefined;
+	/** CreaEditor: the BYOK provider group (API key) the model belongs to, for the cost ledger. */
+	private _providerGroup: string | undefined;
+	/** CreaEditor: the work context of the request this endpoint instance last built a body for. */
+	private _workContext: IChatWorkContext | undefined;
+
+	/** CreaEditor: marks this endpoint as talking to an LLM gateway, which enables chat/issue tracking and cost capture. */
+	setGateway(kind: GatewayKind | undefined, providerGroup?: string): void {
+		this._gatewayKind = kind;
+		this._providerGroup = providerGroup;
+	}
+
+	get gatewayKind(): GatewayKind | undefined {
+		return this._gatewayKind ?? gatewayKindFromUrl(this._modelUrl);
+	}
+
 	override createRequestBody(options: ICreateEndpointBodyOptions): IEndpointBody {
-		const body = this._createRequestBodyCore(options);
+		let body = this._createRequestBodyCore(options);
+		const token = getCurrentCapturingToken();
+		// Requests outside a chat (titles, summaries, ...) are tracked as background requests.
+		const chatId = token?.chatSessionId ?? options.conversationId ?? BACKGROUND_CHAT_ID;
+		this._requestMetadataVariables = { sessionId: options.conversationId ?? chatId, requestId: options.requestId };
+
+		// CreaEditor: always tell the gateway which chat and issue the request belongs to.
+		const gateway = this.gatewayKind;
+		if (gateway && chatId) {
+			const rootChatId = token?.parentChatSessionId ?? chatId;
+			this._workContext = this._gatewayTrackingService.getWorkContext(chatId, rootChatId, extractUserRequestText(getUserMessagesText(options.messages)));
+			const api = this.useResponsesApi ? 'responses' : this.useMessagesApi ? 'messages' : 'chatCompletions';
+			body = applyRequestMetadataToBody(body, getGatewayTrackingBody(gateway, api, this._workContext, options.requestId));
+		}
+
 		const metadata = this.modelMetadata.requestMetadata;
 		if (!metadata?.body) {
 			return body;
 		}
-		this._requestMetadataVariables = { sessionId: options.conversationId, requestId: options.requestId };
 		return applyRequestMetadataToBody(body, expandRequestMetadata(metadata, this._requestMetadataVariables).body);
 	}
 
@@ -440,6 +480,10 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		for (const [key, value] of Object.entries(this._customHeaders)) {
 			headers[key] = value;
 		}
+		const gateway = this.gatewayKind;
+		if (gateway) {
+			Object.assign(headers, getGatewayTrackingHeaders(gateway, this._workContext));
+		}
 		const metadataHeaders = this.modelMetadata.requestMetadata?.headers;
 		if (metadataHeaders) {
 			const expanded = expandRequestMetadata({ headers: metadataHeaders }, this._requestMetadataVariables).headers;
@@ -452,7 +496,104 @@ export class OpenAIEndpoint extends ChatEndpoint {
 
 	override cloneWithTokenOverride(modelMaxPromptTokens: number): IChatEndpoint {
 		const newModelInfo = { ...this.modelMetadata, maxInputTokens: modelMaxPromptTokens };
-		return this.instantiationService.createInstance(OpenAIEndpoint, newModelInfo, this._apiKey, this._modelUrl);
+		const clone = this.instantiationService.createInstance(OpenAIEndpoint, newModelInfo, this._apiKey, this._modelUrl);
+		clone.setGateway(this._gatewayKind, this._providerGroup);
+		return clone;
+	}
+
+	override async processResponseFromChatEndpoint(
+		telemetryService: ITelemetryService,
+		logService: ILogService,
+		response: Response,
+		expectedNumChoices: number,
+		finishCallback: FinishedCallback,
+		telemetryData: TelemetryData,
+		cancellationToken?: CancellationToken | undefined
+	): Promise<AsyncIterableObject<ChatCompletion>> {
+		const completions = await super.processResponseFromChatEndpoint(telemetryService, logService, response, expectedNumChoices, finishCallback, telemetryData, cancellationToken);
+		const gateway = this.gatewayKind;
+		const context = this._workContext;
+		if (!gateway || !context || !response.ok) {
+			return completions;
+		}
+		// CreaEditor: record the request in the cost ledger with the cost the gateway reports.
+		const headerCost = getCostFromHeaders(gateway, name => response.headers.get(name));
+		let host = '';
+		try {
+			host = new URL(this._modelUrl).host;
+		} catch {
+			// Keep the host empty for unparsable URLs.
+		}
+		const entryId = this._gatewayTrackingService.recordRequest({
+			chatId: context.chatId,
+			rootChatId: context.rootChatId,
+			chatTitle: context.chatTitle,
+			issue: context.issue,
+			issueSource: context.issueSource,
+			repo: context.repo,
+			branch: context.branch,
+			gateway,
+			gatewayHost: host,
+			providerGroup: this._providerGroup,
+			model: this.model,
+			gatewayRequestId: headerCost.gatewayRequestId,
+			cost: headerCost.cost,
+			costSource: headerCost.cost !== undefined ? 'header' : undefined,
+		});
+		let recorded = false;
+		return completions.map(completion => {
+			if (!recorded && (completion.usage || completion.requestId.completionId)) {
+				recorded = true;
+				const usageCost = headerCost.cost === undefined ? getCostFromUsage(completion.usage) : undefined;
+				const generationId = completion.requestId.completionId || headerCost.gatewayRequestId;
+				this._gatewayTrackingService.updateRequest(entryId, {
+					gatewayRequestId: generationId,
+					promptTokens: completion.usage?.prompt_tokens,
+					completionTokens: completion.usage?.completion_tokens,
+					cachedTokens: completion.usage?.prompt_tokens_details?.cached_tokens,
+					cost: usageCost,
+					costSource: usageCost !== undefined ? 'response' : undefined,
+				});
+				if (headerCost.cost === undefined && usageCost === undefined && generationId) {
+					void this._lookUpCost(gateway, entryId, generationId);
+				}
+			}
+			return completion;
+		});
+	}
+
+	/**
+	 * CreaEditor: asks the gateway for the cost of a request that did not report it inline
+	 * (OpenRouter `GET /generation`, LiteLLM `GET /spend/logs`). Gateways finalize costs
+	 * asynchronously, so this retries a few times.
+	 */
+	private async _lookUpCost(gateway: GatewayKind, entryId: string, gatewayRequestId: string): Promise<void> {
+		const url = gateway === 'openrouter'
+			? `https://openrouter.ai/api/v1/generation?id=${encodeURIComponent(gatewayRequestId)}`
+			: `${normalizeGatewayRoot(this._modelUrl)}/spend/logs?request_id=${encodeURIComponent(gatewayRequestId)}`;
+		for (const delay of [2000, 5000, 15000]) {
+			await timeout(delay);
+			try {
+				const response = await this._gatewayFetcherService.fetch(url, {
+					method: 'GET',
+					headers: { Authorization: `Bearer ${this._apiKey}` },
+					callSite: 'creaeditor-gateway-cost',
+				});
+				if (!response.ok) {
+					if (response.status === 401 || response.status === 403) {
+						return; // The key may not read spend data; keep the request without a cost.
+					}
+					continue;
+				}
+				const cost = parseCostLookup(gateway, await response.json());
+				if (cost !== undefined) {
+					this._gatewayTrackingService.updateRequest(entryId, { cost, costSource: gateway === 'openrouter' ? 'openrouter-api' : 'litellm-api' });
+					return;
+				}
+			} catch (error) {
+				this.logService.trace(`[GatewayTracking] Cost lookup failed: ${error}`);
+			}
+		}
 	}
 
 	public override async makeChatRequest2(options: IMakeChatRequestOptions, token: CancellationToken): Promise<ChatResponse> {
@@ -461,4 +602,26 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		const response = await super.makeChatRequest2(modifiedOptions, token);
 		return hydrateBYOKErrorMessages(response);
 	}
+}
+
+/** CreaEditor: text of the user messages, used for the chat title and issue detection. */
+function getUserMessagesText(messages: readonly Raw.ChatMessage[]): string {
+	return messages
+		.filter(m => m.role === Raw.ChatRole.User)
+		.map(m => m.content.map(part => part.type === Raw.ChatCompletionContentPartKind.Text ? part.text : '').join(''))
+		.join('\n');
+}
+
+/** CreaEditor: reads the cost from an OpenRouter `GET /generation` or LiteLLM `GET /spend/logs` response. */
+function parseCostLookup(gateway: GatewayKind, json: unknown): number | undefined {
+	if (gateway === 'openrouter') {
+		const data = (json as { data?: { total_cost?: unknown } } | undefined)?.data;
+		return typeof data?.total_cost === 'number' ? data.total_cost : undefined;
+	}
+	const rows = Array.isArray(json) ? json : (json as { data?: unknown } | undefined)?.data;
+	if (Array.isArray(rows) && rows.length) {
+		const spend = (rows[0] as { spend?: unknown }).spend;
+		return typeof spend === 'number' ? spend : undefined;
+	}
+	return undefined;
 }

@@ -1,0 +1,22 @@
+{
+  "displayName": "CreaEditor Features",
+  "description": "A tour of what CreaEditor adds to Visual Studio Code.",
+  "walkthrough.title": "What's in CreaEditor",
+  "walkthrough.description": "Everything CreaEditor adds to Visual Studio Code.",
+  "step.look.title": "Creacoon look and feel",
+  "step.look.description": "The Creacoon Dark and Creacoon Light themes, logo and app icon. CreaEditor follows your macOS appearance.\n[Choose a Theme](command:workbench.action.selectTheme)",
+  "step.models.title": "Your own models, no Copilot sign-in",
+  "step.models.description": "Chat, agents, prompts and tools from Copilot Chat run on your own API keys and on models from extensions such as LiteLLM, Claude Code and Codex. No GitHub Copilot account needed.\n[Manage Models](command:workbench.action.chat.manage)",
+  "step.gateways.title": "OpenRouter and LiteLLM, auto-discovered",
+  "step.gateways.description": "Paste an OpenRouter or LiteLLM proxy URL and CreaEditor detects which one it is. OpenRouter presets appear automatically, and only the models your key's guardrails allow are offered, so the model picker stays short.\n[Add OpenRouter or LiteLLM Models](command:workbench.action.chat.addOpenRouterModel)",
+  "step.costs.title": "Cost per issue and per chat",
+  "step.costs.description": "Every OpenRouter and LiteLLM request carries the chat, issue, repository and branch it belongs to. The cost the gateway reports is collected on the AI Costs page, grouped per issue. The issue comes from the branch name, a #123 in the prompt, or an agent using the Set Chat Issue tool.\n[Show AI Costs](command:creaeditor.showAiCosts)",
+  "step.agentsTree.title": "Agents tree",
+  "step.agentsTree.description": "See every chat as a block, with lines to the subagents it started and on to their own subagents. Each block shows status, model and duration and updates live. Click a block to jump to it.\n[Show Agents Tree](command:workbench.action.chat.showAgentsTree)",
+  "step.subagents.title": "Subagents that start subagents",
+  "step.subagents.description": "Subagents can start their own subagents, shown as nested cards in the chat. The depth is configurable.\n[Subagent Settings](command:workbench.action.openSettings?%5B%22chat.subagents%22%5D)",
+  "step.metadata.title": "Request metadata per key and model",
+  "step.metadata.description": "Add headers and body fields to requests per API key, per model, or on a model entry, with variables such as ${sessionId}, ${workspaceFolderName} and ${env:NAME}.\n[Open Language Models (JSON)](command:workbench.action.openLanguageModelsJson)",
+  "step.chatGroups.title": "Chat groups: parallel PRs in worktrees",
+  "step.chatGroups.description": "In the Agents window an agent can start a group of sessions, each in its own git worktree and branch, for example one per issue, and follow them up until each has a pull request. Custom agents with the agent tool get these tools automatically.\n[Open Agents Window](command:workbench.action.openAgentsWindow)"
+}

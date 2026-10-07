@@ -59,15 +59,15 @@ export function shouldShowManageModelsAction(_chatEntitlementService: IChatEntit
 	return true;
 }
 
-/** CreaEditor: opens the "Add OpenRouter Preset or Model..." flow. */
+/** CreaEditor: opens the "Add OpenRouter or LiteLLM Models..." flow. */
 export function createAddOpenRouterModelAction(commandService: ICommandService): IActionWidgetDropdownAction {
 	return {
 		id: 'addOpenRouterModel',
 		enabled: true,
 		checked: false,
 		class: ThemeIcon.asClassName(Codicon.add),
-		tooltip: localize('chat.addOpenRouterModel.tooltip', "Add OpenRouter Preset or Model"),
-		label: localize('chat.addOpenRouterModel', "Add OpenRouter Preset..."),
+		tooltip: localize('chat.addOpenRouterModel.tooltip', "Add OpenRouter or LiteLLM Models"),
+		label: localize('chat.addOpenRouterModel', "Add OpenRouter / LiteLLM..."),
 		run: () => { commandService.executeCommand('workbench.action.chat.addOpenRouterModel'); },
 	};
 }

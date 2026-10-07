@@ -1,0 +1,60 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`gatewayTracking (CreaEditor) > builds tracking bodies and headers per gateway 1`] = `
+{
+  "litellm": {
+    "litellm_session_id": "chat-1",
+    "metadata": {
+      "creaeditor_branch": "12-fix-login",
+      "creaeditor_chat": "chat-1",
+      "creaeditor_issue": "creacoon/bliep#12",
+      "creaeditor_issue_source": "branch",
+      "creaeditor_repo": "creacoon/bliep",
+      "creaeditor_request": "req-1",
+      "creaeditor_subchat": "sub-1",
+      "creaeditor_title": "Fix login",
+      "creaeditor_user": "jibbe",
+      "generation_name": "req-1",
+      "session_id": "chat-1",
+      "tags": [
+        "creaeditor",
+        "chat:chat-1",
+        "issue:creacoon/bliep#12",
+        "repo:creacoon/bliep",
+      ],
+      "trace_id": "chat-1",
+    },
+    "user": "jibbe",
+  },
+  "litellmHeaders": {
+    "x-litellm-tags": "creaeditor,chat:chat-1,issue:creacoon/bliep#12,repo:creacoon/bliep",
+  },
+  "openrouter": {
+    "metadata": {
+      "creaeditor_branch": "12-fix-login",
+      "creaeditor_chat": "chat-1",
+      "creaeditor_issue": "creacoon/bliep#12",
+      "creaeditor_issue_source": "branch",
+      "creaeditor_repo": "creacoon/bliep",
+      "creaeditor_request": "req-1",
+      "creaeditor_subchat": "sub-1",
+      "creaeditor_title": "Fix login",
+      "creaeditor_user": "jibbe",
+    },
+    "session_id": "chat-1",
+    "trace": {
+      "generation_name": "req-1",
+      "span_name": "subagent",
+      "trace_id": "chat-1",
+      "trace_name": "creacoon/bliep#12",
+    },
+    "user": "jibbe",
+  },
+  "openrouterHeaders": {
+    "HTTP-Referer": "https://creacoon.nl",
+    "X-Title": "CreaEditor",
+    "x-session-id": "chat-1",
+  },
+  "openrouterMessages": {},
+}
+`;

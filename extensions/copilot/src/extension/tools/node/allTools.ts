@@ -28,6 +28,7 @@ import './newWorkspace/newWorkspaceTool';
 import './notebookSummaryTool';
 import './readFileTool';
 import './readProjectStructureTool';
+import './setChatIssueTool'; // CreaEditor
 import './replaceStringTool';
 import './resolveMemoryFileUriTool';
 import './runNotebookCellTool';

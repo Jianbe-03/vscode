@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="600" rx="16" fill="#16152D"/>
+	<text x="40" y="58" fill="#F8F7FA" font-size="26" font-weight="600">Chat group "Sprint 12"</text>
+	<text x="40" y="88" fill="#BCBBCA" font-size="16">One agent starts a session per issue, each in its own git worktree and branch.</text>
+
+	<rect x="40" y="120" width="300" height="120" rx="12" fill="#1C1A37" stroke="#00BD8B" stroke-width="2"/>
+	<text x="64" y="158" fill="#00EC95" font-size="14" font-weight="600">COORDINATOR</text>
+	<text x="64" y="186" fill="#F8F7FA" font-size="18" font-weight="600">Issue to PR (Agents View)</text>
+	<text x="64" y="212" fill="#BCBBCA" font-size="14">create_session_group · list_session_group</text>
+
+	<g stroke="#00BD8B" stroke-width="2" fill="none">
+		<path d="M340 180 C 420 180, 420 170, 470 170"/>
+		<path d="M340 180 C 420 180, 420 320, 470 320"/>
+		<path d="M340 180 C 420 180, 420 470, 470 470"/>
+	</g>
+
+	<g font-size="14">
+		<rect x="470" y="120" width="450" height="110" rx="12" fill="#1C1A37" stroke="#34325A"/>
+		<circle cx="496" cy="152" r="7" fill="#00EC95"/>
+		<text x="512" y="157" fill="#F8F7FA" font-size="17" font-weight="600">#101 Plus-address login</text>
+		<text x="496" y="186" fill="#BCBBCA">worktree ../bliep.worktrees/101-plus-address-login</text>
+		<text x="496" y="210" fill="#00EC95">PR #318 opened · 6 files changed</text>
+
+		<rect x="470" y="270" width="450" height="110" rx="12" fill="#1C1A37" stroke="#34325A"/>
+		<circle cx="496" cy="302" r="7" fill="#F5C451"/>
+		<text x="512" y="307" fill="#F8F7FA" font-size="17" font-weight="600">#102 Export invoices as CSV</text>
+		<text x="496" y="336" fill="#BCBBCA">worktree ../bliep.worktrees/102-export-invoices-csv</text>
+		<text x="496" y="360" fill="#F5C451">Running tests · 2 subagents</text>
+
+		<rect x="470" y="420" width="450" height="110" rx="12" fill="#1C1A37" stroke="#34325A"/>
+		<circle cx="496" cy="452" r="7" fill="#F5C451"/>
+		<text x="512" y="457" fill="#F8F7FA" font-size="17" font-weight="600">#107 Dark mode for the dashboard</text>
+		<text x="496" y="486" fill="#BCBBCA">worktree ../bliep.worktrees/107-dashboard-dark-mode</text>
+		<text x="496" y="510" fill="#F5C451">Implementing · started 4 min ago</text>
+	</g>
+
+	<text x="40" y="560" fill="#BCBBCA" font-size="14">Illustration. Members appear under the group name in the Agents window; a failing member does not stop the others.</text>
+</svg>

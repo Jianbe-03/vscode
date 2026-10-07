@@ -1186,7 +1186,8 @@ suite('ExtensionEnablementService Test', () => {
 		assert.deepStrictEqual((<IExtension>target.args[0][0][0]).identifier, { id: 'pub.a' });
 	});
 
-	test('test chat extension is disabled on profile switch when setup is not completed', async () => {
+	test('test chat extension stays enabled when setup is not completed', async () => {
+		// CreaEditor: there is no GitHub Copilot setup, so the built-in chat extension is never disabled for new users or profiles.
 		const chatExtensionId = productService.defaultChatAgent!.chatExtensionId;
 		const chatExtension = aLocalExtension(chatExtensionId, undefined, ExtensionType.System);
 		installed.push(chatExtension);
@@ -1201,20 +1202,13 @@ suite('ExtensionEnablementService Test', () => {
 
 		testObject = disposableStore.add(new TestExtensionEnablementService(instantiationService, chatEntitlementService));
 		await testObject.waitUntilInitialized();
-
-		// Chat extension should be disabled after initial setup
-		assert.strictEqual(testObject.getEnablementState(chatExtension), EnablementState.DisabledGlobally);
-
-		// Enable the chat extension to simulate it being enabled in a previous profile
-		await testObject.setEnablement([chatExtension], EnablementState.EnabledGlobally);
-		assert.strictEqual(testObject.getEnablementState(chatExtension), EnablementState.EnabledGlobally);
+		const afterInitialSetup = testObject.getEnablementState(chatExtension);
 
 		// Simulate switching to a fresh profile by clearing the migration flag
 		storageService = instantiationService.get(IStorageService);
 		storageService.store('builtinChatExtensionEnablementMigration', false, StorageScope.PROFILE, StorageTarget.MACHINE);
 
-		// Chat extension should be disabled again after computing enablement state
-		assert.strictEqual(testObject.getEnablementState(chatExtension), EnablementState.DisabledGlobally);
+		assert.deepStrictEqual([afterInitialSetup, testObject.getEnablementState(chatExtension)], [EnablementState.EnabledGlobally, EnablementState.EnabledGlobally]);
 	});
 
 	test('test extension is disabled by allowed list', async () => {

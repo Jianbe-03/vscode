@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IGatewayTrackingService, NullGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
 import { CopilotTokenStore, ICopilotTokenStore } from '../../../platform/authentication/common/copilotTokenStore';
 import { BlockedExtensionService, IBlockedExtensionService } from '../../../platform/chat/common/blockedExtensionService';
 import { IChatMLFetcher } from '../../../platform/chat/common/chatMLFetcher';
@@ -160,6 +161,7 @@ export function createExtensionTestingServices(): TestingServiceCollection {
 	testingServiceCollection.define(IPowerService, new SyncDescriptor(NullPowerService));
 	testingServiceCollection.define(IChatMLFetcher, new SyncDescriptor(ChatMLFetcherImpl));
 	testingServiceCollection.define(IChatWebSocketManager, new SyncDescriptor(NullChatWebSocketManager));
+	testingServiceCollection.define(IGatewayTrackingService, new SyncDescriptor(NullGatewayTrackingService)); // CreaEditor
 	testingServiceCollection.define(IImageService, nullImageService);
 	testingServiceCollection.define(ITabsAndEditorsService, new SyncDescriptor(TabsAndEditorsServiceImpl));
 	testingServiceCollection.define(IEmbeddingsComputer, new SyncDescriptor(RemoteEmbeddingsComputer));

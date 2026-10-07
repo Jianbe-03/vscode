@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { IGatewayTrackingService, NullGatewayTrackingService } from '../../platform/endpoint/common/gatewayTrackingService';
 import type * as vscode from 'vscode';
 import { DocumentSelector, Position } from 'vscode-languageserver-protocol';
 import { GhostTextLogContext } from '../../extension/completions-core/common/ghostTextContext';
@@ -429,6 +430,7 @@ function setupServices(options: INESProviderOptions) {
 	builder.define(IPowerService, new SyncDescriptor(NullPowerService));
 	builder.define(IChatMLFetcher, new SyncDescriptor(ChatMLFetcherImpl));
 	builder.define(IChatWebSocketManager, new SyncDescriptor(NullChatWebSocketManager));
+	builder.define(IGatewayTrackingService, new SyncDescriptor(NullGatewayTrackingService)); // CreaEditor
 	builder.define(IOTelService, new NoopOTelService(resolveOTelConfig({ env: {}, extensionVersion: '0.0.0', sessionId: 'chatlib' })));
 	builder.define(IChatQuotaService, new SyncDescriptor(ChatQuotaService));
 	builder.define(IInteractionService, new SyncDescriptor(InteractionService));

@@ -1,0 +1,270 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+import * as l10n from '@vscode/l10n';
+import { commands, Uri, ViewColumn, WebviewPanel, window, workspace } from 'vscode';
+import { IGatewayCostEntry, IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
+import { Disposable, DisposableStore } from '../../../util/vs/base/common/lifecycle';
+import { generateUuid } from '../../../util/vs/base/common/uuid';
+
+export const SHOW_GATEWAY_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
+
+type PanelMessage = { readonly type: 'ready' } | { readonly type: 'exportCsv' } | { readonly type: 'clear' };
+
+/**
+ * CreaEditor: the "AI Costs" page. Shows the cost OpenRouter and LiteLLM reported for every request,
+ * grouped per issue and per chat, from the local cost ledger.
+ */
+export class GatewayCostsPanel extends Disposable {
+
+	private _panel: WebviewPanel | undefined;
+	private readonly _panelDisposables = this._register(new DisposableStore());
+
+	constructor(
+		@IGatewayTrackingService private readonly _trackingService: IGatewayTrackingService,
+	) {
+		super();
+		this._register(commands.registerCommand(SHOW_GATEWAY_COSTS_COMMAND_ID, () => this.show()));
+	}
+
+	show(): void {
+		if (this._panel) {
+			this._panel.reveal();
+			return;
+		}
+		const panel = window.createWebviewPanel('creaeditor.aiCosts', l10n.t('AI Costs'), ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
+		this._panel = panel;
+		panel.webview.html = this._getHtml();
+		this._panelDisposables.add(panel.webview.onDidReceiveMessage((message: PanelMessage) => this._onMessage(message)));
+		this._panelDisposables.add(this._trackingService.onDidChangeEntries(() => this._postEntries()));
+		this._panelDisposables.add(panel.onDidDispose(() => {
+			this._panel = undefined;
+			this._panelDisposables.clear();
+		}));
+	}
+
+	private async _onMessage(message: PanelMessage): Promise<void> {
+		switch (message.type) {
+			case 'ready':
+				this._postEntries();
+				break;
+			case 'exportCsv':
+				await this._exportCsv();
+				break;
+			case 'clear': {
+				const clear = l10n.t('Clear');
+				const answer = await window.showWarningMessage(l10n.t('Remove all recorded AI costs from this machine?'), { modal: true }, clear);
+				if (answer === clear) {
+					this._trackingService.clear();
+				}
+				break;
+			}
+		}
+	}
+
+	private _postEntries(): void {
+		void this._panel?.webview.postMessage({ type: 'entries', entries: this._trackingService.entries });
+	}
+
+	private async _exportCsv(): Promise<void> {
+		const target = await window.showSaveDialog({
+			defaultUri: Uri.file(`creaeditor-ai-costs-${new Date().toISOString().slice(0, 10)}.csv`),
+			filters: { CSV: ['csv'] },
+		});
+		if (!target) {
+			return;
+		}
+		await workspace.fs.writeFile(target, new TextEncoder().encode(toCsv(this._trackingService.entries)));
+		window.showInformationMessage(l10n.t('Exported {0} requests.', this._trackingService.entries.length));
+	}
+
+	private _getHtml(): string {
+		const nonce = generateUuid().replace(/-/g, '');
+		const strings = {
+			title: l10n.t('AI Costs'),
+			subtitle: l10n.t('Cost reported by OpenRouter and LiteLLM for every request, per issue and chat.'),
+			total: l10n.t('Total'),
+			requests: l10n.t('Requests'),
+			issues: l10n.t('Issues'),
+			chats: l10n.t('Chats'),
+			oneChat: l10n.t('{0} chat'),
+			manyChats: l10n.t('{0} chats'),
+			unknownCost: l10n.t('Requests without a cost yet'),
+			period7: l10n.t('Last 7 days'),
+			period30: l10n.t('Last 30 days'),
+			period90: l10n.t('Last 90 days'),
+			periodAll: l10n.t('All time'),
+			allGateways: l10n.t('All gateways'),
+			search: l10n.t('Filter by issue, chat, repository or model'),
+			export: l10n.t('Export CSV'),
+			clear: l10n.t('Clear'),
+			noIssue: l10n.t('Not linked to an issue'),
+			untitled: l10n.t('Untitled chat'),
+			empty: l10n.t('No requests recorded yet. Requests to OpenRouter and LiteLLM models are tracked automatically.'),
+			model: l10n.t('Model'),
+			tokens: l10n.t('Tokens'),
+			cost: l10n.t('Cost'),
+			last: l10n.t('Last request'),
+			sources: l10n.t('Cost sources'),
+			source_response: l10n.t('response'),
+			source_header: l10n.t('LiteLLM header'),
+			['source_openrouter-api']: l10n.t('OpenRouter API'),
+			['source_litellm-api']: l10n.t('LiteLLM spend API'),
+			viaBranch: l10n.t('from branch'),
+			viaPrompt: l10n.t('from prompt'),
+			viaAgent: l10n.t('set by agent'),
+		};
+		return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style nonce="${nonce}">
+	body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); color: var(--vscode-foreground); background: var(--vscode-editor-background); padding: 24px 32px; margin: 0; }
+	h1 { font-size: 1.6em; font-weight: 600; margin: 0 0 4px; }
+	.subtitle { color: var(--vscode-descriptionForeground); margin-bottom: 20px; }
+	.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+	select, input { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 4px 8px; font: inherit; }
+	input { flex: 1; min-width: 220px; }
+	button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 4px; padding: 5px 12px; font: inherit; cursor: pointer; }
+	button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+	.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 24px; }
+	.card { background: var(--vscode-sideBar-background, var(--vscode-editorWidget-background)); border: 1px solid var(--vscode-widget-border, transparent); border-radius: 8px; padding: 12px 16px; }
+	.card .label { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+	.card .value { font-size: 1.5em; font-weight: 600; margin-top: 4px; }
+	.card.total .value { color: var(--vscode-button-background); }
+	details.issue { border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+	details.issue > summary { display: flex; align-items: center; gap: 12px; padding: 10px 14px; cursor: pointer; background: var(--vscode-sideBar-background, transparent); list-style: none; }
+	details.issue > summary::-webkit-details-marker { display: none; }
+	.issue-name { font-weight: 600; flex: 1; }
+	.muted { color: var(--vscode-descriptionForeground); }
+	.badge { font-size: 0.8em; padding: 1px 6px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+	.amount { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 80px; text-align: right; }
+	table { width: 100%; border-collapse: collapse; }
+	th, td { text-align: left; padding: 6px 14px; border-top: 1px solid var(--vscode-widget-border, var(--vscode-panel-border)); vertical-align: top; }
+	th { color: var(--vscode-descriptionForeground); font-weight: normal; font-size: 0.9em; }
+	td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+	.chat-title { font-weight: 500; }
+	.models { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+	.empty { color: var(--vscode-descriptionForeground); padding: 40px 0; text-align: center; }
+</style>
+</head>
+<body>
+<h1>${escapeHtml(strings.title)}</h1>
+<div class="subtitle">${escapeHtml(strings.subtitle)}</div>
+<div class="toolbar">
+	<select id="period"><option value="7">${escapeHtml(strings.period7)}</option><option value="30" selected>${escapeHtml(strings.period30)}</option><option value="90">${escapeHtml(strings.period90)}</option><option value="0">${escapeHtml(strings.periodAll)}</option></select>
+	<select id="gateway"><option value="">${escapeHtml(strings.allGateways)}</option><option value="openrouter">OpenRouter</option><option value="litellm">LiteLLM</option></select>
+	<input id="search" type="search" placeholder="${escapeHtml(strings.search)}">
+	<button id="export">${escapeHtml(strings.export)}</button>
+	<button id="clear">${escapeHtml(strings.clear)}</button>
+</div>
+<div class="cards" id="cards"></div>
+<div id="groups"></div>
+<script nonce="${nonce}">
+const vscode = acquireVsCodeApi();
+const S = ${JSON.stringify(strings)};
+let entries = [];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const money = v => v === undefined ? '–' : '$' + (v < 10 && v > 0 ? v.toFixed(4) : v.toFixed(2));
+const tokens = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : String(v);
+const issueLabel = e => e.issue ? ((e.issue.repo || e.repo) ? (e.issue.repo || e.repo) + '#' + e.issue.number : '#' + e.issue.number) : '';
+function filtered() {
+	const days = Number($('period').value);
+	const since = days ? Date.now() - days * 864e5 : 0;
+	const gateway = $('gateway').value;
+	const q = $('search').value.trim().toLowerCase();
+	return entries.filter(e => e.time >= since && (!gateway || e.gateway === gateway) && (!q || [issueLabel(e), e.chatTitle, e.repo, e.branch, e.model].some(v => v && String(v).toLowerCase().includes(q))));
+}
+function sum(list, f) { return list.reduce((a, e) => a + (f(e) || 0), 0); }
+function render() {
+	const list = filtered();
+	const byIssue = new Map();
+	for (const e of list) {
+		const key = issueLabel(e) || '';
+		if (!byIssue.has(key)) byIssue.set(key, []);
+		byIssue.get(key).push(e);
+	}
+	const chats = new Set(list.map(e => e.rootChatId));
+	const unknown = list.filter(e => e.cost === undefined).length;
+	$('cards').innerHTML = [
+		['total', S.total, money(sum(list, e => e.cost))],
+		['', S.requests, list.length],
+		['', S.issues, [...byIssue.keys()].filter(Boolean).length],
+		['', S.chats, chats.size],
+		['', S.unknownCost, unknown],
+	].map(([cls, l, v]) => '<div class="card ' + cls + '"><div class="label">' + esc(l) + '</div><div class="value">' + esc(v) + '</div></div>').join('');
+	if (!list.length) { $('groups').innerHTML = '<div class="empty">' + esc(S.empty) + '</div>'; return; }
+	const groups = [...byIssue.entries()].sort((a, b) => sum(b[1], e => e.cost) - sum(a[1], e => e.cost));
+	$('groups').innerHTML = groups.map(([issue, items]) => {
+		const byChat = new Map();
+		for (const e of items) { if (!byChat.has(e.rootChatId)) byChat.set(e.rootChatId, []); byChat.get(e.rootChatId).push(e); }
+		const sourceOf = items.find(e => e.issueSource)?.issueSource;
+		const via = sourceOf === 'branch' ? S.viaBranch : sourceOf === 'prompt' ? S.viaPrompt : sourceOf === 'agent' ? S.viaAgent : '';
+		const rows = [...byChat.values()].sort((a, b) => sum(b, e => e.cost) - sum(a, e => e.cost)).map(chat => {
+			const models = [...new Set(chat.map(e => e.model))].join(', ');
+			const last = new Date(Math.max(...chat.map(e => e.time)));
+			const title = chat.find(e => e.chatTitle)?.chatTitle || S.untitled;
+			const branch = chat.find(e => e.branch)?.branch;
+			return '<tr><td><div class="chat-title">' + esc(title) + '</div><div class="models">' + esc(models) + (branch ? ' · ' + esc(branch) : '') + '</div></td>'
+				+ '<td class="num">' + chat.length + '</td>'
+				+ '<td class="num">' + tokens(sum(chat, e => (e.promptTokens || 0) + (e.completionTokens || 0))) + '</td>'
+				+ '<td>' + esc(last.toLocaleString()) + '</td>'
+				+ '<td class="num"><b>' + money(sum(chat, e => e.cost)) + '</b></td></tr>';
+		}).join('');
+		return '<details class="issue" open><summary><span class="issue-name">' + esc(issue || S.noIssue) + '</span>'
+			+ (via ? '<span class="badge">' + esc(via) + '</span>' : '')
+			+ '<span class="muted">' + esc((byChat.size === 1 ? S.oneChat : S.manyChats).replace('{0}', byChat.size)) + '</span>'
+			+ '<span class="amount">' + money(sum(items, e => e.cost)) + '</span></summary>'
+			+ '<table><tr><th>' + esc(S.chats) + '</th><th class="num">' + esc(S.requests) + '</th><th class="num">' + esc(S.tokens) + '</th><th>' + esc(S.last) + '</th><th class="num">' + esc(S.cost) + '</th></tr>' + rows + '</table></details>';
+	}).join('');
+}
+for (const id of ['period', 'gateway']) $(id).addEventListener('change', render);
+$('search').addEventListener('input', render);
+$('export').addEventListener('click', () => vscode.postMessage({ type: 'exportCsv' }));
+$('clear').addEventListener('click', () => vscode.postMessage({ type: 'clear' }));
+window.addEventListener('message', event => { if (event.data?.type === 'entries') { entries = event.data.entries; render(); } });
+vscode.postMessage({ type: 'ready' });
+</script>
+</body>
+</html>`;
+	}
+}
+
+function escapeHtml(value: string): string {
+	return value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c] ?? c);
+}
+
+function csvCell(value: string | number | undefined): string {
+	const text = value === undefined ? '' : String(value);
+	return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/** CreaEditor: the cost ledger as CSV, one row per request. */
+export function toCsv(entries: readonly IGatewayCostEntry[]): string {
+	const header = ['time', 'issue', 'issue_source', 'repo', 'branch', 'chat', 'chat_title', 'subchat', 'gateway', 'gateway_host', 'model', 'gateway_request_id', 'prompt_tokens', 'completion_tokens', 'cached_tokens', 'cost_usd', 'cost_source'];
+	const rows = entries.map(entry => [
+		new Date(entry.time).toISOString(),
+		entry.issue ? `${entry.issue.repo ?? entry.repo ?? ''}#${entry.issue.number}` : undefined,
+		entry.issueSource,
+		entry.repo,
+		entry.branch,
+		entry.rootChatId,
+		entry.chatTitle,
+		entry.chatId !== entry.rootChatId ? entry.chatId : undefined,
+		entry.gateway,
+		entry.gatewayHost,
+		entry.model,
+		entry.gatewayRequestId,
+		entry.promptTokens,
+		entry.completionTokens,
+		entry.cachedTokens,
+		entry.cost,
+		entry.costSource,
+	].map(csvCell).join(','));
+	return [header.join(','), ...rows].join('\n') + '\n';
+}

@@ -1,0 +1,121 @@
+{
+  "name": "creaeditor-features",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "1.0.0",
+  "publisher": "vscode",
+  "license": "MIT",
+  "engines": {
+    "vscode": "*"
+  },
+  "categories": [
+    "Other"
+  ],
+  "contributes": {
+    "walkthroughs": [
+      {
+        "id": "creaeditor.features",
+        "title": "%walkthrough.title%",
+        "description": "%walkthrough.description%",
+        "steps": [
+          {
+            "id": "look",
+            "title": "%step.look.title%",
+            "description": "%step.look.description%",
+            "media": {
+              "image": "media/look.png",
+              "altText": "%step.look.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.selectTheme"
+            ]
+          },
+          {
+            "id": "models",
+            "title": "%step.models.title%",
+            "description": "%step.models.description%",
+            "media": {
+              "image": "media/models.png",
+              "altText": "%step.models.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.manage"
+            ]
+          },
+          {
+            "id": "gateways",
+            "title": "%step.gateways.title%",
+            "description": "%step.gateways.description%",
+            "media": {
+              "image": "media/gateways.png",
+              "altText": "%step.gateways.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.addOpenRouterModel"
+            ]
+          },
+          {
+            "id": "costs",
+            "title": "%step.costs.title%",
+            "description": "%step.costs.description%",
+            "media": {
+              "image": "media/costs.png",
+              "altText": "%step.costs.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.showAiCosts"
+            ]
+          },
+          {
+            "id": "agentsTree",
+            "title": "%step.agentsTree.title%",
+            "description": "%step.agentsTree.description%",
+            "media": {
+              "image": "media/agents-tree.png",
+              "altText": "%step.agentsTree.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.showAgentsTree"
+            ]
+          },
+          {
+            "id": "subagents",
+            "title": "%step.subagents.title%",
+            "description": "%step.subagents.description%",
+            "media": {
+              "image": "media/subagents.png",
+              "altText": "%step.subagents.title%"
+            },
+            "completionEvents": [
+              "onSettingChanged:chat.subagents.maxNestingDepth"
+            ]
+          },
+          {
+            "id": "metadata",
+            "title": "%step.metadata.title%",
+            "description": "%step.metadata.description%",
+            "media": {
+              "image": "media/metadata.png",
+              "altText": "%step.metadata.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.openLanguageModelsJson"
+            ]
+          },
+          {
+            "id": "chatGroups",
+            "title": "%step.chatGroups.title%",
+            "description": "%step.chatGroups.description%",
+            "media": {
+              "svg": "media/chat-groups.svg",
+              "altText": "%step.chatGroups.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.openAgentsWindow"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

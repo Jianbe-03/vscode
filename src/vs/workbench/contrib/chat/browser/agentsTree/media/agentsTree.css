@@ -1,0 +1,207 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* CreaEditor: the Agents tree view, drawn as cards connected by lines. */
+
+.agents-tree-view .agents-tree-scroll {
+	overflow: auto;
+}
+
+.agents-tree-view .agents-tree {
+	/* Horizontal offset of the line that connects a card to its children, and the children's indent. */
+	--agents-tree-connector-x: 12px;
+	--agents-tree-indent: 24px;
+	/* Vertical gap between sibling cards, and the distance from a card's top to the middle of its header. */
+	--agents-tree-gap: 8px;
+	--agents-tree-header-middle: 17px;
+	--agents-tree-line: color-mix(in srgb, var(--vscode-descriptionForeground) 55%, transparent);
+	padding: var(--vscode-spacing-size80) var(--vscode-spacing-size120) var(--vscode-spacing-size120);
+}
+
+.agents-tree-view .agents-tree-empty {
+	color: var(--vscode-descriptionForeground);
+	padding: var(--vscode-spacing-size40) 0;
+}
+
+/* Status color of a card's accent and of the line that leads to it. */
+.agents-tree-view .agents-tree-node {
+	--agents-tree-status: var(--vscode-descriptionForeground);
+	position: relative;
+}
+
+.agents-tree-view .agents-tree-node[data-status="running"] {
+	--agents-tree-status: var(--vscode-progressBar-background);
+}
+
+.agents-tree-view .agents-tree-node[data-status="waiting"] {
+	--agents-tree-status: var(--vscode-editorWarning-foreground);
+}
+
+.agents-tree-view .agents-tree-node[data-status="done"] {
+	--agents-tree-status: var(--vscode-testing-iconPassed);
+}
+
+.agents-tree-view .agents-tree-node[data-status="failed"] {
+	--agents-tree-status: var(--vscode-errorForeground);
+}
+
+.agents-tree-view .agents-tree > .agents-tree-node + .agents-tree-node {
+	margin-top: var(--vscode-spacing-size160);
+}
+
+/* Children are indented below their parent card. */
+.agents-tree-view .agents-tree-children {
+	padding-left: var(--agents-tree-indent);
+}
+
+.agents-tree-view .agents-tree-children > .agents-tree-node {
+	padding-top: var(--agents-tree-gap);
+}
+
+/* The elbow from the parent's line into a child card. */
+.agents-tree-view .agents-tree-children > .agents-tree-node::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	left: calc(var(--agents-tree-connector-x) - var(--agents-tree-indent));
+	width: calc(var(--agents-tree-indent) - var(--agents-tree-connector-x));
+	height: calc(var(--agents-tree-gap) + var(--agents-tree-header-middle));
+	border-left: 2px solid var(--agents-tree-line);
+	border-bottom: 2px solid var(--agents-tree-line);
+	border-bottom-left-radius: var(--vscode-cornerRadius-large);
+	box-sizing: border-box;
+}
+
+/* The parent's line continues past a child to its next sibling. */
+.agents-tree-view .agents-tree-children > .agents-tree-node:not(:last-child)::after {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: calc(var(--agents-tree-connector-x) - var(--agents-tree-indent));
+	border-left: 2px solid var(--agents-tree-line);
+}
+
+/* A running or waiting agent highlights the line that leads to it. */
+.agents-tree-view .agents-tree-children > .agents-tree-node:is([data-status="running"], [data-status="waiting"])::before {
+	border-color: var(--agents-tree-status);
+}
+
+.agents-tree-view .agents-tree-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size20);
+	min-width: 0;
+	max-width: 480px;
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size80);
+	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-left: 2px solid var(--agents-tree-status);
+	border-radius: var(--vscode-cornerRadius-medium);
+	background-color: var(--vscode-editorWidget-background);
+	cursor: pointer;
+	box-sizing: border-box;
+}
+
+.agents-tree-view .agents-tree-card:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.agents-tree-view .agents-tree-card:focus {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.agents-tree-view .agents-tree-node[data-kind="group"] > .agents-tree-card {
+	border-style: dashed;
+	background-color: transparent;
+}
+
+.agents-tree-view .agents-tree-card-header {
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size60);
+	min-width: 0;
+	line-height: 20px;
+}
+
+.agents-tree-view .agents-tree-icon {
+	flex-shrink: 0;
+	color: var(--agents-tree-status);
+}
+
+.agents-tree-view .agents-tree-node:not([data-status]) > .agents-tree-card .agents-tree-icon,
+.agents-tree-view .agents-tree-node[data-status=""] > .agents-tree-card .agents-tree-icon {
+	color: var(--vscode-foreground);
+}
+
+.agents-tree-view .agents-tree-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.agents-tree-view .agents-tree-duration {
+	flex-shrink: 0;
+	white-space: nowrap;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label2);
+	font-variant-numeric: tabular-nums;
+}
+
+.agents-tree-view .agents-tree-twistie {
+	flex-shrink: 0;
+	border-radius: var(--vscode-cornerRadius-small);
+	color: var(--vscode-descriptionForeground);
+}
+
+.agents-tree-view .agents-tree-twistie:hover {
+	color: var(--vscode-foreground);
+	background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.agents-tree-view .agents-tree-description {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	color: var(--vscode-descriptionForeground);
+}
+
+.agents-tree-view .agents-tree-card-footer {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size40);
+	margin-top: var(--vscode-spacing-size20);
+}
+
+.agents-tree-view .agents-tree-model,
+.agents-tree-view .agents-tree-hidden-count {
+	padding: 0 var(--vscode-spacing-size60);
+	border-radius: var(--vscode-cornerRadius-circle);
+	font-size: var(--vscode-fontSize-label2);
+	line-height: 16px;
+	white-space: nowrap;
+}
+
+.agents-tree-view .agents-tree-model {
+	border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+	color: var(--vscode-descriptionForeground);
+}
+
+.agents-tree-view .agents-tree-hidden-count {
+	background-color: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+}
+
+.agents-tree-view .agents-tree-duration:empty,
+.agents-tree-view .agents-tree-description:empty,
+.agents-tree-view .agents-tree-model:empty,
+.agents-tree-view .agents-tree-hidden-count:empty,
+.agents-tree-view .agents-tree-card-footer:not(:has(> :not(:empty))) {
+	display: none;
+}

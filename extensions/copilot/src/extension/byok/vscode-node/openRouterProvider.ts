@@ -5,6 +5,7 @@
 import { IChatMLFetcher } from '../../../platform/chat/common/chatMLFetcher';
 import { IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IDomainService } from '../../../platform/endpoint/common/domainService';
+import { IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
 import { IChatModelInformation, ModelSupportedEndpoint } from '../../../platform/endpoint/common/endpointProvider';
 import { ILogService } from '../../../platform/log/common/logService';
 import { IFetcherService } from '../../../platform/networking/common/fetcherService';
@@ -66,7 +67,29 @@ interface OpenRouterModelEntry {
 interface OpenRouterProviderConfig extends LanguageModelChatConfiguration {
 	readonly models?: readonly OpenRouterModelEntry[];
 	readonly showAllModels?: boolean;
+	/** List the presets of the key's account in the model picker automatically (default `true`). */
+	readonly discoverPresets?: boolean;
+	/** Model or preset ids to hide from the model picker (e.g. discovered presets). */
+	readonly hiddenModels?: readonly string[];
 }
+
+/** Subset of an OpenRouter `GET /presets` entry. */
+interface OpenRouterPreset {
+	readonly slug: string;
+	readonly name?: string;
+	readonly status?: string;
+}
+
+/** CreaEditor: what the last model discovery found, offered by the "Add OpenRouter / LiteLLM Models" flow. */
+export interface IDiscoveredGatewayModel {
+	readonly id: string;
+	readonly name: string;
+	readonly contextWindow?: number;
+	readonly isPreset: boolean;
+}
+
+/** CreaEditor: the presets and guardrail-allowed models found by the most recent OpenRouter discovery. */
+export const lastOpenRouterDiscovery: { models: readonly IDiscoveredGatewayModel[] } = { models: [] };
 
 const OPENROUTER_PRESET_PREFIX = '@preset/';
 const DEFAULT_PRESET_CONTEXT_WINDOW = 200_000;
@@ -129,15 +152,28 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 
 	protected override async getAllModels(silent: boolean, apiKey: string | undefined, configuration: LanguageModelChatConfiguration | undefined): Promise<OpenAICompatibleLanguageModelChatInformation<LanguageModelChatConfiguration>[]> {
 		const config = configuration as OpenRouterProviderConfig | undefined;
-		const entries = (config?.models ?? [])
+		const hidden = new Set((config?.hiddenModels ?? []).map(normalizeOpenRouterModelId));
+		const entries: OpenRouterModelEntry[] = (config?.models ?? [])
 			.filter(entry => typeof entry?.id === 'string' && entry.id.trim().length > 0)
 			.map(entry => ({ ...entry, id: normalizeOpenRouterModelId(entry.id) }));
-		const needsCatalog = config?.showAllModels === true || entries.some(entry => !entry.id.startsWith(OPENROUTER_PRESET_PREFIX) || entry.baseModel);
+
+		// CreaEditor: the account's presets show up automatically.
+		const presets = apiKey && config?.discoverPresets !== false ? await this._fetchPresets(apiKey) : [];
+		for (const preset of presets) {
+			const id = OPENROUTER_PRESET_PREFIX + preset.slug;
+			if (!entries.some(entry => entry.id === id)) {
+				entries.push({ id, name: preset.name && preset.name !== preset.slug ? `${preset.name} (preset)` : undefined });
+			}
+		}
+		// The catalog (limited to the key's guardrails) is always fetched when there is a key, so the
+		// "Add OpenRouter / LiteLLM Models" flow can offer exactly the models the key may use.
+		const needsCatalog = !!apiKey || config?.showAllModels === true || entries.some(entry => !entry.id.startsWith(OPENROUTER_PRESET_PREFIX) || entry.baseModel);
 
 		let catalog: OpenAICompatibleLanguageModelChatInformation<LanguageModelChatConfiguration>[] = [];
 		if (needsCatalog) {
 			try {
-				catalog = await super.getAllModels(silent, apiKey, configuration);
+				// CreaEditor: `/models/user` may ignore the tools filter; agents need tool calling.
+				catalog = (await super.getAllModels(silent, apiKey, configuration)).filter(model => !!model.capabilities?.toolCalling);
 			} catch (error) {
 				// Presets must stay usable when the catalog cannot be fetched (e.g. offline).
 				if (!entries.length) {
@@ -171,12 +207,41 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 			this._knownModels = { ...this._knownModels, [id]: capabilities };
 		}
 
-		const configuredModels = byokKnownModelsToAPIInfoWithEffort(this._name, configured).map(model => ({ ...model, url: baseUrl }));
+		const configuredModels = byokKnownModelsToAPIInfoWithEffort(this._name, configured)
+			.filter(model => !hidden.has(model.id))
+			.map(model => ({ ...model, url: baseUrl }));
+		const configuredIds = new Set(configuredModels.map(model => model.id));
+		lastOpenRouterDiscovery.models = [
+			...presets.map(preset => {
+				const id = OPENROUTER_PRESET_PREFIX + preset.slug;
+				return { id, name: configured[id]?.name ?? defaultPresetName(id), isPreset: true };
+			}),
+			...catalog.map(model => ({ id: model.id, name: model.name, contextWindow: model.maxInputTokens + model.maxOutputTokens, isPreset: false })),
+		];
 		if (config?.showAllModels !== true) {
 			return configuredModels;
 		}
-		const configuredIds = new Set(configuredModels.map(model => model.id));
-		return [...configuredModels, ...catalog.filter(model => !configuredIds.has(model.id))];
+		return [...configuredModels, ...catalog.filter(model => !configuredIds.has(model.id) && !hidden.has(model.id))];
+	}
+
+	/** CreaEditor: the presets of the key's account (`GET /api/v1/presets`). */
+	private async _fetchPresets(apiKey: string): Promise<OpenRouterPreset[]> {
+		try {
+			const response = await this._fetcherService.fetch(`${this.getModelsBaseUrl()}/presets?limit=100`, {
+				method: 'GET',
+				headers: { Authorization: `Bearer ${apiKey}` },
+				callSite: 'creaeditor-openrouter-presets',
+			});
+			if (!response.ok) {
+				this._logService.trace(`[OpenRouter] Could not list presets: HTTP ${response.status}`);
+				return [];
+			}
+			const data = (await response.json() as { data?: OpenRouterPreset[] }).data ?? [];
+			return data.filter(preset => typeof preset.slug === 'string' && preset.slug && (!preset.status || preset.status === 'active'));
+		} catch (error) {
+			this._logService.trace(`[OpenRouter] Could not list presets: ${error}`);
+			return [];
+		}
 	}
 
 	protected override getModelsBaseUrl(): string | undefined {
@@ -184,12 +249,15 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 	}
 
 	protected override getModelsDiscoveryUrl(modelsBaseUrl: string): string {
-		return `${modelsBaseUrl}/models?supported_parameters=tools`;
+		// CreaEditor: `/models/user` only lists models allowed by the key's guardrails, provider preferences
+		// and privacy settings.
+		return `${modelsBaseUrl}/models/user?supported_parameters=tools`;
 	}
 
 	protected override resolveModelCapabilities(modelData: unknown): BYOKModelCapabilities | undefined {
 		const openRouterModelData = modelData as OpenRouterModelData;
 		const supportedParameters = openRouterModelData.supported_parameters ?? [];
+
 		// OpenRouter reports reasoning support per model via `supported_parameters`. The unified `reasoning` parameter and
 		// the OpenAI-style `reasoning_effort` alias both indicate the model accepts an effort level.
 		// See https://openrouter.ai/docs/use-cases/reasoning-tokens
@@ -269,8 +337,10 @@ export class OpenRouterEndpoint extends OpenAIEndpoint {
 		@IExperimentationService expService: IExperimentationService,
 		@IChatWebSocketManager chatWebSocketService: IChatWebSocketManager,
 		@ILogService logService: ILogService,
+		@IGatewayTrackingService gatewayTrackingService: IGatewayTrackingService,
+		@IFetcherService fetcherService: IFetcherService,
 	) {
-		super(modelMetadata, apiKey, modelUrl, domainService, chatMLFetcher, tokenizerProvider, instantiationService, configurationService, expService, chatWebSocketService, logService);
+		super(modelMetadata, apiKey, modelUrl, domainService, chatMLFetcher, tokenizerProvider, instantiationService, configurationService, expService, chatWebSocketService, logService, gatewayTrackingService, fetcherService);
 	}
 
 	/**

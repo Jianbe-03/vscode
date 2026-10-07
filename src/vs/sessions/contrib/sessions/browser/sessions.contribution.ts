@@ -31,7 +31,8 @@ const agentSessionsViewIcon = registerIcon('chat-sessions-icon', Codicon.comment
 const AGENT_SESSIONS_VIEW_TITLE = localize2('agentSessions.view.label', "Sessions");
 const SessionsContainerId = 'agentic.workbench.view.sessionsContainer';
 
-const agentSessionsViewContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
+// CreaEditor: exported so that the Agents tree view can be registered in the Sessions container.
+export const agentSessionsViewContainer: ViewContainer = Registry.as<IViewContainersRegistry>(ViewContainerExtensions.ViewContainersRegistry).registerViewContainer({
 	id: SessionsContainerId,
 	title: AGENT_SESSIONS_VIEW_TITLE,
 	icon: agentSessionsViewIcon,

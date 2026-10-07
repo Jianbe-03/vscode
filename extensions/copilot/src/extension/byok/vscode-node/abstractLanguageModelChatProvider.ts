@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { GatewayKind } from '../../../platform/endpoint/common/gatewayTracking';
 import { CancellationToken, commands, LanguageModelChatInformation, LanguageModelChatMessage, LanguageModelChatMessage2, LanguageModelChatProvider, LanguageModelResponsePart2, PrepareLanguageModelChatModelOptions, Progress, ProvideLanguageModelChatResponseOptions } from 'vscode';
 import { IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IChatModelInformation, ModelSupportedEndpoint } from '../../../platform/endpoint/common/endpointProvider';
@@ -17,6 +18,7 @@ import { OpenAIEndpoint } from '../node/openAIEndpoint';
 import { byokKnownModelsToAPIInfoWithEffort } from './byokModelInfo';
 import { resolveByokRequestMetadata } from './byokRequestMetadata';
 import { IBYOKStorageService } from './byokStorageService';
+import { detectGatewayKind } from './gatewayDetection';
 
 export interface LanguageModelChatConfiguration {
 	readonly apiKey?: string;
@@ -176,7 +178,17 @@ export abstract class AbstractOpenAICompatibleLMProvider<T extends LanguageModel
 	protected async createRequestEndpoint(model: OpenAICompatibleLanguageModelChatInformation<T>): Promise<OpenAIEndpoint> {
 		const endpoint = await this.createOpenAIEndPoint(model);
 		this.attachRequestMetadata(endpoint, model);
+		// CreaEditor: requests through OpenRouter or LiteLLM always carry chat/issue tracking and record their cost.
+		endpoint.setGateway(await this.resolveGatewayKind(endpoint));
 		return endpoint;
+	}
+
+	/**
+	 * CreaEditor: the LLM gateway behind an endpoint. OpenRouter is known by its URL; other OpenAI-compatible
+	 * URLs are probed once for a LiteLLM proxy.
+	 */
+	protected async resolveGatewayKind(endpoint: OpenAIEndpoint): Promise<GatewayKind | undefined> {
+		return endpoint.gatewayKind ?? detectGatewayKind(endpoint.urlOrRequestMetadata, this._fetcherService);
 	}
 
 	protected attachRequestMetadata(endpoint: OpenAIEndpoint, model: OpenAICompatibleLanguageModelChatInformation<T>): void {

@@ -3,17 +3,19 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: quick flow to add an OpenRouter preset (or a single OpenRouter model) to the
-// model picker without listing every OpenRouter model.
+// CreaEditor: quick flow to connect an OpenRouter account or a LiteLLM proxy and to add OpenRouter
+// presets or models to the model picker, without listing every model.
 
 import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2 } from '../../../../../platform/actions/common/actions.js';
+import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
-import { IQuickInputService, IQuickPickItem } from '../../../../../platform/quickinput/common/quickInput.js';
+import { IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../../platform/quickinput/common/quickInput.js';
 import { asJson, IRequestService } from '../../../../../platform/request/common/request.js';
 import { ILanguageModelsService } from '../../common/languageModels.js';
 import { ILanguageModelsConfigurationService, ILanguageModelsProviderGroup } from '../../common/languageModelsConfiguration.js';
@@ -22,7 +24,20 @@ import { CHAT_CATEGORY } from './chatActions.js';
 export const ADD_OPENROUTER_MODEL_COMMAND_ID = 'workbench.action.chat.addOpenRouterModel';
 
 const OPENROUTER_VENDOR = 'openrouter';
+const LITELLM_VENDOR = 'litellm';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1';
 const PRESET_PREFIX = '@preset/';
+
+/** Gateway kinds reported by the chat extension's `creaeditor.gateway.detect` command. */
+type GatewayKind = 'openrouter' | 'litellm';
+
+/** A model or preset discovered by the chat extension (`creaeditor.gateway.openRouterModels`). */
+interface IDiscoveredModel {
+	readonly id: string;
+	readonly name: string;
+	readonly contextWindow?: number;
+	readonly isPreset: boolean;
+}
 
 interface IOpenRouterCatalogModel {
 	readonly id: string;
@@ -38,6 +53,15 @@ interface IOpenRouterPick extends IQuickPickItem {
 interface IOpenRouterModelEntry {
 	readonly id: string;
 	readonly name?: string;
+}
+
+/** Services the connect flow needs. */
+interface IConnectGatewayServices {
+	readonly quickInputService: IQuickInputService;
+	readonly commandService: ICommandService;
+	readonly dialogService: IDialogService;
+	readonly languageModelsService: ILanguageModelsService;
+	readonly configurationService: ILanguageModelsConfigurationService;
 }
 
 /**
@@ -75,12 +99,22 @@ function presetPick(value: string): IOpenRouterPick {
 	};
 }
 
-async function fetchCatalog(requestService: IRequestService, logService: ILogService): Promise<IOpenRouterCatalogModel[]> {
+/** The presets and guardrail-allowed models the chat extension discovered with the OpenRouter key. */
+async function getDiscoveredModels(commandService: ICommandService): Promise<IDiscoveredModel[]> {
+	try {
+		return await commandService.executeCommand<IDiscoveredModel[]>('creaeditor.gateway.openRouterModels') ?? [];
+	} catch {
+		return [];
+	}
+}
+
+/** The public OpenRouter catalog, used when nothing was discovered with a key yet. */
+async function fetchPublicCatalog(requestService: IRequestService, logService: ILogService): Promise<IDiscoveredModel[]> {
 	const cts = new CancellationTokenSource();
 	try {
-		const context = await requestService.request({ type: 'GET', url: 'https://openrouter.ai/api/v1/models?supported_parameters=tools', callSite: 'chat.openRouterCatalog' }, cts.token);
+		const context = await requestService.request({ type: 'GET', url: `${OPENROUTER_URL}/models?supported_parameters=tools`, callSite: 'chat.openRouterCatalog' }, cts.token);
 		const result = await asJson<{ data?: IOpenRouterCatalogModel[] }>(context);
-		return result?.data ?? [];
+		return (result?.data ?? []).map(model => ({ id: model.id, name: model.name ?? model.id, contextWindow: model.context_length, isPreset: false }));
 	} catch (error) {
 		logService.warn('[OpenRouter] Could not load the model catalog', error);
 		return [];
@@ -89,32 +123,50 @@ async function fetchCatalog(requestService: IRequestService, logService: ILogSer
 	}
 }
 
-async function pickOpenRouterModel(quickInputService: IQuickInputService, requestService: IRequestService, logService: ILogService): Promise<IOpenRouterPick | undefined> {
+async function pickOpenRouterModel(quickInputService: IQuickInputService, commandService: ICommandService, requestService: IRequestService, logService: ILogService, existingIds: ReadonlySet<string>): Promise<IOpenRouterPick | undefined> {
 	const disposables = new DisposableStore();
-	const picker = disposables.add(quickInputService.createQuickPick<IOpenRouterPick>());
+	const picker = disposables.add(quickInputService.createQuickPick<IOpenRouterPick>({ useSeparators: true }));
 	picker.title = localize('openRouter.pickTitle', "Add OpenRouter Preset or Model");
-	picker.placeholder = localize('openRouter.pickPlaceholder', "Type a preset slug (e.g. programmer-agent), paste a preset URL, or pick a model");
+	picker.placeholder = localize('openRouter.pickPlaceholder', "Pick a preset or a model your key may use, or type a preset slug or URL");
 	picker.matchOnDescription = true;
 	picker.busy = true;
 
-	let catalogItems: IOpenRouterPick[] = [];
+	let discoveredItems: (IOpenRouterPick | IQuickPickSeparator)[] = [];
 	const update = () => {
 		const value = picker.value.trim();
 		const typed = value ? [presetPick(value)] : [];
-		picker.items = [...typed, ...catalogItems];
+		picker.items = [...typed, ...discoveredItems];
 	};
 	disposables.add(picker.onDidChangeValue(update));
-	fetchCatalog(requestService, logService).then(models => {
-		catalogItems = models.map(model => ({
-			modelId: model.id,
-			defaultName: model.name ?? model.id,
-			label: model.name ?? model.id,
-			description: model.id,
-			detail: model.context_length ? localize('openRouter.context', "{0}K context", Math.round(model.context_length / 1000)) : undefined,
-		}));
+
+	const toPick = (model: IDiscoveredModel): IOpenRouterPick => ({
+		modelId: model.id,
+		defaultName: model.name || model.id,
+		label: model.name || model.id,
+		description: existingIds.has(model.id) ? localize('openRouter.alreadyAdded', "{0} · added", model.id) : model.id,
+		detail: model.contextWindow ? localize('openRouter.context', "{0}K context", Math.round(model.contextWindow / 1000)) : undefined,
+	});
+	const load = async () => {
+		let models = await getDiscoveredModels(commandService);
+		const fromKey = models.length > 0;
+		if (!fromKey) {
+			models = await fetchPublicCatalog(requestService, logService);
+		}
+		const presets = models.filter(model => model.isPreset);
+		const others = models.filter(model => !model.isPreset);
+		const presetSeparator: IQuickPickSeparator = { type: 'separator', label: localize('openRouter.presets', "Presets") };
+		const modelSeparator: IQuickPickSeparator = {
+			type: 'separator',
+			label: fromKey ? localize('openRouter.allowedModels', "Models allowed by your key's guardrails") : localize('openRouter.allModels', "Models"),
+		};
+		discoveredItems = [
+			...(presets.length ? [presetSeparator, ...presets.map(toPick)] : []),
+			...(others.length ? [modelSeparator, ...others.map(toPick)] : []),
+		];
 		picker.busy = false;
 		update();
-	});
+	};
+	void load();
 	update();
 
 	try {
@@ -132,11 +184,73 @@ async function pickOpenRouterModel(quickInputService: IQuickInputService, reques
 	}
 }
 
+/**
+ * Connects a new gateway: asks for its URL, detects whether it is OpenRouter or a LiteLLM proxy and
+ * adds a provider group with the given API key. Returns the detected gateway kind.
+ */
+async function connectGateway(services: IConnectGatewayServices): Promise<GatewayKind | undefined> {
+	const { quickInputService, commandService, dialogService, languageModelsService, configurationService } = services;
+	const url = (await quickInputService.input({
+		title: localize('gateway.urlTitle', "Connect OpenRouter or LiteLLM"),
+		prompt: localize('gateway.urlPrompt', "OpenRouter, or the URL of your LiteLLM proxy (connect to Tailscale or your VPN first if the proxy is only reachable there)."),
+		value: OPENROUTER_URL,
+		validateInput: async value => {
+			try {
+				new URL(value.trim());
+				return undefined;
+			} catch {
+				return localize('gateway.invalidUrl', "Please enter a valid URL.");
+			}
+		},
+	}))?.trim();
+	if (!url) {
+		return undefined;
+	}
+
+	let kind = await commandService.executeCommand<GatewayKind | undefined>('creaeditor.gateway.detect', url);
+	if (!kind) {
+		const { confirmed } = await dialogService.confirm({
+			message: localize('gateway.notDetected', "No OpenRouter or LiteLLM proxy was found at {0}.", url),
+			detail: localize('gateway.notDetectedDetail', "If this is a LiteLLM proxy, check that you are connected to Tailscale or your VPN. You can also add it anyway; its models are discovered once it can be reached."),
+			primaryButton: localize('gateway.addAnyway', "Add as LiteLLM Anyway"),
+		});
+		if (!confirmed) {
+			return undefined;
+		}
+		kind = 'litellm';
+	}
+
+	const existingNames = new Set(configurationService.getLanguageModelsProviderGroups().map(group => group.name));
+	const defaultName = kind === 'openrouter' ? 'OpenRouter' : 'LiteLLM';
+	const name = (await quickInputService.input({
+		title: kind === 'openrouter' ? localize('gateway.nameOpenRouter', "OpenRouter Detected") : localize('gateway.nameLiteLLM', "LiteLLM Proxy Detected"),
+		prompt: localize('gateway.namePrompt', "Name for this connection (shown as a group in the model picker)."),
+		value: existingNames.has(defaultName) ? `${defaultName} 2` : defaultName,
+		validateInput: async value => !value.trim()
+			? localize('gateway.nameRequired', "Please enter a name.")
+			: existingNames.has(value.trim()) ? localize('gateway.nameExists', "A connection with this name already exists.") : undefined,
+	}))?.trim();
+	if (!name) {
+		return undefined;
+	}
+	const apiKey = await quickInputService.input({
+		title: kind === 'openrouter' ? localize('gateway.keyOpenRouter', "OpenRouter API Key") : localize('gateway.keyLiteLLM', "LiteLLM Virtual Key"),
+		prompt: localize('gateway.keyPrompt', "Stored in the secret storage of this machine."),
+		password: true,
+		validateInput: async value => value.trim() ? undefined : localize('gateway.keyRequired', "Please enter an API key."),
+	});
+	if (!apiKey) {
+		return undefined;
+	}
+	await languageModelsService.addLanguageModelsProviderGroup(name, kind === 'openrouter' ? OPENROUTER_VENDOR : LITELLM_VENDOR, kind === 'openrouter' ? { apiKey } : { url, apiKey });
+	return kind;
+}
+
 export class AddOpenRouterModelAction extends Action2 {
 	constructor() {
 		super({
 			id: ADD_OPENROUTER_MODEL_COMMAND_ID,
-			title: localize2('chat.addOpenRouterModel', "Add OpenRouter Preset or Model..."),
+			title: localize2('chat.addGatewayModels', "Add OpenRouter or LiteLLM Models..."),
 			category: CHAT_CATEGORY,
 			f1: true,
 		});
@@ -149,8 +263,47 @@ export class AddOpenRouterModelAction extends Action2 {
 		const languageModelsService = accessor.get(ILanguageModelsService);
 		const configurationService = accessor.get(ILanguageModelsConfigurationService);
 		const notificationService = accessor.get(INotificationService);
+		const commandService = accessor.get(ICommandService);
+		const dialogService = accessor.get(IDialogService);
 
-		const picked = await pickOpenRouterModel(quickInputService, requestService, logService);
+		await configurationService.whenReady;
+		const gatewayGroups = () => configurationService.getLanguageModelsProviderGroups().filter(group => group.vendor === OPENROUTER_VENDOR || group.vendor === LITELLM_VENDOR);
+
+		let group: ILanguageModelsProviderGroup | undefined;
+		const groups = gatewayGroups();
+		if (groups.length) {
+			const pick = await quickInputService.pick<IQuickPickItem & { group?: ILanguageModelsProviderGroup }>([
+				...groups.map(g => ({ label: g.name, description: g.vendor === LITELLM_VENDOR ? localize('gateway.liteLLM', "LiteLLM") : localize('gateway.openRouter', "OpenRouter"), group: g })),
+				{ label: localize('gateway.connectNew', "{0} Connect OpenRouter or a LiteLLM Proxy...", '$(plug)') },
+			], { placeHolder: localize('gateway.pickGroup', "Add models to which connection?") });
+			if (!pick) {
+				return;
+			}
+			group = pick.group;
+		}
+		if (!group) {
+			const kind = await connectGateway({ quickInputService, commandService, dialogService, languageModelsService, configurationService });
+			if (!kind) {
+				return;
+			}
+			if (kind === 'litellm') {
+				notificationService.info(localize('gateway.liteLLMAdded', "LiteLLM connected. The models your key may use appear in the model picker automatically."));
+				return;
+			}
+			notificationService.info(localize('gateway.openRouterAdded', "OpenRouter connected. Your presets appear in the model picker automatically; you can add models next."));
+			group = gatewayGroups().filter(g => g.vendor === OPENROUTER_VENDOR).at(-1);
+			if (!group) {
+				return;
+			}
+		}
+
+		if (group.vendor === LITELLM_VENDOR) {
+			notificationService.info(localize('gateway.liteLLMAuto', "The models of \"{0}\" are discovered from the LiteLLM proxy automatically. Add a \"hiddenModels\" list in the language models JSON to hide some.", group.name));
+			return;
+		}
+
+		const existing: IOpenRouterModelEntry[] = Array.isArray(group.models) ? group.models as IOpenRouterModelEntry[] : [];
+		const picked = await pickOpenRouterModel(quickInputService, commandService, requestService, logService, new Set(existing.map(entry => entry.id)));
 		if (!picked) {
 			return;
 		}
@@ -165,33 +318,11 @@ export class AddOpenRouterModelAction extends Action2 {
 			return;
 		}
 
-		await configurationService.whenReady;
-		const openRouterGroups = () => configurationService.getLanguageModelsProviderGroups().filter(group => group.vendor === OPENROUTER_VENDOR);
-		let groups = openRouterGroups();
-		if (!groups.length) {
-			// No API key configured yet: run the regular "add OpenRouter" flow (asks for a name and API key).
-			await languageModelsService.configureLanguageModelsProviderGroup(OPENROUTER_VENDOR);
-			groups = openRouterGroups();
-			if (!groups.length) {
-				return;
-			}
-		}
-
-		let group: ILanguageModelsProviderGroup | undefined = groups[0];
-		if (groups.length > 1) {
-			const pick = await quickInputService.pick(groups.map(g => ({ label: g.name, group: g })), { placeHolder: localize('openRouter.pickGroup', "Add to which OpenRouter API key?") });
-			group = pick?.group;
-		}
-		if (!group) {
-			return;
-		}
-
-		const existing: IOpenRouterModelEntry[] = Array.isArray(group.models) ? group.models as IOpenRouterModelEntry[] : [];
 		const models = existing.some(entry => entry.id === picked.modelId)
 			? existing.map(entry => entry.id === picked.modelId ? { ...entry, name: name.trim() } : entry)
 			: [...existing, { id: picked.modelId, name: name.trim() }];
 		await configurationService.updateLanguageModelsProviderGroup(group, { ...group, models });
 
-		notificationService.info(localize('openRouter.added', "Added \"{0}\" ({1}) to OpenRouter group \"{2}\".", name.trim(), picked.modelId, group.name));
+		notificationService.info(localize('openRouter.added', "Added \"{0}\" ({1}) to \"{2}\".", name.trim(), picked.modelId, group.name));
 	}
 }

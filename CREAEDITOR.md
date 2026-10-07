@@ -4,10 +4,13 @@ CreaEditor is Creacoon's build of Visual Studio Code (based on VS Code 1.140.0).
 
 - the Creacoon look: Creacoon Dark and Creacoon Light themes, logo and app icon;
 - chat that runs only on your own language models (BYOK, LiteLLM, Claude Code, Codex, ...), with all of Copilot Chat's built-in agents, prompts and tools;
-- OpenRouter presets in the model picker, without listing every OpenRouter model;
+- OpenRouter and LiteLLM connections that are detected automatically, with OpenRouter presets and only the models your key's guardrails allow, so the model picker stays short;
+- tracking of every OpenRouter / LiteLLM request by chat and issue, and an **AI Costs** page with the cost per issue and per chat;
 - request metadata (extra headers and body fields) per API key and per model;
-- subagents that can start their own subagents;
+- subagents that can start their own subagents, and an **Agents** tree that shows them all live;
 - chat groups: agents can start several sessions at once, each in its own git worktree and branch.
+
+**Help → CreaEditor Features** opens a tour of all of this, with pictures.
 
 ## Installing (macOS)
 
@@ -29,22 +32,28 @@ CreaEditor keeps its settings and extensions apart from VS Code (`~/Library/Appl
 GitHub Copilot models are not used, and no GitHub sign-in is needed for chat. Add models in one of these ways:
 
 - **Chat: Manage Language Models** (or **Manage Models...** in the model picker): add an API key for OpenRouter, Anthropic, OpenAI, Azure, Gemini, Ollama, a custom OpenAI-compatible endpoint, and others.
-- Extensions that contribute language models, such as LiteLLM, show up in the model picker automatically.
+- **Chat: Add OpenRouter or LiteLLM Models...** (also in the model picker): connect OpenRouter or your LiteLLM proxy, see below.
+- Extensions that contribute language models show up in the model picker automatically.
 - **Claude Code** (`anthropic.claude-code`) and **Codex** (`openai.chatgpt`) install from the Extensions view and work as in VS Code.
 
 Copilot Chat's agents (Agent, Ask, Plan, ...), prompts, tools, custom agents (`.github/agents/*.agent.md`), prompt files and instructions all work with these models. Internal helper tasks, such as titles and summaries, use the selected chat model, or the model set in `chat.utilityModel` / `chat.utilitySmallModel`.
 
-## OpenRouter presets
+## OpenRouter and LiteLLM
 
-By default an OpenRouter API key shows **only the models you add**, not the whole catalog.
+Run **Chat: Add OpenRouter or LiteLLM Models...**, or click **Add OpenRouter / LiteLLM...** (or **+** next to **Other Models**) in the model picker.
 
-Add one:
+1. Enter the URL: OpenRouter (`https://openrouter.ai/api/v1`, the default) or your LiteLLM proxy. If the proxy is only reachable over Tailscale or a VPN, connect that first. CreaEditor detects which of the two it is.
+2. Give the connection a name and enter the API key (OpenRouter key or LiteLLM virtual key). It is stored in the secret storage of your Mac.
 
-1. Click **+** in the **Other Models** section of the model picker, or run **Chat: Add OpenRouter Preset or Model...**.
-2. Type the preset slug (`programmer-agent`), `@preset/programmer-agent`, or paste the preset URL from openrouter.ai. You can also pick a regular model from the list.
-3. Accept or change the name, for example `Programmer Agent (preset)`.
+**OpenRouter:**
+- The presets of your account appear in the model picker automatically (`GET /api/v1/presets`).
+- To add a model, run the same command again. The list only offers models your key's guardrails, provider preferences and privacy settings allow (`GET /api/v1/models/user`).
+- You can still type a preset slug, `@preset/...` or a preset URL.
+- The rest of the catalog stays out of the picker unless you set `"showAllModels": true`.
 
-The first time, you are asked for the OpenRouter API key.
+**LiteLLM:**
+- Every model your virtual key may use appears automatically, with context size, tool calling and vision taken from the proxy's `/model/info`.
+- Hide models with `"hiddenModels": ["..."]`, or rename them under `"models"`.
 
 Agents and prompt files can use the model by name:
 
@@ -73,7 +82,35 @@ The entries live in `chatLanguageModels.json` (**Chat: Open Language Models (JSO
 
 Preset defaults are tool calling on, vision off, a 200K context window and 32K output tokens. A preset can borrow the capabilities of a catalog model with `"baseModel": "anthropic/claude-sonnet-4.5"`.
 
+## Cost per issue and chat
+
+Every request to OpenRouter or LiteLLM carries the chat it belongs to and the issue it works on, so the gateways can attribute the cost:
+
+| Gateway | Sent with each request |
+| --- | --- |
+| OpenRouter | `session_id` (the chat), `user`, `trace` (issue as trace name) and `metadata`: `creaeditor_chat`, `creaeditor_issue`, `creaeditor_repo`, `creaeditor_branch`, `creaeditor_title`, ... Header `x-session-id`. |
+| LiteLLM | `litellm_session_id`, `user`, `metadata` (same fields plus `tags`) and header `x-litellm-tags: creaeditor,chat:<id>,issue:<owner/repo#n>,repo:<owner/repo>` |
+
+**Subagents:** their requests carry their own `creaeditor_subchat` id and add up to the chat that started them.
+
+**Issue:** taken from, in order of preference:
+1. an agent calling the **Set Chat Issue** tool (`#chatIssue`; it is in the `execute` tool set, so agents like *Issue to PR* have it);
+2. `#123`, `owner/repo#123` or an issue URL in the first prompt;
+3. the branch name (`123-fix-login`, `issue/123`, `feature/GH-123-x`).
+
+**Recording costs:** CreaEditor records the cost each gateway reports:
+- OpenRouter: `usage.cost` in the response, or `GET /api/v1/generation` afterwards.
+- LiteLLM: the `x-litellm-response-cost` header, or `GET /spend/logs` when the key may read it.
+
+**AI Costs page** (**CreaEditor: Show AI Costs per Issue and Chat**):
+- Shows the total per issue, and per chat within each issue.
+- Filter by period, gateway or text, and export everything as CSV.
+- The data stays on your Mac.
+- Because the metadata is sent along, the same breakdown is also available in the OpenRouter activity logs and in LiteLLM's spend tracking (tags), for the whole team.
+
 ## Request metadata
+
+Your own metadata comes on top of the tracking fields above.
 
 Every BYOK provider group (that is, every API key) can add HTTP headers and JSON body fields to its requests. You can set them for the whole key, for single models via `requestMetadata.models`, or on a model entry itself.
 
@@ -111,6 +148,12 @@ Every BYOK provider group (that is, every API key) can add HTTP headers and JSON
 ## Subagents that start subagents
 
 Subagents (the `agent` / `runSubagent` tool) can start their own subagents. Nested subagents appear as cards inside their parent's card.
+
+**Chat: Show Agents Tree** opens the **Agents** view next to the chat, like Claude Code's agent tree:
+- Every chat is a card. Lines connect it to the cards of the subagents it started, and those to their own nested subagents.
+- Each card shows the agent's task, model and duration, and updates live. Its colored edge shows the status: running, waiting for confirmation, done or failed. The line to a running agent takes that color too.
+- Click a card to jump to it. The chevron on a card collapses its subagents; the keyboard works with the arrow keys and Enter.
+- In the Agents window the tree also shows the sessions and chat groups an agent created.
 
 | Setting | Default | |
 | --- | --- | --- |

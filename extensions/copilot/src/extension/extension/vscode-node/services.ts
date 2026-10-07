@@ -38,6 +38,8 @@ import { INativeEnvService, isScenarioAutomation } from '../../../platform/env/c
 import { NativeEnvServiceImpl } from '../../../platform/env/vscode-node/nativeEnvServiceImpl';
 import { IGitCommitMessageService } from '../../../platform/git/common/gitCommitMessageService';
 import { IGitDiffService } from '../../../platform/git/common/gitDiffService';
+import { IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
+import { GatewayTrackingService } from '../../../platform/endpoint/vscode-node/gatewayTrackingServiceImpl';
 import { IGitService } from '../../../platform/git/common/gitService';
 import { GitServiceImpl } from '../../../platform/git/vscode-node/gitServiceImpl';
 import { GithubApiFetcherService, IGithubApiFetcherService } from '../../../platform/github/common/githubApiFetcherService';
@@ -233,6 +235,7 @@ export function registerServices(builder: IInstantiationServiceBuilder, extensio
 	builder.define(IWorkspaceMutationManager, new SyncDescriptor(WorkspaceMutationManager));
 	builder.define(IScopeSelector, new SyncDescriptor(ScopeSelectorImpl));
 	builder.define(IGitService, new SyncDescriptor(GitServiceImpl));
+	builder.define(IGatewayTrackingService, new SyncDescriptor(GatewayTrackingService)); // CreaEditor
 	builder.define(IGitDiffService, new SyncDescriptor(GitDiffService));
 	builder.define(IGitCommitMessageService, new SyncDescriptor(GitCommitMessageServiceImpl));
 	builder.define(IGithubRepositoryService, new SyncDescriptor(GithubRepositoryService));

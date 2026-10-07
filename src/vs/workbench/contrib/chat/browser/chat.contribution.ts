@@ -9,6 +9,7 @@ import { ExportAgentHostDebugLogsAction } from './actions/exportAgentHostDebugLo
 import { ForkConversationAction } from './actions/chatForkActions.js';
 import { IChatResponseFileChangesService } from './chatResponseFileChangesService.js';
 import { EditorChatResponseFileChangesService } from './editorChatResponseFileChangesService.js';
+import './agentsTree/agentsTree.contribution.js'; // CreaEditor: the Agents view next to the Chat view.
 
 registerAction2(ForkConversationAction);
 registerAction2(ExportAgentHostDebugLogsAction);
