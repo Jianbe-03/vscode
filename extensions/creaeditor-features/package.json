@@ -55,15 +55,27 @@
             ]
           },
           {
-            "id": "costs",
-            "title": "%step.costs.title%",
-            "description": "%step.costs.description%",
+            "id": "agentsWindow",
+            "title": "%step.agentsWindow.title%",
+            "description": "%step.agentsWindow.description%",
             "media": {
-              "image": "media/costs.png",
-              "altText": "%step.costs.title%"
+              "image": "media/agents-window.png",
+              "altText": "%step.agentsWindow.title%"
             },
             "completionEvents": [
-              "onCommand:creaeditor.showAiCosts"
+              "onCommand:workbench.action.openAgentsWindow"
+            ]
+          },
+          {
+            "id": "chatGroups",
+            "title": "%step.chatGroups.title%",
+            "description": "%step.chatGroups.description%",
+            "media": {
+              "svg": "media/chat-groups.svg",
+              "altText": "%step.chatGroups.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.openAgentsWindow"
             ]
           },
           {
@@ -76,6 +88,42 @@
             },
             "completionEvents": [
               "onCommand:workbench.action.chat.showAgentsTree"
+            ]
+          },
+          {
+            "id": "costs",
+            "title": "%step.costs.title%",
+            "description": "%step.costs.description%",
+            "media": {
+              "image": "media/costs.png",
+              "altText": "%step.costs.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.showAiCosts"
+            ]
+          },
+          {
+            "id": "pets",
+            "title": "%step.pets.title%",
+            "description": "%step.pets.description%",
+            "media": {
+              "image": "media/pets.gif",
+              "altText": "%step.pets.title%"
+            },
+            "completionEvents": [
+              "onStepSelected"
+            ]
+          },
+          {
+            "id": "backgrounds",
+            "title": "%step.backgrounds.title%",
+            "description": "%step.backgrounds.description%",
+            "media": {
+              "image": "media/backgrounds.png",
+              "altText": "%step.backgrounds.title%"
+            },
+            "completionEvents": [
+              "onStepSelected"
             ]
           },
           {
@@ -100,18 +148,6 @@
             },
             "completionEvents": [
               "onCommand:workbench.action.openLanguageModelsJson"
-            ]
-          },
-          {
-            "id": "chatGroups",
-            "title": "%step.chatGroups.title%",
-            "description": "%step.chatGroups.description%",
-            "media": {
-              "svg": "media/chat-groups.svg",
-              "altText": "%step.chatGroups.title%"
-            },
-            "completionEvents": [
-              "onCommand:workbench.action.openAgentsWindow"
             ]
           }
         ]
