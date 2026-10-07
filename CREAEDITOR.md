@@ -150,11 +150,11 @@ Every BYOK provider group (that is, every API key) can add HTTP headers and JSON
 Subagents (the `agent` / `runSubagent` tool) can start their own subagents. Nested subagents appear as cards inside their parent's card.
 
 **Chat: Show Agents Tree** opens the **Agents** view next to the chat, like Claude Code's agent tree:
-- Every chat is a row. Thin lines connect it to the rows of the subagents it started, and those to their own nested subagents.
-- Each row shows the agent's task, model and duration, and updates live. Its icon shows the status: running, waiting for confirmation, done or failed. The line to a running agent takes that color too.
-- Click a row to jump to it. The chevron on the left collapses its subagents; the keyboard works with the arrow keys and Enter.
+- Every chat is a card. Lines connect it to the cards of the subagents it started, and those to their own nested subagents.
+- Each card shows the agent's task, model and duration, and updates live. Its colored edge shows the status: running, waiting for confirmation, done or failed. The line to a running agent takes that color too.
+- Click a card to jump to it. The chevron on a card collapses its subagents; the keyboard works with the arrow keys and Enter.
 - In the Agents window the tree also shows the sessions and chat groups an agent created.
-- Ended agents stay visible, shown as turned off: finished, failed or cancelled agents, closed chats and archived sessions are greyed out with an **Ended**, **Closed** or **Archived** label. Running agents come first, then idle chats, then ended ones, each newest first. Only the 20 most recent closed chats or archived sessions are kept.
+- Ended agents stay visible as turned off: finished, failed or cancelled agents, closed chats and archived sessions keep their card in a quieter grey, and their subagents fold away (click the chevron to unfold them; they stay open). Running agents come first, then idle chats, then ended ones, each newest first. Only the 20 most recent closed chats or archived sessions are kept.
 
 In the Agents window, the header of the Sessions list has two extra buttons after New, Filter and Find: **Open Agents Tree** ($(type-hierarchy-sub)), which shows the tree as the **Agents** tab on the right next to Changes and Files, and **Open AI Costs** ($(credit-card)), which opens the [cost page](#cost-per-issue-and-chat) in the editor area.
 

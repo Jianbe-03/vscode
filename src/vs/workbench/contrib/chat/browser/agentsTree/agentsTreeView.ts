@@ -330,8 +330,6 @@ interface IRenderedAgentCard {
 	readonly card: HTMLElement;
 	readonly icon: HTMLElement;
 	readonly label: HTMLElement;
-	/** Pill that tells the agent is turned off. */
-	readonly state: HTMLElement;
 	readonly duration: HTMLElement;
 	readonly description: HTMLElement;
 	readonly model: HTMLElement;
@@ -348,6 +346,10 @@ class AgentsBlockTree extends Disposable {
 	private readonly _domNode: HTMLElement;
 	private readonly _renderStore = this._register(new DisposableStore());
 	private readonly _collapsed = new Set<string>();
+	/** Cards this tree folded because their agent ended; unfolded again when the agent runs again. */
+	private readonly _autoCollapsed = new Set<string>();
+	/** Ended cards that were already folded once, so a card the user unfolds stays open. */
+	private readonly _endedSeen = new Set<string>();
 	private _roots: readonly AgentsTreeElement[] = [];
 	/** The rendered cards in document order. */
 	private _cards: IRenderedAgentCard[] = [];
@@ -369,6 +371,7 @@ class AgentsBlockTree extends Disposable {
 	}
 
 	private _render(): void {
+		this._foldEnded(this._roots);
 		// Live updates (status, durations) patch the cards in place, which keeps hovers and focus steady.
 		const structureKey = this._getStructureKey(this._roots);
 		if (structureKey === this._structureKey) {
@@ -408,6 +411,29 @@ class AgentsBlockTree extends Disposable {
 	}
 
 	/**
+	 * Folds the subagents of an agent once it ended, so finished work takes little room, and unfolds
+	 * them again when the agent becomes active. A card the user unfolded stays open.
+	 */
+	private _foldEnded(elements: readonly AgentsTreeElement[]): void {
+		for (const element of elements) {
+			const id = getElementId(element);
+			if (getElementActivity(element) === AgentsTreeActivity.Ended) {
+				if (element.children.length > 0 && !this._endedSeen.has(id)) {
+					this._endedSeen.add(id);
+					this._collapsed.add(id);
+					this._autoCollapsed.add(id);
+				}
+			} else {
+				this._endedSeen.delete(id);
+				if (this._autoCollapsed.delete(id)) {
+					this._collapsed.delete(id);
+				}
+			}
+			this._foldEnded(element.children);
+		}
+	}
+
+	/**
 	 * Identifies the rendered structure: which cards exist, how they nest and which are collapsed.
 	 */
 	private _getStructureKey(elements: readonly AgentsTreeElement[]): string {
@@ -436,7 +462,6 @@ class AgentsBlockTree extends Disposable {
 		const header = dom.append(card, dom.$('.agents-tree-card-header'));
 		const icon = dom.append(header, dom.$('.agents-tree-icon'));
 		const label = dom.append(header, dom.$('.agents-tree-label'));
-		const state = dom.append(header, dom.$('.agents-tree-state'));
 		const duration = dom.append(header, dom.$('.agents-tree-duration'));
 		if (hasChildren) {
 			const twistie = dom.append(header, dom.$(`.agents-tree-twistie${ThemeIcon.asCSSSelector(collapsed ? Codicon.chevronRight : Codicon.chevronDown)}`));
@@ -452,7 +477,7 @@ class AgentsBlockTree extends Disposable {
 		const hiddenCount = dom.append(footer, dom.$('.agents-tree-hidden-count'));
 		const hover = this._renderStore.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), card, ''));
 
-		const entry: IRenderedAgentCard = { id, parentId, element, node, card, icon, label, state, duration, description, model, hiddenCount, hover };
+		const entry: IRenderedAgentCard = { id, parentId, element, node, card, icon, label, duration, description, model, hiddenCount, hover };
 		this._cards.push(entry);
 		this._updateCard(entry, element);
 		this._renderStore.add(dom.addDisposableListener(card, dom.EventType.CLICK, () => this._open(entry.element, true)));
@@ -472,7 +497,6 @@ class AgentsBlockTree extends Disposable {
 		entry.node.dataset.status = status ?? '';
 		entry.node.dataset.activity = getElementActivity(element);
 		entry.card.setAttribute('aria-label', getAriaLabel(element));
-		entry.state.textContent = endedLabel ?? '';
 		entry.icon.className = `agents-tree-icon ${ThemeIcon.asClassName(getElementIcon(element))}`;
 
 		const label = getElementLabel(element);
@@ -510,6 +534,7 @@ class AgentsBlockTree extends Disposable {
 
 	private _toggle(id: string, expand?: boolean): void {
 		const collapse = expand === undefined ? !this._collapsed.has(id) : !expand;
+		this._autoCollapsed.delete(id);
 		if (collapse) {
 			this._collapsed.add(id);
 		} else {
