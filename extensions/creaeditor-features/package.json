@@ -12,11 +12,6 @@
     "Other"
   ],
   "contributes": {
-    "chatAgents": [
-      {
-        "path": "./agents/director.agent.md"
-      }
-    ],
     "walkthroughs": [
       {
         "id": "creaeditor.features",

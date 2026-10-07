@@ -17,6 +17,6 @@
   "step.subagents.description": "Subagents can start their own subagents, shown as nested cards in the chat. The depth is configurable.\n[Subagent Settings](command:workbench.action.openSettings?%5B%22chat.subagents%22%5D)",
   "step.metadata.title": "Request metadata per key and model",
   "step.metadata.description": "Add headers and body fields to requests per API key, per model, or on a model entry, with variables such as ${sessionId}, ${workspaceFolderName} and ${env:NAME}.\n[Open Language Models (JSON)](command:workbench.action.openLanguageModelsJson)",
-  "step.chatGroups.title": "Chat groups: parallel PRs in worktrees",
-  "step.chatGroups.description": "Pick the built-in Director agent in the Agents window and ask for several pull requests at once, for example \"make PRs for issues #101, #102 and #107 on develop\". It starts one session per task, each in its own git worktree and branch, follows them up and reports the PR links. The Director works in your folder, so it doesn't need New Worktree. Your own custom agents with the agent tool can do the same.\n[Open Agents Window](command:workbench.action.openAgentsWindow)"
+  "step.chatGroups.title": "Director agent: several PRs at once",
+  "step.chatGroups.description": "1. Open the Agents window and pick your repository.\n2. In the agent picker below the input (it says Agent), choose **Director**.\n3. Ask for the work, for example \"make PRs for issues #101, #102 and #107 on develop\", and confirm the group once.\nThe Director starts one session per task, each in its own git worktree and branch, follows them up and ends with a table of PR links. It works in your folder itself, so New Worktree is hidden while it is selected.\n[Open Agents Window](command:workbench.action.openAgentsWindow)"
 }

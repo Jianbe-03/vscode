@@ -1,0 +1,4 @@
+{
+  "displayName": "CreaEditor Agents",
+  "description": "Built-in custom agents for CreaEditor, such as the Director, which makes several pull requests at once. Kept separate from CreaEditor Features so the agents are also available in the Agents window."
+}
