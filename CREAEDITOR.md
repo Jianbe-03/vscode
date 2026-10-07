@@ -164,7 +164,24 @@ Depth is counted per chain, so parallel subagents do not use up each other's bud
 
 ## Chat groups: parallel PRs in separate worktrees
 
-In the **Agents window**, an agent can start other sessions, each in its own git worktree on its own branch, and follow them up. A typical use is your *Issue to PR (Agents View)* agent working on several issues at once. Any custom agent whose `tools` include `agent` gets these tools automatically:
+In the **Agents window**, an agent can start other sessions, each in its own git worktree on its own branch, and follow them up. A typical use is your *Issue to PR (Agents View)* agent working on several issues at once.
+
+### The Director agent
+
+CreaEditor ships a built-in **Director** agent for this. To make several pull requests at once:
+
+1. Open the Agents window, pick your repository, and pick **Director** in the agent picker.
+2. Ask for the work, for example: *"Make PRs for issues #101, #102 and #107 on `develop` with the Issue to PR (Agents View) agent."*
+3. The Director reads the issues (with `gh`), checks that they don't overlap, and starts one session per issue with `create_session_group`. You confirm the whole group once.
+4. Each session works in its **own new worktree and branch** and opens its own pull request. The Director follows them up and ends with a table of branches and PR links.
+
+The Director itself never changes code, so it never needs a worktree. While it is selected, the **New Worktree** checkbox is hidden and the session works in your folder. Your usual worktree choice for that workspace is left as it was. The checkbox otherwise only affects the session you are starting.
+
+To make your own director, copy the built-in one into `.github/agents/` and name the file `<something>-director.agent.md` (for example `sprint-director.agent.md`). Any agent file whose name ends in `director.agent.md` gets the same folder-only treatment. It needs `agent` in its `tools`.
+
+### The tools
+
+Any custom agent whose `tools` include `agent` gets these tools automatically:
 
 | Tool | What it does |
 | --- | --- |

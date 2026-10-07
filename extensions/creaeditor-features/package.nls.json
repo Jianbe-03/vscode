@@ -18,5 +18,5 @@
   "step.metadata.title": "Request metadata per key and model",
   "step.metadata.description": "Add headers and body fields to requests per API key, per model, or on a model entry, with variables such as ${sessionId}, ${workspaceFolderName} and ${env:NAME}.\n[Open Language Models (JSON)](command:workbench.action.openLanguageModelsJson)",
   "step.chatGroups.title": "Chat groups: parallel PRs in worktrees",
-  "step.chatGroups.description": "In the Agents window an agent can start a group of sessions, each in its own git worktree and branch, for example one per issue, and follow them up until each has a pull request. Custom agents with the agent tool get these tools automatically.\n[Open Agents Window](command:workbench.action.openAgentsWindow)"
+  "step.chatGroups.description": "Pick the built-in Director agent in the Agents window and ask for several pull requests at once, for example \"make PRs for issues #101, #102 and #107 on develop\". It starts one session per task, each in its own git worktree and branch, follows them up and reports the PR links. The Director works in your folder, so it doesn't need New Worktree. Your own custom agents with the agent tool can do the same.\n[Open Agents Window](command:workbench.action.openAgentsWindow)"
 }
