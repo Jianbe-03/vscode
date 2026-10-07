@@ -11,16 +11,19 @@ import { timeout } from '../../../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { toDisposable } from '../../../../../../base/common/lifecycle.js';
 import { constObservable } from '../../../../../../base/common/observable.js';
+import { URI } from '../../../../../../base/common/uri.js';
 import { mock } from '../../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { TestAccessibilityService } from '../../../../../../platform/accessibility/test/common/testAccessibilityService.js';
 import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IContextMenuService } from '../../../../../../platform/contextview/browser/contextView.js';
+import { NullHoverService } from '../../../../../../platform/hover/test/browser/nullHoverService.js';
 import { NullLogService } from '../../../../../../platform/log/common/log.js';
 import { StorageScope, StorageTarget } from '../../../../../../platform/storage/common/storage.js';
 import { NullTelemetryServiceShape } from '../../../../../../platform/telemetry/common/telemetryUtils.js';
 import { TestStorageService } from '../../../../../test/common/workbenchTestServices.js';
 import { IHostService } from '../../../../../services/host/browser/host.js';
+import { IChatService } from '../../../common/chatService/chatService.js';
 import { IChatModel } from '../../../common/model/chatModel.js';
 import { CHAT_PET_OPEN_ACHIEVEMENTS_COMMAND_ID, chatPetAchievements, ChatPetAccessoryIds, ChatPetAchievementIds, didExplicitlyEnableChatPetAutopilot, disabledChatPetAchievements, getChatPetAchievement, getChatPetAchievementPresentation, getChatPetCustomizationAchievementIds, getUnlockedChatPetAccessories, isUserAuthoredChatPetCustomization, shouldUnlockChatPetIntegratedBrowserShare } from '../../../browser/chatPetAchievements.js';
 import { ChatPetService, getChatPetVariant } from '../../../browser/chatPetService.js';
@@ -34,6 +37,10 @@ suite('ChatPetWidget', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
 	teardown(() => sinon.restore());
+
+	const testChatService = new class extends mock<IChatService>() {
+		override getSession() { return undefined; }
+	}();
 
 	class TestTelemetryService extends NullTelemetryServiceShape {
 		readonly events: { readonly name: string; readonly data: unknown }[] = [];
@@ -107,8 +114,11 @@ suite('ChatPetWidget', () => {
 		const secondHost: IChatPetWidgetHost = {
 			...createHost(secondParent, 'fall'),
 			model: constObservable(new class extends mock<IChatModel>() {
+				override readonly sessionResource = URI.parse('chat:/pet');
 				override readonly hasActiveRequest = constObservable(true);
+				override readonly requestNeedsInput = constObservable(undefined);
 				override readonly lastRequestObs = constObservable(undefined);
+				override readonly lastRequest = undefined;
 			}()),
 		};
 		const service = disposables.add(new ChatPetService(disposables.add(new TestStorageService()), new TestTelemetryService(), new NullLogService()));
@@ -123,6 +133,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		const button = firstParent.querySelector<HTMLElement>('.chat-pet-button')!;
 		const overlay = firstParent.querySelector<HTMLElement>('.chat-pet-overlay')!;
@@ -198,6 +210,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		const visual = parent.getElementsByClassName('chat-pet-visual')[0];
 		const button = parent.getElementsByClassName('chat-pet-button')[0] as HTMLElement;
@@ -244,6 +258,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 
 		assert.strictEqual(observedTargets.size, 0);
@@ -281,6 +297,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		const button = parent.querySelector<HTMLElement>('.chat-pet-button');
 		assert.ok(button);
@@ -337,6 +355,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		const button = parent.getElementsByClassName('chat-pet-button')[0] as HTMLElement;
 
@@ -400,6 +420,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		const overlay = parent.getElementsByClassName('chat-pet-overlay')[0];
 		const button = parent.getElementsByClassName('chat-pet-button')[0] as HTMLElement;
@@ -507,6 +529,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		);
 		try {
 			service.setOnTheRun(true);
@@ -551,6 +575,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		const button = firstParent.getElementsByClassName('chat-pet-button')[0];
 
@@ -1280,6 +1306,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		disposables.add(toDisposable(() => {
 			parent.remove();
@@ -2670,6 +2698,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		disposables.add(toDisposable(() => {
 			// Drain the shared animation-frame queue after widget disposal, before restoring the clock.
@@ -2804,6 +2834,8 @@ suite('ChatPetWidget', () => {
 				override readonly onDidChangeFocus = Event.None;
 				override readonly onDidChangeActiveWindow = Event.None;
 			}(),
+			testChatService,
+			NullHoverService,
 		));
 		const button = parent.querySelector<HTMLElement>('.chat-pet-button');
 		const counter = parent.querySelector<HTMLElement>('.chat-pet-bounce-counter');

@@ -584,3 +584,186 @@
 .monaco-workbench.monaco-reduce-motion .chat-pet-button[data-state='yapping'] .chat-pet-eye-accessory {
 	transform: translateY(calc(-1 * var(--vscode-spacing-size40))) rotate(-90deg);
 }
+
+/* CreaEditor: a badge above the working pet names what the chat's agent is doing. */
+.chat-pet-activity-badge,
+.chat-pet-crew-badge {
+	position: absolute;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	box-sizing: border-box;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-charts-green);
+	color: var(--vscode-editor-background);
+}
+
+.chat-pet-activity-badge {
+	left: calc(-1 * var(--vscode-spacing-size60));
+	top: calc(-1 * var(--vscode-spacing-size60));
+	z-index: 1;
+	width: 18px;
+	height: 18px;
+	cursor: default;
+	pointer-events: auto;
+}
+
+.chat-pet-button > .chat-pet-activity-badge.codicon {
+	font-size: 12px;
+}
+
+.chat-pet-activity-badge.hidden,
+.chat-pet-button.dragging > .chat-pet-activity-badge,
+.chat-pet-button.throwing > .chat-pet-activity-badge,
+.chat-pet-button.falling > .chat-pet-activity-badge {
+	display: none;
+}
+
+.chat-pet-activity-badge[data-activity='waitingForInput'],
+.chat-pet-crew-member[data-activity='waitingForInput'] > .chat-pet-crew-badge {
+	background: var(--vscode-charts-yellow);
+}
+
+.chat-pet-crew-member[data-activity='failed'] > .chat-pet-crew-badge {
+	background: var(--vscode-charts-red);
+}
+
+/* CreaEditor: the crew, one small pet for every running subagent, stands beside the main pet. */
+.chat-pet-crew {
+	position: absolute;
+	z-index: 1;
+	display: flex;
+	flex-direction: row-reverse;
+	align-items: flex-end;
+	gap: var(--vscode-spacing-size40);
+	pointer-events: none;
+}
+
+.chat-pet-crew[data-side='right'] {
+	flex-direction: row;
+}
+
+.chat-pet-crew.hidden,
+.chat-pet-crew-member.hidden,
+.chat-pet-crew-overflow.hidden,
+.chat-pet-overlay.relocating > .chat-pet-crew {
+	display: none;
+}
+
+.chat-pet-crew-member {
+	position: relative;
+	flex: none;
+	pointer-events: auto;
+}
+
+.chat-pet-crew-member.entering {
+	animation: chat-pet-crew-enter 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.chat-pet-crew-member.leaving {
+	pointer-events: none;
+	animation: chat-pet-crew-leave 300ms ease-in forwards;
+}
+
+.chat-pet-crew-sprite {
+	position: absolute;
+	bottom: 0;
+	left: 50%;
+	background-position: 0 0;
+	background-repeat: no-repeat;
+	image-rendering: pixelated;
+	transform: translateX(-50%);
+	pointer-events: none;
+}
+
+.chat-pet-crew[data-side='right'] .chat-pet-crew-sprite {
+	transform: translateX(-50%) scaleX(-1);
+}
+
+.chat-pet-crew-sprite.animated {
+	animation: chat-pet-crew-frames var(--chat-pet-crew-duration) steps(var(--chat-pet-crew-frames)) infinite;
+}
+
+.chat-pet-crew-member > .chat-pet-crew-badge {
+	bottom: 100%;
+	left: 50%;
+	width: 14px;
+	height: 14px;
+	transform: translate(-50%, var(--vscode-spacing-size40));
+	pointer-events: none;
+}
+
+.chat-pet-crew-member > .chat-pet-crew-badge.codicon {
+	font-size: 10px;
+}
+
+.chat-pet-crew-overflow {
+	display: flex;
+	align-self: center;
+	align-items: center;
+	box-sizing: border-box;
+	height: 16px;
+	padding: 0 var(--vscode-spacing-size40);
+	border-radius: var(--vscode-cornerRadius-circle);
+	background: var(--vscode-badge-background);
+	color: var(--vscode-badge-foreground);
+	font-size: var(--vscode-fontSize-label3);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	font-variant-numeric: tabular-nums;
+	line-height: 1;
+	pointer-events: none;
+}
+
+.hc-black .chat-pet-activity-badge,
+.hc-light .chat-pet-activity-badge,
+.hc-black .chat-pet-crew-badge,
+.hc-light .chat-pet-crew-badge,
+.hc-black .chat-pet-crew-overflow,
+.hc-light .chat-pet-crew-overflow {
+	border: var(--vscode-strokeThickness) solid var(--vscode-contrastBorder);
+}
+
+@keyframes chat-pet-crew-frames {
+	to {
+		background-position-x: var(--chat-pet-crew-strip-width);
+	}
+}
+
+@keyframes chat-pet-crew-enter {
+	0% {
+		opacity: 0;
+		transform: translateY(var(--vscode-spacing-size80)) scale(0.5);
+	}
+
+	65% {
+		opacity: 1;
+		transform: translateY(calc(-1 * var(--vscode-spacing-size40))) scale(1.08);
+	}
+
+	100% {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+@keyframes chat-pet-crew-leave {
+	0% {
+		opacity: 1;
+		transform: none;
+	}
+
+	40% {
+		opacity: 1;
+		transform: translateY(calc(-1 * var(--vscode-spacing-size80)));
+	}
+
+	100% {
+		opacity: 0;
+		transform: translateY(calc(-1 * var(--vscode-spacing-size160))) scale(0.6);
+	}
+}
+
+.monaco-workbench.monaco-reduce-motion .chat-pet-crew-member,
+.monaco-workbench.monaco-reduce-motion .chat-pet-crew-sprite {
+	animation: none;
+}

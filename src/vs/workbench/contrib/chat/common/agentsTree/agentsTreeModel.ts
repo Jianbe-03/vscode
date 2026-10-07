@@ -41,7 +41,7 @@ type ToolInvocation = IChatToolInvocation | IChatToolInvocationSerialized;
 /**
  * Returns whether a tool invocation is waiting for the user (confirmation, post-approval or authentication).
  */
-function isWaitingForUser(invocation: ToolInvocation): boolean {
+export function isWaitingForUser(invocation: ToolInvocation): boolean {
 	if (invocation.kind === 'toolInvocationSerialized') {
 		return false;
 	}
