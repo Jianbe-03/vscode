@@ -149,6 +149,10 @@ export class SessionsPart extends Part {
 		const updateBackground = () => backgroundRenderer.setBackground(this.chatBackgroundService.getBackground());
 		this._register(this.chatBackgroundService.onDidChangeBackground(updateBackground));
 		updateBackground();
+		// CreaEditor: shooting stars of the Starry Night background follow the reduced motion preference.
+		const updateMotion = () => backgroundRenderer.setMotionReduced(this.accessibilityService.isMotionReduced());
+		this._register(this.accessibilityService.onDidChangeReducedMotion(updateMotion));
+		updateMotion();
 
 		const contentArea = $('.content');
 		parent.appendChild(contentArea);

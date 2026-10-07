@@ -185,9 +185,6 @@ export class NewChatView extends AbstractChatView {
 
 	override setVisible(visible: boolean): void {
 		this._isVisibleObs.set(visible, undefined);
-		if (this._widget instanceof NewChatWidget) {
-			this._widget.setHostVisible(visible);
-		}
 	}
 }
 

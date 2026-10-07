@@ -203,13 +203,12 @@ Members appear under the group name in the Agents window. A failing member does 
 
 ## Agents window background and pet
 
-The new-session view of the Agents window has a background, set with `sessions.background`, **Choose Agents Window Background** or a right-click on the background:
+The Agents window has a chat background behind the new-session view and every open chat, so it stays while you work in a session. Pick it with **Set Background...**, from the Command Palette or a right-click on the background. Next to **No Background**, **Codicons**, **Image...** and recently used images, it offers:
 
 - **Starry Night** (default): a night sky whose twinkling stars are Creacoon marks, with a Creacoon shooting star now and then.
 - **Creacoon Pattern**: a calm, slowly drifting pattern of Creacoon marks.
-- **None**.
 
-With reduced motion on, the stars don't twinkle and there are no shooting stars.
+The choice is stored per color theme kind in `chat.agentSessions.preferredDarkBackgroundImage` and `chat.agentSessions.preferredLightBackgroundImage` (`starryNight`, `pattern`, `codicons`, `none`, or an image path). An existing `sessions.background` value is migrated to these settings. High contrast themes show no background, and with reduced motion on the stars don't twinkle, the pattern doesn't drift and there are no shooting stars.
 
 Type `/creacoon-pet` (or use **Pet** in the same right-click menu) for the Creacoon pet, the green chat companion that replaces the VS Code pet. Its context menu switches between Green and Mint colors.
 

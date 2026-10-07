@@ -146,12 +146,6 @@ export const SessionsBlockedSessionsVisibleContext = new RawContextKey<boolean>(
 
 //#endregion
 
-//#region < --- Aquarium --- >
-
-export const SessionsBackgroundActiveContext = new RawContextKey<boolean>('sessionsBackgroundActive', false, localize('sessionsBackgroundActive', "Whether a background is shown behind the new session view of the Agents window"));
-
-//#endregion
-
 //#region < --- Session Navigation --- >
 
 export const CanGoBackContext = new RawContextKey<boolean>('sessionsCanGoBack', false, localize('sessionsCanGoBack', "Whether there is a previous session in the navigation history"));

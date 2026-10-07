@@ -6,7 +6,7 @@
 import './media/chatWidget.css';
 import * as dom from '../../../../base/browser/dom.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
-import { Action, SubmenuAction, toAction } from '../../../../base/common/actions.js';
+import { Action, toAction } from '../../../../base/common/actions.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { isCancellationError, onUnexpectedError } from '../../../../base/common/errors.js';
 import { toErrorMessage } from '../../../../base/common/errorMessage.js';
@@ -35,7 +35,6 @@ import { isAllowSignedOutWhenUsableEnabled, shouldShowGitHubWorkspaceGroupSignIn
 import { AGENTIC_SIGN_IN_COMMAND_ID, FOCUS_NEW_SESSION_HARNESS_PICKER_COMMAND_ID, FOCUS_NEW_SESSION_WORKSPACE_PICKER_COMMAND_ID } from '../../../common/sessionCommands.js';
 import { isAgentHostProvider, LOCAL_AGENT_HOST_PROVIDER_ID } from '../../../common/agentHostSessionsProvider.js';
 import { NewSessionCreationProviderIdContext } from '../../../common/contextkeys.js';
-import { AgentsBackground, getAgentsBackgroundLabel, IAgentsBackgroundHost, IAgentsBackgroundService } from '../../agentsBackground/browser/agentsBackground.js';
 import { IWorkspacePickerNoWorkspaceOption, IWorkspacePickerTrigger, WorkspacePicker } from './sessionWorkspacePicker.js';
 import { WebWorkspacePicker } from './webWorkspacePicker.js';
 import { IPickedSessionType, IPreferredSessionType } from './sessionTypePicker.js';
@@ -97,7 +96,6 @@ export class NewChatWidget extends Disposable {
 	private readonly _newChatInput: NewChatInputWidget;
 	private readonly _chatTipPresenter = this._register(new MutableDisposable<ChatInputTipPresenter>());
 	private _isChatTipSessionInitialized = false;
-	private _backgroundHost: IAgentsBackgroundHost | undefined;
 
 	/** Recreates the draft once a better/late-registering provider can serve the folder (see {@link _createNewSession}). */
 	private readonly _pendingPreferredUpgrade = new MutableDisposable<IDisposable>();
@@ -160,7 +158,6 @@ export class NewChatWidget extends Disposable {
 		@ISessionsManagementService private readonly sessionsManagementService: ISessionsManagementService,
 		@ISessionsService private readonly sessionsService: ISessionsService,
 		@ISessionsProvidersService private readonly sessionsProvidersService: ISessionsProvidersService,
-		@IAgentsBackgroundService private readonly agentsBackgroundService: IAgentsBackgroundService,
 		@IAgentHostFilterService private readonly agentHostFilterService: IAgentHostFilterService,
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 		@IAgentFeedbackService private readonly agentFeedbackService: IAgentFeedbackService,
@@ -551,15 +548,6 @@ export class NewChatWidget extends Disposable {
 		}));
 		this._register(this.defaultAccountService.onDidChangeDefaultAccount(() => void this._refreshGitHubProfileName()));
 
-		this._backgroundHost = this._register(this.agentsBackgroundService.mountHost());
-		const backgroundActions = [AgentsBackground.StarryNight, AgentsBackground.Pattern, AgentsBackground.None].map(background => this._register(new Action(
-			`sessions.background.${background}`,
-			getAgentsBackgroundLabel(background),
-			undefined,
-			true,
-			() => this.agentsBackgroundService.setBackground(background)
-		)));
-		const backgroundSubmenu = new SubmenuAction('sessions.background', localize('backgroundSubmenu', "Background"), backgroundActions);
 		const petAction = this._register(new Action(
 			'sessions.chatPet.toggle',
 			localize('petAction', "Pet (/creacoon-pet)"),
@@ -575,18 +563,14 @@ export class NewChatWidget extends Disposable {
 
 			e.preventDefault();
 			e.stopPropagation();
-			const currentBackgroundId = `sessions.background.${this.agentsBackgroundService.background}`;
-			for (const action of backgroundActions) {
-				action.checked = action.id === currentBackgroundId;
-			}
 			petAction.checked = this.chatPetService.enabled.get();
 			const anchor = new StandardMouseEvent(dom.getWindow(element), e);
 			this.contextMenuService.showContextMenu({
 				menuId: Menus.SessionChatBackgroundContext,
 				contextKeyService: this.contextKeyService,
 				getAnchor: () => anchor,
-				getActions: () => [backgroundSubmenu, petAction],
-				getCheckedActionsRepresentation: action => backgroundActions.includes(action as Action) ? 'radio' : 'checkbox',
+				getActions: () => [petAction],
+				getCheckedActionsRepresentation: () => 'checkbox',
 			});
 		}));
 
@@ -1569,10 +1553,6 @@ export class NewChatWidget extends Disposable {
 
 	prefillInput(text: string): void {
 		this._newChatInput.prefillInput(text);
-	}
-
-	setHostVisible(visible: boolean): void {
-		this._backgroundHost?.setHostVisible(visible);
 	}
 
 	sendQuery(text: string): void {

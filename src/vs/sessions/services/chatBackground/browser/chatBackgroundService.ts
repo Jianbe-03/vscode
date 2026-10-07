@@ -23,7 +23,16 @@ export const AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_SETTING = 'cha
 export const AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING = 'chat.agentSessions.preferredDarkBackgroundImageLayout';
 export const AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING = 'chat.agentSessions.preferredLightBackgroundImageLayout';
 export const AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET = 'codicons';
-export type SessionsChatBackgroundPreset = typeof AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET;
+// CreaEditor: the Creacoon presets. Starry Night is the background until the user picks another
+// one; `none` explicitly turns the background off.
+export const AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET = 'starryNight';
+export const AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET = 'pattern';
+export const AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET = 'none';
+export const AGENT_SESSIONS_CHAT_BACKGROUND_DEFAULT = AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET;
+export type SessionsChatBackgroundPreset =
+	| typeof AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET
+	| typeof AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET
+	| typeof AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET;
 const RECENT_BACKGROUND_IMAGES_STORAGE_KEY = 'chat.agentSessions.recentBackgroundImages';
 const MAX_RECENT_BACKGROUND_IMAGES = 5;
 
@@ -39,7 +48,14 @@ export interface ISessionsChatCodiconsBackground {
 	readonly kind: 'codicons';
 }
 
-export type ISessionsChatBackground = ISessionsChatImageBackground | ISessionsChatCodiconsBackground;
+/**
+ * CreaEditor: a Creacoon background, drawn by the chat background renderer.
+ */
+export interface ISessionsChatCreacoonBackground {
+	readonly kind: typeof AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET | typeof AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET;
+}
+
+export type ISessionsChatBackground = ISessionsChatImageBackground | ISessionsChatCodiconsBackground | ISessionsChatCreacoonBackground;
 
 const backgroundImageStyles = {
 	repeat: { backgroundRepeat: 'repeat', backgroundSize: 'auto', backgroundPosition: 'left top' },
@@ -132,7 +148,7 @@ export class SessionsChatBackgroundService extends Disposable implements ISessio
 			return undefined;
 		}
 		const configuredBackground = this.getConfiguredBackground();
-		if (configuredBackground?.kind === 'codicons') {
+		if (configuredBackground && configuredBackground.kind !== 'image') {
 			return configuredBackground;
 		}
 		return configuredBackground ? {
@@ -166,7 +182,8 @@ export class SessionsChatBackgroundService extends Disposable implements ISessio
 
 	async clearBackground(): Promise<void> {
 		const setting = this.getBackgroundImageSetting(this.themeService.getColorTheme().type);
-		await this.configurationService.updateValue(setting, undefined, ConfigurationTarget.USER);
+		// CreaEditor: an unset setting means the default Starry Night, so store `none` explicitly.
+		await this.configurationService.updateValue(setting, AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET, ConfigurationTarget.USER);
 	}
 
 	getBackgroundImageLayout(): ChatBackgroundImageLayout {
@@ -213,11 +230,20 @@ export class SessionsChatBackgroundService extends Disposable implements ISessio
 			: AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING;
 	}
 
-	private getConfiguredBackground(): { readonly kind: 'codicons' } | { readonly kind: 'image'; readonly image: URI } | undefined {
+	private getConfiguredBackground(): ISessionsChatCodiconsBackground | ISessionsChatCreacoonBackground | { readonly kind: 'image'; readonly image: URI } | undefined {
 		const setting = this.getBackgroundImageSetting(this.themeService.getColorTheme().type);
-		const value = this.configurationService.getValue<string>(setting);
-		if (value?.trim() === AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET) {
+		// CreaEditor: fall back to the default background when the setting has no value at all.
+		const configuredValue = this.configurationService.getValue<string | undefined>(setting);
+		const value = configuredValue === undefined ? AGENT_SESSIONS_CHAT_BACKGROUND_DEFAULT : configuredValue;
+		const preset = typeof value === 'string' ? value.trim() : undefined;
+		if (preset === AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET) {
 			return { kind: 'codicons' };
+		}
+		if (preset === AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET || preset === AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET) {
+			return { kind: preset };
+		}
+		if (preset === AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET) {
+			return undefined;
 		}
 		const image = this.resolveBackgroundImage(value);
 		return image ? { kind: 'image', image } : undefined;

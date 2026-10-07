@@ -62,7 +62,6 @@ import { IActiveSession, ISessionsManagementService } from '../../../../services
 import { ChatModelSource, IChat, ISession, ISessionWorkspace, ISessionType, SESSION_WORKSPACE_GROUP_GITHUB, SESSION_WORKSPACE_GROUP_LOCAL, SESSION_WORKSPACE_GROUP_REMOTE, SessionStatus, SessionTypeAuthRequirement } from '../../../../services/sessions/common/session.js';
 import { ISessionsProvider } from '../../../../services/sessions/common/sessionsProvider.js';
 import { AGENT_FEEDBACK_NEW_SESSION_RESOURCE, AgentFeedbackKind, AgentFeedbackState, IAgentFeedback, IAgentFeedbackService } from '../../../agentFeedback/browser/agentFeedbackService.js';
-import { IAgentsBackgroundService } from '../../../agentsBackground/browser/agentsBackground.js';
 import { computeIssueIcon, computePullRequestIcon, GitHubIssueState, GitHubPullRequestState } from '../../../github/common/types.js';
 import { NewChatView } from '../../browser/chatView.js';
 import { EXPERIMENTAL_NEW_SESSION_COMPOSER_LAYOUT_SETTING, NEW_SESSION_WELCOME_NAME_SETTING, NEW_SESSION_WELCOME_PHRASES_SETTING, UNIFIED_WORKSPACE_PICKER_SETTING } from '../../common/constants.js';
@@ -309,11 +308,6 @@ async function renderNewChatWidget(context: ComponentFixtureContext, options: IN
 				override readonly hosts = [];
 				override readonly isDiscovering = false;
 				override async rediscover(): Promise<boolean> { return true; }
-			}());
-			reg.defineInstance(IAgentsBackgroundService, new class extends mock<IAgentsBackgroundService>() {
-				override mountHost() {
-					return { dispose() { }, setHostVisible() { } };
-				}
 			}());
 			reg.defineInstance(IAgentFeedbackService, new class extends mock<IAgentFeedbackService>() {
 				override readonly onDidChangeFeedback = Event.None;

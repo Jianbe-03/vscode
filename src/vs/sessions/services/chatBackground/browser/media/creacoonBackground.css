@@ -3,30 +3,20 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-/* CreaEditor: backgrounds of the Agents window's new-session view. All layers use
- * pointer-events:none. See agentsBackground.ts. */
-
-/* While a background is shown, the Sessions Grid wrappers (added between the sessionspart and
- * the chat widget) would otherwise paint their opaque `--session-view-background` on top of it. */
-.monaco-workbench .part.sessionspart.agents-background-active .session-view,
-.monaco-workbench .part.sessionspart.agents-background-active .session-view .session-view-content,
-.monaco-workbench .part.sessionspart.agents-background-active .chat-group-view {
-	background-color: transparent;
-}
+/* CreaEditor: the Creacoon chat backgrounds of the Agents window, drawn inside the chat
+ * background layer (`.sessions-chat-background`), which sits behind all sessions content and
+ * ignores the pointer. See creacoonBackground.ts. */
 
 .agents-creacoon-background {
 	position: absolute;
 	inset: 0;
 	pointer-events: none;
 	overflow: hidden;
-	z-index: 1;
 	border-radius: inherit;
-	opacity: 0;
-	transition: opacity 400ms ease-out;
 }
 
-.agents-creacoon-background.visible {
-	opacity: 1;
+.agents-creacoon-background[hidden] {
+	display: none;
 }
 
 /* --- Starry night --- */
@@ -38,8 +28,7 @@
 		linear-gradient(180deg, rgba(8, 7, 26, 0.55) 0%, rgba(8, 7, 26, 0.2) 55%, transparent 100%);
 }
 
-.monaco-workbench.vs .agents-creacoon-background.starry-night,
-.monaco-workbench.hc-light .agents-creacoon-background.starry-night {
+.monaco-workbench.vs .agents-creacoon-background.starry-night {
 	background: linear-gradient(0deg, rgba(0, 189, 139, 0.08) 0%, transparent 40%);
 }
 
@@ -64,8 +53,7 @@
 }
 
 /* Light themes have no dark sky, so light stars become green. */
-.monaco-workbench.vs .agents-creacoon-star[data-tone="light"],
-.monaco-workbench.hc-light .agents-creacoon-star[data-tone="light"] {
+.monaco-workbench.vs .agents-creacoon-star[data-tone="light"] {
 	--star-color: #00bd8b;
 }
 
@@ -122,8 +110,7 @@
 	animation: agents-creacoon-shoot-head var(--shooting-duration, 1.4s) ease-out forwards;
 }
 
-.monaco-workbench.vs .agents-creacoon-shooting-star-head,
-.monaco-workbench.hc-light .agents-creacoon-shooting-star-head {
+.monaco-workbench.vs .agents-creacoon-shooting-star-head {
 	background-color: #00bd8b;
 }
 
@@ -209,11 +196,6 @@
 	opacity: 0.28;
 }
 
-.monaco-workbench.hc-black .agents-creacoon-pattern,
-.monaco-workbench.hc-light .agents-creacoon-pattern {
-	opacity: 0.12;
-}
-
 /* translate3d so the GPU composites instead of re-rasterizing each frame. */
 @keyframes agents-creacoon-drift {
 	from {
@@ -229,16 +211,21 @@
 
 @media (prefers-reduced-motion: reduce) {
 	.agents-creacoon-pattern,
-	.agents-creacoon-star {
+	.agents-creacoon-star,
+	.agents-creacoon-shooting-star {
 		animation: none;
 	}
 
-	.agents-creacoon-background {
-		transition: none;
+	.agents-creacoon-shooting-star {
+		display: none;
 	}
 }
 
 .monaco-workbench.monaco-reduce-motion .agents-creacoon-pattern,
 .monaco-workbench.monaco-reduce-motion .agents-creacoon-star {
 	animation: none;
+}
+
+.monaco-workbench.monaco-reduce-motion .agents-creacoon-shooting-star {
+	display: none;
 }

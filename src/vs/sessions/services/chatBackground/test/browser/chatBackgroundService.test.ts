@@ -14,7 +14,7 @@ import { InMemoryStorageService } from '../../../../../platform/storage/common/s
 import { ColorScheme } from '../../../../../platform/theme/common/theme.js';
 import { TestColorTheme, TestThemeService } from '../../../../../platform/theme/test/common/testThemeService.js';
 import { SessionsChatBackgroundAvailableContext, SessionsChatBackgroundConfiguredContext, SessionsChatBackgroundImageConfiguredContext } from '../../../../common/contextkeys.js';
-import { AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_SETTING, chatBackgroundImageLayoutValues, ChatBackgroundImageLayout, ISessionsChatImageBackground, SessionsChatBackgroundService } from '../../browser/chatBackgroundService.js';
+import { AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_SETTING, chatBackgroundImageLayoutValues, ChatBackgroundImageLayout, ISessionsChatImageBackground, SessionsChatBackgroundService } from '../../browser/chatBackgroundService.js';
 
 class CapturingConfigurationService extends TestConfigurationService {
 	readonly updates: { key: string; value: unknown; target: ConfigurationTarget | undefined }[] = [];
@@ -39,7 +39,7 @@ function fireConfigurationChange(configurationService: TestConfigurationService,
 suite('Sessions Chat Background Service', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
 
-	test('does not return a background without a configured image', () => {
+	test('returns the Starry Night background without a configured background', () => {
 		const contextKeyService = disposables.add(new MockContextKeyService());
 		const service = disposables.add(new SessionsChatBackgroundService(new TestConfigurationService(), new TestThemeService(), contextKeyService, disposables.add(new InMemoryStorageService())));
 
@@ -49,10 +49,35 @@ suite('Sessions Chat Background Service', () => {
 			backgroundConfigured: contextKeyService.getContextKeyValue(SessionsChatBackgroundConfiguredContext.key),
 			imageConfigured: contextKeyService.getContextKeyValue(SessionsChatBackgroundImageConfiguredContext.key),
 		}, {
-			background: undefined,
+			background: { kind: 'starryNight' },
 			image: undefined,
-			backgroundConfigured: false,
+			backgroundConfigured: true,
 			imageConfigured: false,
+		});
+	});
+
+	test('resolves the Creacoon presets and turns the background off with none', () => {
+		const resolve = (value: string) => {
+			const contextKeyService = disposables.add(new MockContextKeyService());
+			const configurationService = new TestConfigurationService({ [AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING]: value });
+			const service = disposables.add(new SessionsChatBackgroundService(configurationService, new TestThemeService(), contextKeyService, disposables.add(new InMemoryStorageService())));
+			return {
+				background: service.getBackground(),
+				image: service.getConfiguredBackgroundImage(),
+				backgroundConfigured: contextKeyService.getContextKeyValue(SessionsChatBackgroundConfiguredContext.key),
+			};
+		};
+
+		assert.deepStrictEqual({
+			starryNight: resolve(AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET),
+			pattern: resolve(` ${AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET} `),
+			none: resolve(AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET),
+			empty: resolve(''),
+		}, {
+			starryNight: { background: { kind: 'starryNight' }, image: undefined, backgroundConfigured: true },
+			pattern: { background: { kind: 'pattern' }, image: undefined, backgroundConfigured: true },
+			none: { background: undefined, image: undefined, backgroundConfigured: false },
+			empty: { background: undefined, image: undefined, backgroundConfigured: false },
 		});
 	});
 
@@ -342,6 +367,7 @@ suite('Sessions Chat Background Service', () => {
 
 		await service.setBackground(image);
 		await service.setBackground(AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET);
+		await service.setBackground(AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET);
 		await service.clearBackground();
 		themeService.setTheme(new TestColorTheme({}, ColorScheme.LIGHT));
 		await service.setBackground(image);
@@ -357,7 +383,11 @@ suite('Sessions Chat Background Service', () => {
 			target: ConfigurationTarget.USER,
 		}, {
 			key: AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING,
-			value: undefined,
+			value: AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET,
+			target: ConfigurationTarget.USER,
+		}, {
+			key: AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING,
+			value: AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET,
 			target: ConfigurationTarget.USER,
 		}, {
 			key: AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_SETTING,

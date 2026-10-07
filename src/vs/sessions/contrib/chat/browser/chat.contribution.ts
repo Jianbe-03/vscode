@@ -64,8 +64,9 @@ import { ISessionsChatViewStateService, SessionsChatViewStateService } from './c
 import { SessionsChatResponseFileChangesService } from './sessionTurnChanges.js';
 import { IChatResponseFileChangesService } from '../../../../workbench/contrib/chat/browser/chatResponseFileChangesService.js';
 import { SessionsChatPetAchievementContribution } from './chatPetAchievements.js';
-import { AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_SETTING, chatBackgroundImageLayoutValues, ChatBackgroundImageLayout, ISessionsChatBackgroundService, SessionsChatBackgroundService } from '../../../services/chatBackground/browser/chatBackgroundService.js';
+import { AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_DEFAULT, AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_LAYOUT_SETTING, AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_SETTING, chatBackgroundImageLayoutValues, ChatBackgroundImageLayout, ISessionsChatBackgroundService, SessionsChatBackgroundService } from '../../../services/chatBackground/browser/chatBackgroundService.js';
 import { LEGACY_UNIFIED_WORKSPACE_PICKER_SETTING, unifiedWorkspacePickerConfigurationMigration } from './unifiedWorkspacePickerConfiguration.js';
+import { creacoonBackgroundConfigurationMigration } from './creacoonBackgroundConfiguration.js';
 import { ISessionArchiveNudgeService, SESSION_ARCHIVE_NUDGE_SETTING, SessionArchiveNudgeContribution, SessionArchiveNudgeService } from './sessionArchiveNudge.js';
 import { INewSessionComposerService } from './newSessionComposerService.js';
 import { FOCUS_NEW_SESSION_HARNESS_PICKER_COMMAND_ID, FOCUS_NEW_SESSION_WORKSPACE_PICKER_COMMAND_ID } from '../../../common/sessionCommands.js';
@@ -87,13 +88,22 @@ type RecentChatBackgroundTypeItem = IQuickPickItem & {
 };
 
 type ChatBackgroundTypeItem = IQuickPickItem & ({
-	readonly kind: 'none' | 'codicons' | 'image';
+	readonly kind: 'none' | 'starryNight' | 'pattern' | 'codicons' | 'image';
 }) | RecentChatBackgroundTypeItem;
 
 const chatBackgroundTypeItems: ChatBackgroundTypeItem[] = [{
 	kind: 'none',
 	label: localize('chat.agentSessions.backgroundType.none.label', "No Background"),
 	detail: localize('chat.agentSessions.backgroundType.none.detail', "Remove the current chat background."),
+}, {
+	// CreaEditor: the Creacoon backgrounds; Starry Night is the default.
+	kind: 'starryNight',
+	label: localize('chat.agentSessions.backgroundType.starryNight.label', "Starry Night"),
+	detail: localize('chat.agentSessions.backgroundType.starryNight.detail', "A night sky of twinkling Creacoon marks with the occasional shooting star (default)."),
+}, {
+	kind: 'pattern',
+	label: localize('chat.agentSessions.backgroundType.pattern.label', "Creacoon Pattern"),
+	detail: localize('chat.agentSessions.backgroundType.pattern.detail', "A calm, slowly drifting pattern of Creacoon marks."),
 }, {
 	kind: 'codicons',
 	label: localize('chat.agentSessions.backgroundType.codicons.label', "Codicons"),
@@ -406,6 +416,12 @@ class SetChatBackgroundAction extends Action2 {
 			status(localize('chat.agentSessions.clearBackground.cleared', "Chat background cleared."));
 			return;
 		}
+		// CreaEditor: the Creacoon backgrounds.
+		if (backgroundType.kind === 'starryNight' || backgroundType.kind === 'pattern') {
+			await backgroundService.setBackground(backgroundType.kind === 'starryNight' ? AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET : AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET);
+			status(localize('chat.agentSessions.setBackground.creacoon', "Chat background set to {0}.", backgroundType.label));
+			return;
+		}
 		if (backgroundType.kind === 'codicons') {
 			await backgroundService.setBackground(AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET);
 			status(localize('chat.agentSessions.setBackground.codicons', "Chat background set to Codicons."));
@@ -588,19 +604,21 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		},
 		[AGENT_SESSIONS_PREFERRED_DARK_CHAT_BACKGROUND_IMAGE_SETTING]: {
 			type: 'string',
-			default: '',
+			// CreaEditor: Starry Night is the default background, and `none` turns it off.
+			default: AGENT_SESSIONS_CHAT_BACKGROUND_DEFAULT,
 			scope: ConfigurationScope.MACHINE,
-			markdownDescription: localize('chat.agentSessions.preferredDarkBackgroundImage', "Specifies `codicons`, an absolute file path, or a `file` URI for the background displayed behind chat content in the Agents Window when using a dark color theme. The background is hidden in high contrast themes."),
-			examples: ['codicons'],
+			markdownDescription: localize('chat.agentSessions.preferredDarkBackgroundImage.creacoon', "Specifies `starryNight`, `pattern`, `codicons`, `none`, an absolute file path, or a `file` URI for the background displayed behind chat content in the Agents Window when using a dark color theme. The background is hidden in high contrast themes."),
+			examples: [AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET],
 			tags: ['experimental'],
 			ignoreSync: true,
 		},
 		[AGENT_SESSIONS_PREFERRED_LIGHT_CHAT_BACKGROUND_IMAGE_SETTING]: {
 			type: 'string',
-			default: '',
+			// CreaEditor: Starry Night is the default background, and `none` turns it off.
+			default: AGENT_SESSIONS_CHAT_BACKGROUND_DEFAULT,
 			scope: ConfigurationScope.MACHINE,
-			markdownDescription: localize('chat.agentSessions.preferredLightBackgroundImage', "Specifies `codicons`, an absolute file path, or a `file` URI for the background displayed behind chat content in the Agents Window when using a light color theme. The background is hidden in high contrast themes."),
-			examples: ['codicons'],
+			markdownDescription: localize('chat.agentSessions.preferredLightBackgroundImage.creacoon', "Specifies `starryNight`, `pattern`, `codicons`, `none`, an absolute file path, or a `file` URI for the background displayed behind chat content in the Agents Window when using a light color theme. The background is hidden in high contrast themes."),
+			examples: [AGENT_SESSIONS_CHAT_BACKGROUND_STARRY_NIGHT_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_PATTERN_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_CODICONS_PRESET, AGENT_SESSIONS_CHAT_BACKGROUND_NONE_PRESET],
 			tags: ['experimental'],
 			ignoreSync: true,
 		},
@@ -625,4 +643,4 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 	},
 });
 
-Registry.as<IConfigurationMigrationRegistry>(WorkbenchConfigurationExtensions.ConfigurationMigration).registerConfigurationMigrations([unifiedWorkspacePickerConfigurationMigration]);
+Registry.as<IConfigurationMigrationRegistry>(WorkbenchConfigurationExtensions.ConfigurationMigration).registerConfigurationMigrations([unifiedWorkspacePickerConfigurationMigration, creacoonBackgroundConfigurationMigration]);

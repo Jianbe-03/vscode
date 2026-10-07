@@ -186,22 +186,6 @@ suite('Sessions - Chat View', () => {
 		assert.deepStrictEqual({ forwarded, isVisible: isVisible.get() }, { forwarded: [false, true], isVisible: false });
 	});
 
-	test('forwards new chat visibility to the aquarium host', () => {
-		const forwarded: boolean[] = [];
-		const isVisible = observableValue(disposables, true);
-		const view: NewChatView = Object.assign(Object.create(NewChatView.prototype), {
-			_isVisibleObs: isVisible,
-			_widget: Object.assign(Object.create(NewChatWidget.prototype), {
-				setHostVisible: (visible: boolean) => forwarded.push(visible),
-			}),
-		});
-
-		view.setVisible(false);
-		view.setVisible(true);
-
-		assert.deepStrictEqual({ forwarded, petHostVisible: isVisible.get() }, { forwarded: [false, true], petHostVisible: true });
-	});
-
 	test('hides the phone combined picker label when compact', () => {
 		const toolbar = dom.append(document.body, dom.$('.sessions-chat-config-toolbar'));
 		disposables.add(toDisposable(() => toolbar.remove()));

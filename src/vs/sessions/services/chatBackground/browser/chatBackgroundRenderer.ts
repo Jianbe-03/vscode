@@ -15,6 +15,7 @@ import { ThemeIcon } from '../../../../base/common/themables.js';
 import { localize } from '../../../../nls.js';
 import { getCompactCodicon } from '../../../../workbench/contrib/chat/browser/chatIcons.js';
 import { ISessionsChatBackground } from './chatBackgroundService.js';
+import { CreacoonBackgroundLayer } from './creacoonBackground.js';
 
 const codiconCellSize = 80;
 const codiconButtonSize = 24;
@@ -143,6 +144,8 @@ export class SessionsChatBackgroundRenderer extends Disposable {
 	private readonly backgroundLayer: HTMLElement;
 	private readonly codiconLayer: HTMLElement;
 	private readonly codiconDepthLayers: readonly HTMLElement[];
+	// CreaEditor: the Starry Night and Creacoon Pattern backgrounds.
+	private readonly creacoonLayer: CreacoonBackgroundLayer;
 	private readonly codiconCells = new Map<string, ICodiconCell>();
 	private readonly confettiCandidates = new Set<string>();
 	private readonly foregroundResizeObservations = new Map<HTMLElement, IDisposable>();
@@ -162,7 +165,10 @@ export class SessionsChatBackgroundRenderer extends Disposable {
 	) {
 		super();
 		this.refreshScheduler = this._register(new RunOnceScheduler(
-			() => this.renderCodicons(this.element.clientWidth, this.element.clientHeight),
+			() => {
+				this.renderCodicons(this.element.clientWidth, this.element.clientHeight);
+				this.creacoonLayer.layout(this.element.clientWidth, this.element.clientHeight);
+			},
 			0
 		));
 
@@ -179,6 +185,8 @@ export class SessionsChatBackgroundRenderer extends Disposable {
 			return layer;
 		});
 		this.backgroundLayer.appendChild(this.codiconLayer);
+		this.creacoonLayer = this._register(new CreacoonBackgroundLayer(getWindow(element)));
+		this.backgroundLayer.appendChild(this.creacoonLayer.element);
 		this.element.prepend(this.backgroundLayer);
 		this._register(toDisposable(() => {
 			this.element.classList.remove('has-chat-background', 'has-chat-background-image');
@@ -230,6 +238,9 @@ export class SessionsChatBackgroundRenderer extends Disposable {
 		this.backgroundLayer.style.backgroundSize = background?.kind === 'image' ? background.backgroundSize : '';
 		this.backgroundLayer.style.backgroundPosition = background?.kind === 'image' ? background.backgroundPosition : '';
 
+		const creacoonKind = background?.kind === 'starryNight' || background?.kind === 'pattern' ? background.kind : undefined;
+		this.creacoonLayer.setKind(creacoonKind, this.element.clientWidth, this.element.clientHeight);
+
 		const showCodicons = background?.kind === 'codicons';
 		this.codiconLayer.hidden = !showCodicons;
 		if (showCodicons) {
@@ -238,6 +249,15 @@ export class SessionsChatBackgroundRenderer extends Disposable {
 			this.codiconGridSize = undefined;
 			this.clearCodicons();
 		}
+	}
+
+	/**
+	 * CreaEditor: shooting stars cross the Starry Night background of the interactive (primary)
+	 * background unless the user prefers reduced motion. Replicas never show them, since they could
+	 * not cross in step with the primary background. Until this is called, there are none.
+	 */
+	setMotionReduced(reduced: boolean): void {
+		this.creacoonLayer.setShootingStarsEnabled(this.interactive && !reduced);
 	}
 
 	private renderCodicons(width: number, height: number): void {
