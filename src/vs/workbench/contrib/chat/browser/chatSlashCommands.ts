@@ -67,8 +67,8 @@ export class ChatSlashCommandsContribution extends Disposable {
 		super();
 
 		this._store.add(slashCommandService.registerSlashCommand({
-			command: 'vscode-pet',
-			detail: nls.localize('vscodePet', "Toggle an interactive VS Code pet (Experimental)"),
+			command: 'creacoon-pet',
+			detail: nls.localize('vscodePet', "Toggle an interactive Creacoon pet (Experimental)"),
 			sortText: 'z3_vscodePet',
 			executeImmediately: true,
 			silent: true,

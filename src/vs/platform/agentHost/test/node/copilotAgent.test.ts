@@ -1377,8 +1377,12 @@ suite('CopilotAgent', () => {
 		}
 	};
 
-	setup(clearProxyEnvironment);
+	setup(() => {
+		clearProxyEnvironment();
+		CopilotAgent.githubModelsDisabled = false;
+	});
 	teardown(() => {
+		CopilotAgent.githubModelsDisabled = true;
 		clearProxyEnvironment();
 		Object.assign(process.env, savedProxyEnvironment);
 	});
@@ -7281,6 +7285,23 @@ suite('CopilotAgent', () => {
 					models: ['gpt-5'],
 					stopCallCount: 1,
 				});
+			} finally {
+				await disposeAgent(agent);
+			}
+		});
+
+		test('publishes no GitHub Copilot models or HydraFusion in CreaEditor', async () => {
+			CopilotAgent.githubModelsDisabled = true;
+			const client = new TestCopilotClient([], [{ id: 'gpt-5', name: 'GPT-5' }]);
+			const { agent } = createTestAgentContext(disposables, {
+				copilotClient: client,
+				rootConfig: { [CopilotCliConfigKey.HydraFusion]: true },
+			});
+			try {
+				await agent.authenticate('https://api.github.com', 'token');
+				await agent.refreshModels();
+
+				assert.deepStrictEqual(agent.models.get().map(model => model.id), []);
 			} finally {
 				await disposeAgent(agent);
 			}

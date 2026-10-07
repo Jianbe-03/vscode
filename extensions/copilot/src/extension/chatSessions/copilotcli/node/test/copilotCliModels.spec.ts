@@ -131,10 +131,18 @@ describe('CopilotCLIModels', () => {
 		const accessor = services.createTestingAccessor();
 		logService = accessor.get(ILogService);
 		accessor.get(IInstantiationService);
+		CopilotCLIModels.copilotModelsDisabled = false;
 	});
 
 	afterEach(() => {
+		CopilotCLIModels.copilotModelsDisabled = true;
 		disposables.clear();
+	});
+
+	it('publishes no GitHub Copilot models in CreaEditor', async () => {
+		CopilotCLIModels.copilotModelsDisabled = true;
+		const { models } = createModels();
+		expect(await models.getModels()).toEqual([]);
 	});
 
 	function createModels(options: { hasSession?: boolean; sdk?: ICopilotCLISDK; configService?: MockConfigurationService } = {}): { models: CopilotCLIModels; auth: MockAuthenticationService; configService: MockConfigurationService } {

@@ -1766,7 +1766,7 @@ configurationRegistry.registerConfiguration({
 		[AgentHostHydraFusionEnabledSettingId]: {
 			type: 'boolean',
 			markdownDescription: nls.localize('chat.copilot.hydraFusion.enabled', "When enabled, makes the experimental HydraFusion model available to local Copilot Agent Host sessions. Changing this setting restarts the local Copilot runtime."),
-			default: true,
+			default: false, // CreaEditor: HydraFusion is a GitHub Copilot model.
 			experiment: { mode: 'startup' },
 			scope: ConfigurationScope.APPLICATION_MACHINE,
 			tags: ['preview', 'experimental', 'advanced'],

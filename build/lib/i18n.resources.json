@@ -785,7 +785,7 @@
 			"project": "vscode-sessions"
 		},
 		{
-			"name": "vs/sessions/contrib/aquarium",
+			"name": "vs/sessions/contrib/agentsBackground",
 			"project": "vscode-sessions"
 		},
 		{

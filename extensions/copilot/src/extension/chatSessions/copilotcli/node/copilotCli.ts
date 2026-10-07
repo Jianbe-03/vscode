@@ -84,6 +84,11 @@ export const ICopilotCLIModels = createServiceIdentifier<ICopilotCLIModels>('ICo
 
 export class CopilotCLIModels extends Disposable implements ICopilotCLIModels {
 	declare _serviceBrand: undefined;
+	/**
+	 * CreaEditor: the Copilot CLI lists GitHub Copilot models for a GitHub sign-in. CreaEditor uses only
+	 * the user's own providers, so the list is never fetched or published. Tests switch it back on.
+	 */
+	static copilotModelsDisabled = true;
 	private _availableModels?: Promise<CopilotCLIModelInfo[]>;
 	/** Synchronously available model infos (includes `auto`). Set once the eager fetch completes. */
 	private _resolvedModelInfos?: vscode.LanguageModelChatInformation[];
@@ -106,6 +111,9 @@ export class CopilotCLIModels extends Disposable implements ICopilotCLIModels {
 	}
 
 	private _fetchAndCacheModels(): void {
+		if (CopilotCLIModels.copilotModelsDisabled) {
+			return;
+		}
 		if (!this._authenticationService.hasCopilotTokenSource) {
 			this.logService.info('[CopilotCLIModels] Skipping model fetch since there is no Copilot token source');
 			return;
@@ -152,7 +160,7 @@ export class CopilotCLIModels extends Disposable implements ICopilotCLIModels {
 	}
 
 	public async getModels(): Promise<CopilotCLIModelInfo[]> {
-		if (!this._authenticationService.hasCopilotTokenSource) {
+		if (CopilotCLIModels.copilotModelsDisabled || !this._authenticationService.hasCopilotTokenSource) {
 			return [];
 		}
 
@@ -205,6 +213,9 @@ export class CopilotCLIModels extends Disposable implements ICopilotCLIModels {
 		const provider: vscode.LanguageModelChatProvider = {
 			onDidChangeLanguageModelChatInformation: this._onDidChange.event,
 			provideLanguageModelChatInformation: async (_options, _token) => {
+				if (CopilotCLIModels.copilotModelsDisabled) {
+					return [];
+				}
 				const models = this._resolvedModelInfos ?? [];
 				if (models.length) {
 					return models;

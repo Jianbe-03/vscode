@@ -497,7 +497,7 @@ import './contrib/extensions/browser/extensions.contribution.js';
 import './contrib/terminal/browser/sessionsTerminalContribution.js';
 import './contrib/chatDebug/browser/chatDebug.contribution.js';
 import './contrib/workspace/browser/workspace.contribution.js';
-import './contrib/aquarium/browser/aquarium.contribution.js';
+import './contrib/agentsBackground/browser/agentsBackground.contribution.js';
 import './contrib/policyBlocked/browser/policyBlocked.contribution.js';
 import '../workbench/services/policies/browser/managedSettingsUpdate.contribution.js';
 import './contrib/automations/browser/automations.contribution.js';

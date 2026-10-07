@@ -148,7 +148,7 @@ export const SessionsBlockedSessionsVisibleContext = new RawContextKey<boolean>(
 
 //#region < --- Aquarium --- >
 
-export const SessionsAquariumActiveContext = new RawContextKey<boolean>('sessionsAquariumActive', false, localize('sessionsAquariumActive', "Whether the sessions aquarium overlay is active"));
+export const SessionsBackgroundActiveContext = new RawContextKey<boolean>('sessionsBackgroundActive', false, localize('sessionsBackgroundActive', "Whether a background is shown behind the new session view of the Agents window"));
 
 //#endregion
 

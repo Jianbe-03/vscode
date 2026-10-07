@@ -77,10 +77,16 @@ export class ModelPicker extends Disposable {
 				}
 			},
 			getModels: () => [...this._selectionModel.state.get().models],
-			getPresentationOptions: () => ({
-				...this._selectionModel.state.get().options,
-				showModelIcon: true,
-			}),
+			getPresentationOptions: () => {
+				const state = this._selectionModel.state.get();
+				return {
+					...state.options,
+					// CreaEditor: Auto needs GitHub Copilot models, so without models the picker shows its
+					// "No models available" state (with the action to add models) instead of Auto.
+					showAutoModel: state.options.showAutoModel && state.models.length > 0,
+					showModelIcon: true,
+				};
+			},
 			isCacheWarm: () => {
 				const session = this._sessionContext.session.get();
 				// The session's prompt cache is warm once its first request has
@@ -141,22 +147,14 @@ export class ModelPicker extends Disposable {
 	}
 
 	/**
-	 * Whether the model picker should be shown for the given session. Visible
-	 * when the session has models, when its Auto model is unavailable (so the
-	 * widget can render the "No models available" empty state), or when the
-	 * workspace is untrusted / Chat still needs sign-in (so the widget can render
-	 * its Restricted Mode or Sign In state). Otherwise hidden, matching the
-	 * historical behavior for providers that offer no models.
+	 * Whether the model picker should be shown for the given session.
+	 * CreaEditor: always visible. Without models (for example after hiding the
+	 * last one) the widget renders its "No models available" empty state, which
+	 * offers adding OpenRouter or LiteLLM models; hiding the picker would leave
+	 * no way to add a model from the Agents window.
 	 */
 	private _shouldShowPicker(): boolean {
-		const state = this._selectionModel.state.get();
-		if (state.models.length > 0) {
-			return true;
-		}
-		if (this._modelPicker.isRestrictedMode() || this._modelPicker.isSetupRequired()) {
-			return true;
-		}
-		return !state.options.showAutoModel;
+		return true;
 	}
 
 	private _updatePickerState(): void {

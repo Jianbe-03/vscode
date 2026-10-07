@@ -28,7 +28,6 @@ import { AgentHostOpenSessionLinkOpenerContribution } from './openSessionLinkOpe
 import { AgentHostSessionListContribution } from './agentHostSessionListContribution.js';
 import { AgentHostSdkSetupNotificationContribution } from './agentHostSdkSetupNotification.js';
 import { AgentHostSandboxNotifications } from './agentHostSandboxNotifications.js';
-import { AgentHostSignedOutModelsNotificationContribution } from './agentHostSignedOutModelsNotification.js';
 import { AgentHostTerminalContribution } from './agentHostTerminalContribution.js';
 import { CopilotConfigSlashSubmitHandlerContribution } from './copilotConfigSlashSubmitHandler.js';
 import { primeLegacyMigrationStartupSnapshot } from './agentHostLegacyMigration.js';
@@ -56,7 +55,7 @@ registerWorkbenchContribution2(AgentHostOpenSessionLinkOpenerContribution.ID, Ag
 registerWorkbenchContribution2(AgentHostTerminalContribution.ID, AgentHostTerminalContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostCopilotCliSettingsContribution.ID, AgentHostCopilotCliSettingsContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostAllowSignedOutWhenUsableContribution.ID, AgentHostAllowSignedOutWhenUsableContribution, WorkbenchPhase.AfterRestored);
-registerWorkbenchContribution2(AgentHostSignedOutModelsNotificationContribution.ID, AgentHostSignedOutModelsNotificationContribution, WorkbenchPhase.AfterRestored);
+// CreaEditor: the signed-out models notification (GitHub Copilot sign-in) is not registered; the model picker offers adding models.
 registerWorkbenchContribution2(AgentHostSdkSetupNotificationContribution.ID, AgentHostSdkSetupNotificationContribution, WorkbenchPhase.AfterRestored);
 registerWorkbenchContribution2(AgentHostSandboxNotifications.ID, AgentHostSandboxNotifications, WorkbenchPhase.AfterRestored);
 

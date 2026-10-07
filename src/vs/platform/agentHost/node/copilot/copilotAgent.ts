@@ -797,6 +797,12 @@ const NANO_AIU_PER_CREDIT = 1_000_000_000;
  * Agent provider backed by the Copilot SDK {@link CopilotClient}.
  */
 export class CopilotAgent extends Disposable implements IAgent {
+
+	/**
+	 * CreaEditor: GitHub Copilot (CAPI) models and the synthetic HydraFusion model are never listed;
+	 * only the user's own (BYOK) models are published. Tests switch it back on.
+	 */
+	static githubModelsDisabled = true;
 	readonly id = 'copilotcli' as const;
 	readonly agentHostCapabilities = { workspaceConversion: true } as const;
 	protected readonly _now = Date.now;
@@ -2284,7 +2290,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 		}
 
 		const tokenAtRefreshStart = this._githubCredentials.token;
-		if (!tokenAtRefreshStart) {
+		if (!tokenAtRefreshStart || CopilotAgent.githubModelsDisabled) {
 			this._capiModels = [];
 			this._publishModels();
 			return;
@@ -2328,6 +2334,10 @@ export class CopilotAgent extends Disposable implements IAgent {
 	 * allocated each call so the observable always notifies its consumers.
 	 */
 	private _publishModels(): void {
+		if (CopilotAgent.githubModelsDisabled) {
+			this._models.set([...this._byokModels], undefined);
+			return;
+		}
 		const hydraFusionModels: readonly IAgentModelInfo[] = this._isHydraFusionEnabled() && !this._capiModels.some(model => model.id === COPILOT_HYDRA_FUSION_MODEL_ID) ? [{
 			provider: this.id,
 			id: COPILOT_HYDRA_FUSION_MODEL_ID,

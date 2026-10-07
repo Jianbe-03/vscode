@@ -98,7 +98,7 @@ suite('SlashCommandHandler', () => {
 				agentHostHandled: false,
 				localHandled: true,
 				commandCalls: [AICustomizationManagementCommands.OpenEditor],
-				ownCommands: ['/vscode-pet', '/agents', '/skills', '/instructions', '/hooks', '/models'],
+				ownCommands: ['/creacoon-pet', '/agents', '/skills', '/instructions', '/hooks', '/models'],
 				foreignCommands: undefined,
 			});
 		});

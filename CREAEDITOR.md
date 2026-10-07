@@ -29,7 +29,7 @@ CreaEditor keeps its settings and extensions apart from VS Code (`~/Library/Appl
 
 ## Language models
 
-GitHub Copilot models are not used, and no GitHub sign-in is needed for chat. Add models in one of these ways:
+GitHub Copilot models are not used, and no GitHub sign-in is needed for chat. Signing in to GitHub (for example for pull requests) doesn't add any Copilot models either: the Copilot CLI and the Agents window's Copilot agent only list your own models. Add models in one of these ways:
 
 - **Chat: Manage Language Models** (or **Manage Models...** in the model picker): add an API key for OpenRouter, Anthropic, OpenAI, Azure, Gemini, Ollama, a custom OpenAI-compatible endpoint, and others.
 - **Chat: Add OpenRouter or LiteLLM Models...** (also in the model picker): connect OpenRouter or your LiteLLM proxy, see below.
@@ -183,6 +183,18 @@ Members appear under the group name in the Agents window. A failing member does 
 | --- | --- | --- |
 | `chat.agentHost.maxSessionSpawnDepth` | `3` | How deep agent-created sessions may nest |
 | `chat.agentHost.agentOrchestrationLimits` | `on` | `off` removes the depth and breadth limits |
+
+## Agents window background and pet
+
+The new-session view of the Agents window has a background, set with `sessions.background`, **Choose Agents Window Background** or a right-click on the background:
+
+- **Starry Night** (default): a night sky whose twinkling stars are Creacoon marks, with a Creacoon shooting star now and then.
+- **Creacoon Pattern**: a calm, slowly drifting pattern of Creacoon marks.
+- **None**.
+
+With reduced motion on, the stars don't twinkle and there are no shooting stars.
+
+Type `/creacoon-pet` (or use **Pet** in the same right-click menu) for the Creacoon pet, the green chat companion that replaces the VS Code pet. Its context menu switches between Green and Mint colors.
 
 ## Building from source
 
