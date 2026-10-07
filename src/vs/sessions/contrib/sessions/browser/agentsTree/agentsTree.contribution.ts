@@ -88,7 +88,7 @@ class ShowSessionsListAction extends Action2 {
 			precondition: IsSessionsWindowContext,
 			menu: [
 				{ id: MenuId.CommandPalette, when: ContextKeyExpr.and(IsSessionsWindowContext, SessionsAgentsTreeShownContext) },
-				{ id: MenuId.ViewTitle, group: 'navigation', order: 10, when: ContextKeyExpr.equals('view', SESSIONS_AGENTS_TREE_VIEW_ID) },
+				{ id: Menus.SidebarAgentsTreeHeader, group: 'navigation', order: 10 },
 			],
 		});
 	}
@@ -114,6 +114,7 @@ class OpenAiCostsAction extends Action2 {
 			menu: [
 				{ id: MenuId.CommandPalette, when: IsSessionsWindowContext },
 				{ id: Menus.SidebarSessionsHeader, group: 'navigation', order: 40 },
+				{ id: Menus.SidebarAgentsTreeHeader, group: 'navigation', order: 20 },
 			],
 		});
 	}

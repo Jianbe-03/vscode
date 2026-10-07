@@ -6,8 +6,10 @@
 // CreaEditor: the Agents view of the Agents window: sessions, their subagents and the sessions they created,
 // including the most recently archived sessions, shown as turned off.
 
+import { $, append } from '../../../../../base/browser/dom.js';
 import { autorun, observableFromEvent } from '../../../../../base/common/observable.js';
 import { localize } from '../../../../../nls.js';
+import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../platform/actions/browser/toolbar.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -23,6 +25,7 @@ import { AgentsTreeElement, AgentsTreeViewPane, buildChatModelSubagentElements, 
 import { IChatWidget, IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
 import { AgentsTreeStatus, orderAgentsTreeRoots } from '../../../../../workbench/contrib/chat/common/agentsTree/agentsTreeModel.js';
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { Menus } from '../../../../browser/menus.js';
 import { ISessionGroupsService } from '../../../../services/sessions/browser/sessionGroupsService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { ChatOriginKind, IChat, ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
@@ -46,6 +49,8 @@ function getSessionStatus(status: SessionStatus): AgentsTreeStatus | undefined {
  * Archived sessions stay visible as turned off; at the top level only the most recent ones are kept.
  */
 export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
+
+	private _header: HTMLElement | undefined;
 
 	constructor(
 		options: IViewPaneOptions,
@@ -79,6 +84,24 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 			this.scheduleRefresh();
 		}));
 		this._register(this._sessionGroupsService.onDidChange(() => this.scheduleRefresh()));
+	}
+
+	protected override renderBody(container: HTMLElement): void {
+		super.renderBody(container);
+
+		// The Agents window shows no view titles, so the tree gets a header like the Sessions list it replaces.
+		container.classList.add('agent-sessions-viewpane');
+		const header = this._header = $('.agent-sessions-header-row');
+		container.prepend(header);
+		append(header, $('.agent-sessions-header-label')).textContent = localize('sessionsAgentsTree.header', "Agents");
+		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, append(header, $('.agent-sessions-header-actions')), Menus.SidebarAgentsTreeHeader, {
+			hiddenItemStrategy: HiddenItemStrategy.NoHide,
+			toolbarOptions: { primaryGroup: () => true },
+		}));
+	}
+
+	protected override layoutBody(height: number, width: number): void {
+		super.layoutBody(height - (this._header?.offsetHeight ?? 0), width);
 	}
 
 	protected computeRoots(now: number): AgentsTreeElement[] {
