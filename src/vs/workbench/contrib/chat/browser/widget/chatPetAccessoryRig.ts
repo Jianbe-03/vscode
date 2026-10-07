@@ -137,7 +137,6 @@ export function getChatPetAccessoryTrack(state: ChatPetState): ChatPetAccessoryT
 			return 'idle';
 		case 'planning':
 		case 'reviewing':
-		case 'thinking':
 		case 'testing':
 			return 'activity';
 	}

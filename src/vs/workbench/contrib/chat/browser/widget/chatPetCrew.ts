@@ -10,10 +10,8 @@ import * as dom from '../../../../../base/browser/dom.js';
 import { asCSSUrl } from '../../../../../base/browser/cssValue.js';
 import { equals } from '../../../../../base/common/arrays.js';
 import { IntervalTimer, RunOnceScheduler } from '../../../../../base/common/async.js';
-import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, DisposableMap, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { autorun, IObservable, observableValue } from '../../../../../base/common/observable.js';
-import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
@@ -27,8 +25,8 @@ import { ChatPetVariant } from '../chatPetService.js';
 export const CHAT_PET_CREW_FINISHED_DURATION = 3_000;
 /** How long a crew pet takes to hop out. */
 export const CHAT_PET_CREW_LEAVE_DURATION = 300;
-/** The maximum number of crew pets shown at once; the rest are summarized in a "+N" chip. */
-export const CHAT_PET_CREW_MAX_VISIBLE = 6;
+/** From this many subagent pets on, the crew huddles closer together instead of hiding any. */
+export const CHAT_PET_CREW_CROWDED = 6;
 const CHAT_PET_CREW_SIZE = 32;
 const CHAT_PET_CREW_NESTED_SIZE = 26;
 const CHAT_PET_CREW_SOURCE_SIZE = 96;
@@ -59,6 +57,11 @@ export interface IChatPetSpriteSheet {
  * Resolves the sprite sheet for a crew pose, in the pet's color variant.
  */
 export type ChatPetCrewSpriteSheetProvider = (pose: ChatPetCrewPose, variant: ChatPetVariant, motionReduced: boolean) => IChatPetSpriteSheet;
+
+/**
+ * Resolves the speech bubble sheet a thinking crew pet shows.
+ */
+export type ChatPetCrewSpeechSheetProvider = (variant: ChatPetVariant, motionReduced: boolean) => IChatPetSpriteSheet;
 
 /**
  * Presentation options shared by every crew pet.
@@ -107,23 +110,6 @@ export function getChatPetCrewPose(activity: ChatAgentActivity): ChatPetCrewPose
 			return 'dizzy';
 		default:
 			return 'idle';
-	}
-}
-
-/**
- * Returns the codicon shown in the activity badge above a pet.
- */
-export function getChatPetActivityIcon(activity: ChatAgentActivity): ThemeIcon {
-	switch (activity) {
-		case ChatAgentActivity.Programming: return Codicon.code;
-		case ChatAgentActivity.Testing: return Codicon.terminal;
-		case ChatAgentActivity.Researching: return Codicon.search;
-		case ChatAgentActivity.Planning: return Codicon.checklist;
-		case ChatAgentActivity.Reviewing: return Codicon.eye;
-		case ChatAgentActivity.WaitingForInput: return Codicon.question;
-		case ChatAgentActivity.Done: return Codicon.check;
-		case ChatAgentActivity.Failed: return Codicon.error;
-		default: return Codicon.lightbulb;
 	}
 }
 
@@ -240,7 +226,7 @@ class ChatPetCrewMember extends Disposable {
 
 	readonly element: HTMLElement;
 	private readonly _sprite: HTMLElement;
-	private readonly _badge: HTMLElement;
+	private readonly _bubble: HTMLElement;
 	private _entry: IChatAgentActivityEntry;
 	private _phase: 'working' | 'finished' | 'leaving' = 'working';
 	private readonly _finishedScheduler = this._register(new RunOnceScheduler(() => this.leave(), CHAT_PET_CREW_FINISHED_DURATION));
@@ -250,6 +236,7 @@ class ChatPetCrewMember extends Disposable {
 		entry: IChatAgentActivityEntry,
 		options: IChatPetCrewOptions,
 		private readonly _getSpriteSheet: ChatPetCrewSpriteSheetProvider,
+		private readonly _getSpeechSheet: ChatPetCrewSpeechSheetProvider,
 		onDidLeave: () => void,
 		hoverService: IHoverService,
 		readonly hue: number,
@@ -259,7 +246,7 @@ class ChatPetCrewMember extends Disposable {
 		this.element = dom.$('.chat-pet-crew-member', { 'aria-hidden': 'true' });
 		this.element.style.setProperty('--chat-pet-crew-hue', `${hue}deg`);
 		this._sprite = dom.append(this.element, dom.$('.chat-pet-crew-sprite'));
-		this._badge = dom.append(this.element, dom.$('span.chat-pet-crew-badge'));
+		this._bubble = dom.append(this.element, dom.$('.chat-pet-crew-bubble.hidden'));
 		this._register(toDisposable(() => this.element.remove()));
 		this._leaveScheduler = this._register(new RunOnceScheduler(onDidLeave, CHAT_PET_CREW_LEAVE_DURATION));
 		this._register(hoverService.setupDelayedHover(this.element, () => ({ content: getChatPetAgentHover(this._entry) })));
@@ -308,7 +295,26 @@ class ChatPetCrewMember extends Disposable {
 		this._sprite.style.setProperty('--chat-pet-crew-strip-width', `${-stripWidth}px`);
 		this._sprite.style.setProperty('--chat-pet-crew-duration', `${sheet.frameDurations.reduce((total, duration) => total + duration, 0)}ms`);
 		this._sprite.classList.toggle('animated', frameCount > 1 && !options.motionReduced);
-		this._badge.className = `chat-pet-crew-badge ${ThemeIcon.asClassName(getChatPetActivityIcon(entry.activity))}`;
+		this._renderBubble(entry.activity === ChatAgentActivity.Thinking && this._phase === 'working', size, options);
+	}
+
+	/** The speech bubble of a thinking pet, the same one the main pet shows, at the crew pet's scale. */
+	private _renderBubble(visible: boolean, size: number, options: IChatPetCrewOptions): void {
+		this._bubble.classList.toggle('hidden', !visible);
+		if (!visible) {
+			return;
+		}
+		const sheet = this._getSpeechSheet(options.variant, options.motionReduced);
+		const bubbleSize = size * 1.5;
+		const frameCount = Math.max(1, sheet.frameDurations.length);
+		this._bubble.style.width = `${bubbleSize}px`;
+		this._bubble.style.height = `${bubbleSize}px`;
+		this._bubble.style.backgroundImage = asCSSUrl(URI.parse(sheet.url));
+		this._bubble.style.backgroundSize = `${bubbleSize * frameCount}px ${bubbleSize}px`;
+		this._bubble.style.setProperty('--chat-pet-crew-frames', String(frameCount));
+		this._bubble.style.setProperty('--chat-pet-crew-strip-width', `${-bubbleSize * frameCount}px`);
+		this._bubble.style.setProperty('--chat-pet-crew-duration', `${sheet.frameDurations.reduce((total, duration) => total + duration, 0)}ms`);
+		this._bubble.classList.toggle('animated', frameCount > 1 && !options.motionReduced);
 	}
 
 	leave(motionReduced = false): void {
@@ -329,7 +335,6 @@ class ChatPetCrewMember extends Disposable {
 export class ChatPetCrew extends Disposable {
 
 	readonly element: HTMLElement;
-	private readonly _overflow: HTMLElement;
 	private readonly _members = this._register(new DisposableMap<string, ChatPetCrewMember>());
 	private _entries: readonly IChatAgentActivityEntry[] = [];
 	private _options: IChatPetCrewOptions | undefined;
@@ -338,11 +343,11 @@ export class ChatPetCrew extends Disposable {
 	constructor(
 		parent: HTMLElement,
 		private readonly _getSpriteSheet: ChatPetCrewSpriteSheetProvider,
+		private readonly _getSpeechSheet: ChatPetCrewSpeechSheetProvider,
 		private readonly _hoverService: IHoverService,
 	) {
 		super();
 		this.element = dom.append(parent, dom.$('.chat-pet-crew.hidden', { role: 'img' }));
-		this._overflow = dom.append(this.element, dom.$('span.chat-pet-crew-overflow.hidden', { 'aria-hidden': 'true' }));
 		this._register(toDisposable(() => this.element.remove()));
 	}
 
@@ -371,7 +376,7 @@ export class ChatPetCrew extends Disposable {
 			if (member) {
 				member.update(entry, options);
 			} else if (!isFinished(entry.status)) {
-				const created = new ChatPetCrewMember(entry, options, this._getSpriteSheet, () => this._removeMember(entry.id), this._hoverService, this._pickHue());
+				const created = new ChatPetCrewMember(entry, options, this._getSpriteSheet, this._getSpeechSheet, () => this._removeMember(entry.id), this._hoverService, this._pickHue());
 				this._members.set(entry.id, created);
 			}
 		}
@@ -416,11 +421,8 @@ export class ChatPetCrew extends Disposable {
 			if (current !== member.element) {
 				this.element.insertBefore(member.element, current);
 			}
-			member.element.classList.toggle('hidden', index >= CHAT_PET_CREW_MAX_VISIBLE);
 		});
-		const hiddenCount = Math.max(0, members.length - CHAT_PET_CREW_MAX_VISIBLE);
-		this._overflow.textContent = localize('chatPet.crew.more', "+{0}", hiddenCount);
-		this._overflow.classList.toggle('hidden', hiddenCount === 0);
+		this.element.classList.toggle('crowded', members.length >= CHAT_PET_CREW_CROWDED);
 
 		const working = this._entries.filter(entry => !isFinished(entry.status));
 		this.element.classList.toggle('hidden', !this._options?.visible || (members.length === 0 && working.length === 0));

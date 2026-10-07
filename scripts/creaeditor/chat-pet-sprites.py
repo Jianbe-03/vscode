@@ -7,7 +7,8 @@
 
 The Creacoon pet keeps the poses and timing of the original chat pet, but gets the Creacoon
 look: the Creacoon asterisk as its antenna, brand-navy eyes and a soft highlight. It also gets
-sheets for the agent activities (planning, reviewing, thinking and testing).
+sheets for the agent activities (planning, reviewing and testing). Thinking uses the original
+speech bubble.
 
 The source sprites are read from git (SOURCE_REVISION), so running the script twice gives the
 same result. Usage, from the repository root:
@@ -369,26 +370,6 @@ def reviewing_frames(variant):
 	return frames
 
 
-def thinking_frames(variant):
-	"""A thought cloud whose dots appear one by one, while the antenna sways slowly."""
-	frames = []
-	for step in range(6):
-		lean = (-4, -2, 0, 2, 4, 2)[step]
-		frame = activity_body(variant, bob=4 if step in (2, 3) else 0, lean=lean, eyes_dx=4)
-		px = frame.load()
-		w, h = frame.size
-		pal = PALETTES[variant]
-		# Cloud in the top right, with two small puffs leading to it.
-		rect(px, w, h, 76, 52, 4, 4, PAPER)
-		rect(px, w, h, 80, 40, 8, 8, PAPER)
-		rect(px, w, h, 68, 4, 28, 28, PAPER)
-		rect(px, w, h, 64, 8, 4, 20, PAPER)
-		for dot in range(min(3, step if step < 4 else 3)):
-			rect(px, w, h, 70 + dot * 8, 16, 4, 4, INK)
-		frames.append(frame)
-	return frames
-
-
 def testing_frames(variant):
 	"""A small terminal with a growing line and a blinking cursor."""
 	frames = []
@@ -412,7 +393,6 @@ def testing_frames(variant):
 ACTIVITY_SHEETS = {
 	'planning': planning_frames,
 	'reviewing': reviewing_frames,
-	'thinking': thinking_frames,
 	'testing': testing_frames,
 }
 

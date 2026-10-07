@@ -19,7 +19,6 @@ import { KeyCode, KeyMod } from '../../../../../base/common/keyCodes.js';
 import { Disposable, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { FileAccess } from '../../../../../base/common/network.js';
 import { autorun, derived, IObservable, ISettableObservable, observableFromEvent, observableValue, transaction } from '../../../../../base/common/observable.js';
-import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize } from '../../../../../nls.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
@@ -27,18 +26,18 @@ import { IContextMenuService } from '../../../../../platform/contextview/browser
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IHostService } from '../../../../services/host/browser/host.js';
-import { ChatAgentActivity, CHAT_ROOT_AGENT_ID, IChatAgentActivityEntry } from '../../common/chatPet/chatAgentActivity.js';
+import { ChatAgentActivity, CHAT_ROOT_AGENT_ID } from '../../common/chatPet/chatAgentActivity.js';
 import { IChatService } from '../../common/chatService/chatService.js';
 import { IChatModel } from '../../common/model/chatModel.js';
 import { CHAT_PET_OPEN_ACHIEVEMENTS_COMMAND_ID, ChatPetAccessoryId, getChatPetAccessory, getChatPetAchievement } from '../chatPetAchievements.js';
 import { CHAT_PET_DEFAULT_SCALE, ChatPetVariant, IChatPetService } from '../chatPetService.js';
 import { drawChatPetComposite, drawChatPetEyeAccessory, getChatPetAccessoryImageSource, hasChatPetAccessoryImageDimensions, hasChatPetBodyImageDimensions, IChatPetAccessoryImageSource, IChatPetFixedOrientationDecoration } from './chatPetAccessoryRenderer.js';
 import { CHAT_PET_HEADROOM, getChatPetAccessoryRigFrame, getChatPetReducedMotionRigFrame } from './chatPetAccessoryRig.js';
-import { ChatPetAgentActivityTracker, ChatPetCrew, ChatPetCrewPose, getChatPetActivityIcon, getChatPetAgentHover, IChatPetSpriteSheet } from './chatPetCrew.js';
+import { ChatPetAgentActivityTracker, ChatPetCrew, ChatPetCrewPose, IChatPetSpriteSheet } from './chatPetCrew.js';
 
 export type ChatPetState = 'idle' | 'sleep' | 'waking' | 'typing' | 'rendering' | 'achievementUnlocked' | 'buttonPress' | 'complete' | 'love' | 'clapping' | 'jump' | 'cool' | 'yapping' | 'yappingMouthOpen' | 'sing' | 'speechless' | 'worry' | 'dizzy' | 'falling' | 'wallImpact' | 'splat' | 'onTheRun' | 'searching' | 'searchingDown' | ChatPetActivityPose;
 /** CreaEditor: poses for agent activities that have their own animation. */
-export type ChatPetActivityPose = 'planning' | 'reviewing' | 'thinking' | 'testing';
+export type ChatPetActivityPose = 'planning' | 'reviewing' | 'testing';
 export type ChatPetClickInteraction = Extract<ChatPetState, 'buttonPress' | 'complete' | 'love' | 'cool' | 'yapping' | 'sing' | 'speechless' | 'worry'>;
 
 export interface IChatPetWidgetHost {
@@ -165,7 +164,6 @@ const SEARCH_FRAME_DURATIONS = [500, 500, 500, 500];
 // CreaEditor: agent activity animations (see scripts/creaeditor/chat-pet-sprites.py).
 const PLANNING_FRAME_DURATIONS = [700, 700, 700, 1_200];
 const REVIEWING_FRAME_DURATIONS = [400, 300, 600, 300, 400, 600];
-const THINKING_FRAME_DURATIONS = [350, 350, 350, 350, 350, 350];
 const TESTING_FRAME_DURATIONS = [300, 300, 300, 300];
 
 interface ChatPetSpriteSource {
@@ -282,7 +280,7 @@ const respawnSpriteSources = new Map<ChatPetVariant, ChatPetSpriteSources>();
 
 /** CreaEditor: whether a state is one of the agent activity poses. */
 export function isChatPetActivityPose(state: ChatPetState | undefined): state is ChatPetActivityPose {
-	return state === 'planning' || state === 'reviewing' || state === 'thinking' || state === 'testing';
+	return state === 'planning' || state === 'reviewing' || state === 'testing';
 }
 
 export function doesChatPetStateTrackCursor(state: ChatPetState | undefined): boolean {
@@ -335,7 +333,6 @@ export function getChatPetSpriteName(state: ChatPetState, quality: string | unde
 		case 'worry':
 		case 'planning':
 		case 'reviewing':
-		case 'thinking':
 		case 'testing':
 			return `buddy-${state}-${variant}`;
 		default:
@@ -382,8 +379,6 @@ export function getChatPetFrameDurations(state: ChatPetState): readonly number[]
 			return PLANNING_FRAME_DURATIONS;
 		case 'reviewing':
 			return REVIEWING_FRAME_DURATIONS;
-		case 'thinking':
-			return THINKING_FRAME_DURATIONS;
 		case 'testing':
 			return TESTING_FRAME_DURATIONS;
 		case 'onTheRun':
@@ -470,7 +465,6 @@ function getSpriteSources(variant: ChatPetVariant): Record<ChatPetState, ChatPet
 			searchingDown: createStateSpriteSources('searchingDown'),
 			planning: createStateSpriteSources('planning'),
 			reviewing: createStateSpriteSources('reviewing'),
-			thinking: createStateSpriteSources('thinking'),
 			testing: createStateSpriteSources('testing'),
 		};
 		spriteSources.set(variant, sources);
@@ -564,8 +558,6 @@ export function getChatPetActivityState(activity: ChatAgentActivity | undefined)
 			return 'planning';
 		case ChatAgentActivity.Reviewing:
 			return 'reviewing';
-		case ChatAgentActivity.Thinking:
-			return 'thinking';
 		case ChatAgentActivity.WaitingForInput:
 			return 'clapping';
 		default:
@@ -577,8 +569,19 @@ export function getChatPetActivityState(activity: ChatAgentActivity | undefined)
  * CreaEditor: returns the sprite sheet for a crew pet pose, reusing the main pet's sheets.
  */
 export function getChatPetCrewSpriteSheet(pose: ChatPetCrewPose, variant: ChatPetVariant, motionReduced: boolean): IChatPetSpriteSheet {
-	const state: ChatPetState = pose === 'idle' ? 'complete' : pose === 'search' ? 'searching' : pose;
+	// A thinking crew pet stands idle under its speech bubble (see getChatPetCrewSpeechSheet).
+	const state: ChatPetState = pose === 'idle' || pose === 'thinking' ? 'complete' : pose === 'search' ? 'searching' : pose;
 	const sources = getSpriteSources(variant)[state];
+	const source = motionReduced ? sources.reducedMotion : sources.animated;
+	return { url: source.url, frameWidth: source.frameWidth, frameHeight: source.frameHeight ?? CHAT_PET_SOURCE_SIZE, frameDurations: source.frameDurations };
+}
+
+/**
+ * CreaEditor: returns the speech bubble sheet a thinking crew pet shows, the same bubble the
+ * main pet shows while a response renders.
+ */
+export function getChatPetCrewSpeechSheet(variant: ChatPetVariant, motionReduced: boolean): IChatPetSpriteSheet {
+	const sources = getSpeechSpriteSources(variant);
 	const source = motionReduced ? sources.reducedMotion : sources.animated;
 	return { url: source.url, frameWidth: source.frameWidth, frameHeight: source.frameHeight ?? CHAT_PET_SOURCE_SIZE, frameDurations: source.frameDurations };
 }
@@ -1394,11 +1397,9 @@ export class ChatPetWidget extends Disposable {
 	private _variant: ChatPetVariant;
 	private _selectedAccessory: ChatPetAccessoryId | undefined;
 	private _scale = 1;
-	// CreaEditor: what the chat's agents are doing, acted out by the pet, its badge and its crew.
+	// CreaEditor: what the chat's agents are doing, acted out by the pet and its crew.
 	private readonly _activityTracker: ChatPetAgentActivityTracker;
 	private readonly _crew: ChatPetCrew;
-	private readonly _activityBadge: HTMLElement;
-	private _activityBadgeEntry: IChatAgentActivityEntry | undefined;
 
 	constructor(
 		host: IChatPetWidgetHost,
@@ -1441,10 +1442,8 @@ export class ChatPetWidget extends Disposable {
 			}
 		}));
 		this._visual = dom.append(this._button.element, dom.$('.chat-pet-visual'));
-		// CreaEditor: a badge above the pet names what the chat's agent is doing; the crew stands beside it.
-		this._activityBadge = dom.append(this._button.element, dom.$('span.chat-pet-activity-badge.hidden', { 'aria-hidden': 'true' }));
-		this._register(hoverService.setupDelayedHover(this._activityBadge, () => ({ content: this._activityBadgeEntry ? getChatPetAgentHover(this._activityBadgeEntry) : '' })));
-		this._crew = this._register(new ChatPetCrew(this._overlay, getChatPetCrewSpriteSheet, hoverService));
+		// CreaEditor: the crew of subagent pets stands beside the pet.
+		this._crew = this._register(new ChatPetCrew(this._overlay, getChatPetCrewSpriteSheet, getChatPetCrewSpeechSheet, hoverService));
 		this._activityTracker = this._register(new ChatPetAgentActivityTracker(
 			derived(reader => this._host.read(reader).model.read(reader)),
 			this.chatPetService.enabled,
@@ -1760,10 +1759,6 @@ export class ChatPetWidget extends Disposable {
 				}
 			}
 
-			if (!enabled || isDead || onTheRun || hostTransition) {
-				this._updateActivityBadge(undefined);
-			}
-
 			if (!enabled) {
 				this._hopController.cancel();
 				this._idleScheduler.cancel();
@@ -1815,7 +1810,6 @@ export class ChatPetWidget extends Disposable {
 			}
 
 			const baseState = getChatPetBaseState(hasActiveRequest, needsInput, confirmationAttentionExpired, inputHasContent, idleExpired, rootAgent?.activity);
-			this._updateActivityBadge(this._busy ? rootAgent : undefined);
 			if (isChatPetYapState(transientState) && baseState !== 'idle') {
 				transientState = undefined;
 				this._transientState.set(undefined, undefined);
@@ -2697,19 +2691,6 @@ export class ChatPetWidget extends Disposable {
 			: onTheRun
 				? localize('chatPet.restore', "Bring back the Creacoon pet")
 				: localize('chatPet.interact', "Interact with the Creacoon pet. Drag it around the chat, or flick it toward either side to throw it. While it is falling, catch it with the pointer to bounce it; while it is airborne, press Enter or Space to bounce it. Use the left and right arrow keys to make it hop, or hold Shift to throw it toward a wall. Use the context menu to put it on the run.");
-	}
-
-	/**
-	 * CreaEditor: shows what the chat's own agent is doing in a badge above the pet.
-	 */
-	private _updateActivityBadge(entry: IChatAgentActivityEntry | undefined): void {
-		this._activityBadgeEntry = entry;
-		if (entry) {
-			this._activityBadge.className = `chat-pet-activity-badge ${ThemeIcon.asClassName(getChatPetActivityIcon(entry.activity))}`;
-			this._activityBadge.dataset.activity = entry.activity;
-		} else {
-			this._activityBadge.classList.add('hidden');
-		}
 	}
 
 	/**

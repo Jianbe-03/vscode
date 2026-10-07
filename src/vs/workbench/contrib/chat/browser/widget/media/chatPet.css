@@ -585,48 +585,6 @@
 	transform: translateY(calc(-1 * var(--vscode-spacing-size40))) rotate(-90deg);
 }
 
-/* CreaEditor: a badge above the working pet names what the chat's agent is doing. */
-.chat-pet-activity-badge,
-.chat-pet-crew-badge {
-	position: absolute;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	box-sizing: border-box;
-	border-radius: var(--vscode-cornerRadius-circle);
-	background: var(--vscode-charts-green);
-	color: var(--vscode-editor-background);
-}
-
-.chat-pet-activity-badge {
-	left: calc(-1 * var(--vscode-spacing-size60));
-	top: calc(-1 * var(--vscode-spacing-size60));
-	z-index: 1;
-	width: 18px;
-	height: 18px;
-	cursor: default;
-	pointer-events: auto;
-}
-
-.chat-pet-button > .chat-pet-activity-badge.codicon {
-	font-size: 12px;
-}
-
-.chat-pet-activity-badge.hidden,
-.chat-pet-button.dragging > .chat-pet-activity-badge,
-.chat-pet-button.throwing > .chat-pet-activity-badge,
-.chat-pet-button.falling > .chat-pet-activity-badge {
-	display: none;
-}
-
-.chat-pet-activity-badge[data-activity='waitingForInput'],
-.chat-pet-crew-member[data-activity='waitingForInput'] > .chat-pet-crew-badge {
-	background: var(--vscode-charts-yellow);
-}
-
-.chat-pet-crew-member[data-activity='failed'] > .chat-pet-crew-badge {
-	background: var(--vscode-charts-red);
-}
 
 /* CreaEditor: the crew, one small pet for every running subagent, stands beside the main pet. */
 .chat-pet-crew {
@@ -645,7 +603,6 @@
 
 .chat-pet-crew.hidden,
 .chat-pet-crew-member.hidden,
-.chat-pet-crew-overflow.hidden,
 .chat-pet-overlay.relocating > .chat-pet-crew {
 	display: none;
 }
@@ -686,43 +643,32 @@
 	animation: chat-pet-crew-frames var(--chat-pet-crew-duration) steps(var(--chat-pet-crew-frames)) infinite;
 }
 
-.chat-pet-crew-member > .chat-pet-crew-badge {
-	bottom: 100%;
-	left: 50%;
-	width: 14px;
-	height: 14px;
-	transform: translate(-50%, var(--vscode-spacing-size40));
+.chat-pet-crew.crowded > .chat-pet-crew-member + .chat-pet-crew-member {
+	/* Many subagents: the pets huddle together instead of any being hidden. */
+	margin-left: calc(-1 * var(--vscode-spacing-size120));
+}
+
+/* A thinking crew pet's speech bubble, above it to the right like the main pet's. */
+.chat-pet-crew-bubble {
+	position: absolute;
+	bottom: 60%;
+	left: 40%;
+	background-position: 0 0;
+	background-repeat: no-repeat;
+	image-rendering: pixelated;
 	pointer-events: none;
 }
 
-.chat-pet-crew-member > .chat-pet-crew-badge.codicon {
-	font-size: 10px;
+.chat-pet-crew-bubble.hidden {
+	display: none;
 }
 
-.chat-pet-crew-overflow {
-	display: flex;
-	align-self: center;
-	align-items: center;
-	box-sizing: border-box;
-	height: 16px;
-	padding: 0 var(--vscode-spacing-size40);
-	border-radius: var(--vscode-cornerRadius-circle);
-	background: var(--vscode-badge-background);
-	color: var(--vscode-badge-foreground);
-	font-size: var(--vscode-fontSize-label3);
-	font-weight: var(--vscode-fontWeight-semiBold);
-	font-variant-numeric: tabular-nums;
-	line-height: 1;
-	pointer-events: none;
+.chat-pet-crew-bubble.animated {
+	animation: chat-pet-crew-frames var(--chat-pet-crew-duration) steps(var(--chat-pet-crew-frames)) infinite;
 }
 
-.hc-black .chat-pet-activity-badge,
-.hc-light .chat-pet-activity-badge,
-.hc-black .chat-pet-crew-badge,
-.hc-light .chat-pet-crew-badge,
-.hc-black .chat-pet-crew-overflow,
-.hc-light .chat-pet-crew-overflow {
-	border: var(--vscode-strokeThickness) solid var(--vscode-contrastBorder);
+.monaco-workbench.monaco-reduce-motion .chat-pet-crew-bubble {
+	animation: none;
 }
 
 @keyframes chat-pet-crew-frames {
