@@ -17,6 +17,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { onUnexpectedError } from '../../../../../base/common/errors.js';
 import { Disposable, DisposableMap, DisposableStore, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { autorun, IObservable, observableValue } from '../../../../../base/common/observable.js';
+import { isDirectorAgentUri } from './directorAgent.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { IActionViewItemService, type IActionViewItemFactory } from '../../../../../platform/actions/browser/actionViewItemService.js';
@@ -482,6 +483,7 @@ export class AgentHostSessionConfigPicker extends Disposable {
 
 		this._register(autorun(reader => {
 			const session = this._session.read(reader);
+			session?.mode?.read(reader); // CreaEditor: the isolation control depends on the selected agent
 			for (const changeset of session?.activeChat.read(reader).changesets.read(reader) ?? []) {
 				changeset.operations?.read(reader);
 			}
@@ -604,6 +606,10 @@ export class AgentHostSessionConfigPicker extends Disposable {
 				continue;
 			}
 			if (!this._shouldRenderProperty(property, schema, isNewSession)) {
+				continue;
+			}
+			// CreaEditor: a director works in the folder and gives every session it starts its own worktree.
+			if (property === SessionConfigKey.Isolation && isNewSession && isDirectorAgentUri(session.mode?.get()?.id)) {
 				continue;
 			}
 			const value = resolvedConfig.values[property] ?? schema.default;
@@ -889,14 +895,13 @@ export class AgentHostSessionConfigPicker extends Disposable {
 
 	private _renderIsolationCheckbox(provider: IAgentHostSessionsProvider, sessionId: string, schema: SessionConfigPropertySchema, value: unknown | undefined, isReadOnly: boolean, isLoading: boolean): void {
 		const label = localize('agentHostSessionConfig.isolation.worktree', "New Worktree");
-		const worktreeIndex = schema.enum?.indexOf('worktree') ?? -1;
 		const checked = value === 'worktree';
 		const combinationDisabled = !this._isDevContainerWorktreeEnabled()
 			&& provider.isDevContainerEnabled?.(sessionId) === true
 			&& !checked;
 		const tooltip = combinationDisabled
 			? localize('agentHostSessionConfig.isolation.devContainerDisabled', "New Worktree cannot be combined with Dev Container execution.")
-			: (worktreeIndex >= 0 ? schema.enumDescriptions?.[worktreeIndex] : undefined) ?? schema.description ?? schema.title;
+			: localize('agentHostSessionConfig.isolation.worktreeTooltip', "Run this session in a new Git worktree on its own branch, so your folder stays untouched. This only applies to this session. To make several pull requests at once, pick the Director agent: it works in your folder and gives every session it starts its own worktree.");
 
 		let control = this._isolationCheckbox.value;
 		if (!control || control.sessionId !== sessionId) {

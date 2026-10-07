@@ -4670,6 +4670,31 @@ suite('LocalAgentHostSessionsProvider', () => {
 		});
 	}
 
+	test('a director agent works in the folder and switching away restores the worktree', async () => {
+		const schema: ResolveSessionConfigResult['schema'] = {
+			type: 'object',
+			properties: { [SessionConfigKey.Isolation]: { title: 'Isolation', type: 'string', enum: ['folder', 'worktree'], default: 'worktree' } },
+		};
+		agentHost.resolveSessionConfigResult = { schema, values: { isolation: 'worktree' } };
+		const provider = createProvider(disposables, agentHost);
+		const session = provider.createNewSession(URI.file('/project'), provider.sessionTypes[0].id);
+		await waitForSessionConfig(provider, session.sessionId, () => !provider.isSessionConfigResolving(session.sessionId).get());
+		const requestsBefore = agentHost.resolveSessionConfigRequests.length;
+
+		agentHost.resolveSessionConfigResult = { schema, values: { isolation: 'folder' } };
+		provider.setAgent(session.sessionId, { uri: 'file:///ext/creaeditor-features/agents/director.agent.md', name: 'Director' });
+		await waitForSessionConfig(provider, session.sessionId, config => config?.values.isolation === 'folder' && !provider.isSessionConfigResolving(session.sessionId).get());
+
+		agentHost.resolveSessionConfigResult = { schema, values: { isolation: 'worktree' } };
+		provider.setAgent(session.sessionId, { uri: 'file:///project/.github/agents/reviewer.agent.md', name: 'Reviewer' });
+		await waitForSessionConfig(provider, session.sessionId, config => config?.values.isolation === 'worktree' && !provider.isSessionConfigResolving(session.sessionId).get());
+
+		assert.deepStrictEqual(
+			agentHost.resolveSessionConfigRequests.slice(requestsBefore).map(request => request.config?.isolation),
+			['folder', 'worktree'],
+		);
+	});
+
 	test('changing isolation without starting the session does not update the workspace preference', async () => {
 		const storageService = disposables.add(new InMemoryStorageService());
 		const configurationService = new TestConfigurationService({ [USE_WORKTREE_SETTING]: true });

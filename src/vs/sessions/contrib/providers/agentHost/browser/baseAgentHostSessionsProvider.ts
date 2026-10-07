@@ -33,6 +33,7 @@ import { buildAnnotationsUri } from '../../../../../platform/agentHost/common/an
 import { ChangesetKind } from '../../../../../platform/agentHost/common/changesetUri.js';
 import { parseGitHubIssueUrl } from '../../../../../platform/agentHost/common/githubIssueReferences.js';
 import { getEffectiveAgents } from '../../../../../platform/agentHost/common/customAgents.js';
+import { isDirectorAgentUri } from './directorAgent.js';
 import { KNOWN_MODE_VALUES, omitAutomationSessionTemplateConfigValues, SessionConfigKey } from '../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { applyLegacyAutomationSessionConfig } from '../../../../../platform/agentHost/common/automationConfig.js';
 import { migrateLegacyAutopilotConfig } from '../../../../../platform/agentHost/common/agentHostSchema.js';
@@ -3387,6 +3388,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 	 * the provider itself is disposed.
 	 */
 	private readonly _newSessions = this._register(new DisposableMap<string, NewSession>());
+	/** CreaEditor: isolation of new sessions before a director agent switched them to the folder. */
+	private readonly _isolationBeforeDirector = new Map<string, unknown>();
 
 	/** The in-flight new session with the given id, if any. */
 	protected _getNewSession(sessionId: string): NewSession | undefined {
@@ -3424,6 +3427,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		if (this._newSessions.has(sessionId)) {
 			this._onNewSessionAbandoned(sessionId, 'discarded');
 			this._newSessions.deleteAndDispose(sessionId);
+			this._isolationBeforeDirector.delete(sessionId);
 			this._onDidChangeDraftSessions.fire();
 		}
 	}
@@ -4394,6 +4398,10 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		this._cacheSeededConfigSchemas(config);
 		session.setLoading(config !== undefined && !isSessionConfigComplete(config));
 		this._onDidChangeSessionConfig.fire(session.sessionId);
+		// CreaEditor: the agent can be picked before the config resolves.
+		if (!strict && isDirectorAgentUri(session.getSelectedAgent()?.uri)) {
+			this._applyDirectorIsolation(session, session.getSelectedAgent());
+		}
 		for (const [property, value] of Object.entries(expected ?? {})) {
 			if (!equals(config?.values[property], value)) {
 				throw new Error(`Agent host did not apply session config '${property}'.`);
@@ -5112,6 +5120,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		if (this._newSessions.has(sessionId)) {
 			this._onNewSessionAbandoned(sessionId, 'discarded');
 			this._newSessions.deleteAndDispose(sessionId);
+			this._isolationBeforeDirector.delete(sessionId);
 			this._onDidChangeDraftSessions.fire();
 		}
 	}
@@ -5315,6 +5324,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		const newSession = this._getNewSession(sessionId);
 		if (newSession) {
 			newSession.setSelectedAgent(agent);
+			this._applyDirectorIsolation(newSession, agent);
 			// The selection is forwarded to the host at first-message time
 			// via `sendOptions.agentHostSessionAgent` (see `sendRequest`),
 			// mirroring how `userSelectedModelId` flows.
@@ -5329,6 +5339,37 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			cached.setChatAgent(chatResource, agent);
 			this._updateChatSessionState(chatResource, cached.getChatModelId(chatResource), agent?.uri).catch(err => this._logService.error(`[${this.id}] Failed to update chat model state for ${chatResource.toString()}`, err));
 			this._onDidChangeSessions.fire({ added: [], removed: [], changed: [cached] });
+		}
+	}
+
+	/**
+	 * CreaEditor: a director only starts session groups, whose members each get their
+	 * own worktree, so a new director session works in the folder. Switching back to
+	 * another agent restores the isolation the session had before.
+	 */
+	private _applyDirectorIsolation(newSession: NewSession, agent: ISessionAgentRef | undefined): void {
+		const sessionId = newSession.sessionId;
+		const config = newSession.getConfig();
+		const schema = config?.schema.properties[SessionConfigKey.Isolation];
+		if (!config || !schema?.enum?.includes('folder')) {
+			return;
+		}
+		const current = config.values[SessionConfigKey.Isolation] ?? schema.default;
+		if (isDirectorAgentUri(agent?.uri)) {
+			if (current !== 'folder') {
+				if (!this._isolationBeforeDirector.has(sessionId)) {
+					this._isolationBeforeDirector.set(sessionId, current);
+				}
+				this.setSessionConfigValue(sessionId, SessionConfigKey.Isolation, 'folder').catch(err => this._logService.error(`[${this.id}] Failed to use the folder for a director session`, err));
+			}
+			return;
+		}
+		const previous = this._isolationBeforeDirector.get(sessionId);
+		if (previous !== undefined) {
+			this._isolationBeforeDirector.delete(sessionId);
+			if (previous !== current) {
+				this.setSessionConfigValue(sessionId, SessionConfigKey.Isolation, previous).catch(err => this._logService.error(`[${this.id}] Failed to restore the isolation of a new session`, err));
+			}
 		}
 	}
 
@@ -6103,7 +6144,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 			throw new Error(`[${this.id}] sendRequest rejected: ${result.reason}`);
 		}
 
-		if (newSession.workspaceUri && !newSession.getInitialSessionTemplate()) {
+		// CreaEditor: a director always works in the folder; don't make that the workspace's default.
+		if (newSession.workspaceUri && !newSession.getInitialSessionTemplate() && !isDirectorAgentUri(selectedAgent?.uri)) {
 			this._rememberWorkspaceIsolation(newSession.workspaceUri, newSession.getConfig()?.values[SessionConfigKey.Isolation]);
 		}
 
@@ -6140,6 +6182,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 				newSession.graduate();
 				if (this._newSessions.get(newSession.sessionId) === newSession) {
 					this._newSessions.deleteAndDispose(newSession.sessionId);
+					this._isolationBeforeDirector.delete(newSession.sessionId);
 					this._onDidChangeDraftSessions.fire();
 				}
 				// Clear the pending session before firing the replace event so
@@ -6165,6 +6208,7 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 		if (this._newSessions.get(newSession.sessionId) === newSession) {
 			this._onNewSessionAbandoned(newSession.sessionId, 'sendFailed');
 			this._newSessions.deleteAndDispose(newSession.sessionId);
+			this._isolationBeforeDirector.delete(newSession.sessionId);
 			this._onDidChangeDraftSessions.fire();
 		}
 		this._onDidChangeSessions.fire({ added: [], removed: [skeleton], changed: [] });
