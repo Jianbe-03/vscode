@@ -492,7 +492,7 @@ const configuredLocationsMigrationCategory: ICustomizationMigrationCategory = {
 	getPageDescription(customizations, harnessLabel) {
 		return customizations.length === 0
 			? localize('configuredLocationsMigrationPageDescriptionEmpty', "Select customizations to move to locations supported by the active harness.")
-			: localize('configuredLocationsMigrationPageDescription', "Found {0} customizations in locations configured through VS Code settings that {1} does not use. Move them to supported harness locations.", customizations.length, harnessLabel);
+			: localize('configuredLocationsMigrationPageDescription', "Found {0} customizations in locations configured through CreaEditor settings that {1} does not use. Move them to supported harness locations.", customizations.length, harnessLabel);
 	},
 
 	getBanner(_customizations, harnessLabel, destinationLabel, modifiedSettingIds) {
@@ -500,11 +500,11 @@ const configuredLocationsMigrationCategory: ICustomizationMigrationCategory = {
 		const settingsList = formatSettingLinks(settingsLinks);
 		const message = settingsLinks.length === 1
 			? destinationLabel
-				? localize('configuredLocationsMigrationBannerSingleSettingWithDestination', "The setting {0} is no longer read by {1}. Move the customizations to '{2}' so both VS Code and {1} can use them.", settingsList, harnessLabel, destinationLabel)
-				: localize('configuredLocationsMigrationBannerSingleSetting', "The setting {0} is no longer read by {1}. Move the customizations into supported harness folders so both VS Code and {1} can use them.", settingsList, harnessLabel)
+				? localize('configuredLocationsMigrationBannerSingleSettingWithDestination', "The setting {0} is no longer read by {1}. Move the customizations to '{2}' so both CreaEditor and {1} can use them.", settingsList, harnessLabel, destinationLabel)
+				: localize('configuredLocationsMigrationBannerSingleSetting', "The setting {0} is no longer read by {1}. Move the customizations into supported harness folders so both CreaEditor and {1} can use them.", settingsList, harnessLabel)
 			: destinationLabel
-				? localize('configuredLocationsMigrationBannerSettingsWithDestination', "The settings {0} are no longer read by {1}. Move the customizations to '{2}' so both VS Code and {1} can use them.", settingsList, harnessLabel, destinationLabel)
-				: localize('configuredLocationsMigrationBannerSettings', "The settings {0} are no longer read by {1}. Move the customizations into supported harness folders so both VS Code and {1} can use them.", settingsList, harnessLabel);
+				? localize('configuredLocationsMigrationBannerSettingsWithDestination', "The settings {0} are no longer read by {1}. Move the customizations to '{2}' so both CreaEditor and {1} can use them.", settingsList, harnessLabel, destinationLabel)
+				: localize('configuredLocationsMigrationBannerSettings', "The settings {0} are no longer read by {1}. Move the customizations into supported harness folders so both CreaEditor and {1} can use them.", settingsList, harnessLabel);
 		return {
 			message: new MarkdownString(message, {
 				isTrusted: { enabledCommands: ['workbench.action.openSettings'] },

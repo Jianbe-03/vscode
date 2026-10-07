@@ -653,7 +653,7 @@ export class RemoteTunnelWorkbenchContribution extends Disposable implements IWo
 						} else {
 							notificationService.notify({
 								severity: Severity.Info,
-								message: localize('progress.turnOn.final.noLink', "Remote Tunnel Access is enabled for {0}. You can [configure](command:{1}) or [turn off](command:{2}) this access via the VS Code Accounts menu.", connectionInfo.tunnelName, RemoteTunnelCommandIds.configure, RemoteTunnelCommandIds.turnOff),
+								message: localize('progress.turnOn.final.noLink', "Remote Tunnel Access is enabled for {0}. You can [configure](command:{1}) or [turn off](command:{2}) this access via the CreaEditor Accounts menu.", connectionInfo.tunnelName, RemoteTunnelCommandIds.configure, RemoteTunnelCommandIds.turnOff),
 							});
 						}
 					}

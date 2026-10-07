@@ -1,8 +1,8 @@
 {
   "displayName": "CreaEditor Features",
-  "description": "A tour of what CreaEditor adds to Visual Studio Code.",
+  "description": "A tour of what CreaEditor adds to CreaEditor.",
   "walkthrough.title": "What's in CreaEditor",
-  "walkthrough.description": "Everything CreaEditor adds to Visual Studio Code.",
+  "walkthrough.description": "Everything CreaEditor adds to CreaEditor.",
   "step.look.title": "Creacoon look and feel",
   "step.look.description": "The Creacoon Dark and Creacoon Light themes, logo and app icon. CreaEditor follows your macOS appearance.\n[Choose a Theme](command:workbench.action.selectTheme)",
   "step.models.title": "Your own models, no Copilot sign-in",
