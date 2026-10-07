@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { CustomizationEnablementKind, CustomizationLoadStatus, CustomizationType, type AgentCustomization, type ClientPluginCustomization, type Customization } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
-import { getEffectiveAgents, getEffectiveClientAgents } from '../../../../../../platform/agentHost/common/customAgents.js';
+import { getEffectiveAgents, getEffectiveClientAgents, mergeClientAgents } from '../../../../../../platform/agentHost/common/customAgents.js';
 
 function sc(uri: string, children?: AgentCustomization[], enabled = true): Customization {
 	return {
@@ -113,6 +113,23 @@ suite('getEffectiveAgents', () => {
 		}, {
 			disabled: ['enabled', 'loose'],
 			reenabled: ['disabled', 'enabled', 'loose'],
+		});
+	});
+
+	test('merges draft agents without repeating an agent the host reports as a synced copy', () => {
+		const extensionDirector = agent('file:///app/extensions/creaeditor-agents/agents/director.agent.md', 'Director');
+		const syncedDirector = agent('file:///userData/agentPlugins/synced/1/agents/director.agent.md', 'Director');
+		const workspaceAgent = agent('file:///workspace/.github/agents/review.agent.md', 'Review');
+		const draftAgents = [extensionDirector, workspaceAgent];
+
+		assert.deepStrictEqual({
+			beforeHostState: mergeClientAgents(undefined, draftAgents).map(agent => agent.uri),
+			withSyncedCopy: mergeClientAgents([sc('vscode-synced-customization:///agent-host', [syncedDirector])], draftAgents).map(agent => agent.uri),
+			sameNameElsewhere: mergeClientAgents([sc('file:///plugins/other', [syncedDirector])], draftAgents).map(agent => agent.uri),
+		}, {
+			beforeHostState: [extensionDirector.uri, workspaceAgent.uri],
+			withSyncedCopy: [syncedDirector.uri, workspaceAgent.uri],
+			sameNameElsewhere: [extensionDirector.uri, syncedDirector.uri, workspaceAgent.uri],
 		});
 	});
 });

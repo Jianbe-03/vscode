@@ -3,8 +3,9 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import { isEqualOrParent } from '../../../base/common/resources.js';
+import { basename, isEqualOrParent } from '../../../base/common/resources.js';
 import { URI } from '../../../base/common/uri.js';
+import { SYNCED_CUSTOMIZATION_SCHEME } from './agentHostFileSystemService.js';
 import { isCustomizationEnabled } from './customizationEnablement.js';
 import { CustomizationType, type AgentCustomization, type ClientPluginCustomization, type Customization } from './state/protocol/state.js';
 
@@ -48,6 +49,48 @@ export function getEffectiveAgents(
 	const result = [...seen.values()];
 	result.sort((a, b) => a.name.localeCompare(b.name) || a.uri.toString().localeCompare(b.uri.toString()));
 	return result;
+}
+
+/**
+ * CreaEditor: merges the draft agents a client resolved locally into the agents the host reports
+ * for a session. Agents with the same URI are the same agent, and the client's entry wins.
+ *
+ * An agent outside the workspace, such as one contributed by an extension, reaches the host as a
+ * copy inside the client's synced customization plugin, under another URI. The host resolves a
+ * selected agent by its own URI, so once the host reports that copy, the client's draft entry for
+ * the same agent (same name and file name) is left out instead of showing the agent twice.
+ */
+export function mergeClientAgents(
+	sessionCustomizations: readonly Customization[] | undefined,
+	clientAgents: readonly AgentCustomization[],
+): readonly AgentCustomization[] {
+	const stateAgents = getEffectiveAgents(sessionCustomizations);
+	if (clientAgents.length === 0) {
+		return stateAgents;
+	}
+	const syncedCopies = new Set<string>();
+	for (const container of sessionCustomizations ?? []) {
+		if (container.type === CustomizationType.McpServer || URI.parse(container.uri).scheme !== SYNCED_CUSTOMIZATION_SCHEME) {
+			continue;
+		}
+		for (const child of container.children ?? []) {
+			if (child.type === CustomizationType.Agent) {
+				syncedCopies.add(getAgentCopyKey(child));
+			}
+		}
+	}
+	const agentsByUri = new Map(stateAgents.map(agent => [agent.uri, agent]));
+	for (const agent of clientAgents) {
+		if (!agentsByUri.has(agent.uri) && syncedCopies.has(getAgentCopyKey(agent))) {
+			continue;
+		}
+		agentsByUri.set(agent.uri, agent);
+	}
+	return [...agentsByUri.values()].sort((a, b) => a.name.localeCompare(b.name) || a.uri.localeCompare(b.uri));
+}
+
+function getAgentCopyKey(agent: AgentCustomization): string {
+	return `${agent.name}\0${basename(URI.parse(agent.uri))}`;
 }
 
 /**

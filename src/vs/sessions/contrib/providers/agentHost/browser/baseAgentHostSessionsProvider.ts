@@ -32,7 +32,7 @@ import { readCodexAccountInfo } from '../../../../../platform/agentHost/common/c
 import { buildAnnotationsUri } from '../../../../../platform/agentHost/common/annotationsUri.js';
 import { ChangesetKind } from '../../../../../platform/agentHost/common/changesetUri.js';
 import { parseGitHubIssueUrl } from '../../../../../platform/agentHost/common/githubIssueReferences.js';
-import { getEffectiveAgents } from '../../../../../platform/agentHost/common/customAgents.js';
+import { getEffectiveAgents, mergeClientAgents } from '../../../../../platform/agentHost/common/customAgents.js';
 import { isDirectorAgentUri } from './directorAgent.js';
 import { KNOWN_MODE_VALUES, omitAutomationSessionTemplateConfigValues, SessionConfigKey } from '../../../../../platform/agentHost/common/sessionConfigKeys.js';
 import { applyLegacyAutomationSessionConfig } from '../../../../../platform/agentHost/common/automationConfig.js';
@@ -5375,20 +5375,8 @@ export abstract class BaseAgentHostSessionsProvider extends Disposable implement
 
 	getCustomAgents(sessionId: string): readonly AgentCustomization[] {
 		const sessionState = this._lastSessionStates.get(sessionId);
-		const stateAgents = getEffectiveAgents(sessionState?.customizations);
 		const newSession = this._newSessions.get(sessionId);
-		if (!newSession) {
-			return stateAgents;
-		}
-		const clientAgents = newSession.getClientCustomAgents();
-		if (clientAgents.length === 0) {
-			return stateAgents;
-		}
-		const agentsByUri = new Map(stateAgents.map(agent => [agent.uri.toString(), agent]));
-		for (const agent of clientAgents) {
-			agentsByUri.set(agent.uri.toString(), agent);
-		}
-		return [...agentsByUri.values()].sort((a, b) => a.name.localeCompare(b.name) || a.uri.toString().localeCompare(b.uri.toString()));
+		return mergeClientAgents(sessionState?.customizations, newSession?.getClientCustomAgents() ?? []);
 	}
 
 	getCustomizations(sessionId: string): Customization[] {
