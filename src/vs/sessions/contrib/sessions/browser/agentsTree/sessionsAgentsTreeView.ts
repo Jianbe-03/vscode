@@ -28,7 +28,7 @@ import { ISessionsService } from '../../../../services/sessions/browser/sessions
 import { ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 
-export const SESSIONS_AGENTS_TREE_VIEW_ID = 'agentic.workbench.view.agentsTree';
+export const SESSIONS_AGENTS_TREE_VIEW_ID = 'workbench.sessions.auxiliaryBar.agentsTree';
 
 function getSessionStatus(status: SessionStatus): AgentsTreeStatus | undefined {
 	switch (status) {

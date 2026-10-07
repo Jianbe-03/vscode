@@ -3,8 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: registers the "Agents" view (live tree of sessions, subagents and created sessions) in the Agents window,
-// and the Open Agents Tree and Open AI Costs buttons in the header of the Sessions list.
+// CreaEditor: registers the "Agents" tab (live tree of sessions, subagents and created sessions) next to Changes and
+// Files in the Agents window, and the Open Agents Tree and Open AI Costs buttons in the header of the Sessions list.
 
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -15,13 +15,13 @@ import { ServicesAccessor } from '../../../../../platform/instantiation/common/i
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.js';
 import { IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
-import { IViewsRegistry, Extensions as ViewExtensions, WindowEnablement } from '../../../../../workbench/common/views.js';
+import { ViewPaneContainer } from '../../../../../workbench/browser/parts/views/viewPaneContainer.js';
+import { IViewContainersRegistry, IViewsRegistry, ViewContainerLocation, Extensions as ViewExtensions, WindowEnablement } from '../../../../../workbench/common/views.js';
 import { IViewsService } from '../../../../../workbench/services/views/common/viewsService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { CHAT_CATEGORY } from '../../../../../workbench/contrib/chat/browser/actions/chatActions.js';
 import { ChatContextKeys } from '../../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { Menus } from '../../../../browser/menus.js';
-import { agentSessionsViewContainer } from '../sessions.contribution.js';
 import { SESSIONS_AGENTS_TREE_VIEW_ID, SessionsAgentsTreeViewPane } from './sessionsAgentsTreeView.js';
 
 /** Command of the Copilot extension that opens the AI Costs page (cost per issue and chat). */
@@ -30,18 +30,30 @@ const SHOW_AI_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
 const aiCostsIcon = registerIcon('sessions-ai-costs-icon', Codicon.creditCard, localize('sessionsAiCostsIcon', "Icon of the Open AI Costs action in the Agents window."));
 const agentsTreeViewIcon = registerIcon('sessions-agents-tree-view-icon', Codicon.typeHierarchySub, localize('sessionsAgentsTreeViewIcon', "View icon of the Agents view in the Agents window."));
 
+const SESSIONS_AGENTS_TREE_CONTAINER_ID = 'workbench.sessions.auxiliaryBar.agentsTreeContainer';
+
+// A tab of its own after Changes and Files, so the tree has the full height and the Sessions list keeps its layout.
+const agentsTreeViewContainer = Registry.as<IViewContainersRegistry>(ViewExtensions.ViewContainersRegistry).registerViewContainer({
+	id: SESSIONS_AGENTS_TREE_CONTAINER_ID,
+	title: localize2('sessionsAgentsTree.container.label', "Agents"),
+	icon: agentsTreeViewIcon,
+	order: 12,
+	ctorDescriptor: new SyncDescriptor(ViewPaneContainer, [SESSIONS_AGENTS_TREE_CONTAINER_ID, { mergeViewWithContainerWhenSingleView: true }]),
+	storageId: SESSIONS_AGENTS_TREE_CONTAINER_ID,
+	hideIfEmpty: true,
+	windowEnablement: WindowEnablement.Sessions,
+}, ViewContainerLocation.AuxiliaryBar);
+
 Registry.as<IViewsRegistry>(ViewExtensions.ViewsRegistry).registerViews([{
 	id: SESSIONS_AGENTS_TREE_VIEW_ID,
 	name: localize2('sessionsAgentsTree.view.label', "Agents"),
 	containerIcon: agentsTreeViewIcon,
 	ctorDescriptor: new SyncDescriptor(SessionsAgentsTreeViewPane),
-	canToggleVisibility: true,
+	canToggleVisibility: false,
 	canMoveView: true,
-	// Hidden until opened so the Sessions list keeps its single-view layout.
-	hideByDefault: true,
-	order: 100,
+	when: ChatContextKeys.enabled,
 	windowEnablement: WindowEnablement.Sessions,
-}], agentSessionsViewContainer);
+}], agentsTreeViewContainer);
 
 class ShowSessionsAgentsTreeAction extends Action2 {
 	constructor() {
