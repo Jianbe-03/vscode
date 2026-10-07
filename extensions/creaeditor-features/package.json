@@ -79,6 +79,18 @@
             ]
           },
           {
+            "id": "jira",
+            "title": "%step.jira.title%",
+            "description": "%step.jira.description%",
+            "media": {
+              "image": "media/jira.png",
+              "altText": "%step.jira.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.connectJira"
+            ]
+          },
+          {
             "id": "agentsTree",
             "title": "%step.agentsTree.title%",
             "description": "%step.agentsTree.description%",

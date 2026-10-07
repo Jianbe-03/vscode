@@ -95,8 +95,10 @@ Every request to OpenRouter or LiteLLM carries the chat it belongs to and the is
 
 **Issue:** taken from, in order of preference:
 1. an agent calling the **Set Chat Issue** tool (`#chatIssue`; it is in the `execute` tool set, so agents like *Issue to PR* have it);
-2. `#123`, `owner/repo#123` or an issue URL in the first prompt;
-3. the branch name (`123-fix-login`, `issue/123`, `feature/GH-123-x`).
+2. a GitHub or Jira issue URL, `owner/repo#123`, a Jira key such as `PROJ-123`, or `#123` in the first prompt;
+3. the branch name (`PROJ-123-fix-login`, `123-fix-login`, `issue/123`, `feature/GH-123-x`).
+
+Jira keys are stored in upper case and link to the issue on the AI Costs page when the site is known (from a `/browse/PROJ-123` URL). Prefixes that are not tickets, like `UTF-8`, `SHA-256` or `GPT-5`, never count as a key.
 
 **Recording costs:** CreaEditor records the cost each gateway reports:
 - OpenRouter: `usage.cost` in the response, or `GET /api/v1/generation` afterwards.
@@ -107,6 +109,19 @@ Every request to OpenRouter or LiteLLM carries the chat it belongs to and the is
 - Filter by period, gateway or text, and export everything as CSV.
 - The data stays on your Mac.
 - Because the metadata is sent along, the same breakdown is also available in the OpenRouter activity logs and in LiteLLM's spend tracking (tags), for the whole team.
+
+## Jira
+
+Agents can read Jira issues directly, with their description and comments, through Atlassian's official remote MCP server (Atlassian Cloud sites, `yourcompany.atlassian.net`).
+
+1. Run **CreaEditor: Connect Jira...** from the Command Palette (or the button on the features page).
+2. Choose **Sign In with Atlassian**. CreaEditor adds the server as `atlassian` to your MCP servers (`https://mcp.atlassian.com/v2/mcp`) and starts it; confirm that it may start, and sign in once in the browser. Agents only see what your Atlassian account can see.
+   - Alternatively choose **Use a Service Account API Key** when your Atlassian admin enabled API keys for the Rovo MCP server. The key is asked for once and kept in the secret storage, not in `mcp.json`.
+3. Mention a key in a chat, for example *"Fix PROJ-123"*, or ask for *"all open bugs in sprint 12"*. The agent reads the issue with the Jira tools.
+
+The **Director** reads Jira issues too: *"Make PRs for PROJ-12, PROJ-15 and PROJ-20 on develop"* starts one session per issue, with the key in each branch name and pull request. Jira keys also count as the issue on the [AI Costs page](#cost-per-issue-and-chat).
+
+Jira Data Center (self-hosted) is not supported by Atlassian's remote MCP server; use a community Jira MCP server for it.
 
 ## Request metadata
 
