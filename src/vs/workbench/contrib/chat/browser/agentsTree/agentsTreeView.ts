@@ -87,8 +87,9 @@ export type AgentsTreeElement = IAgentsTreeChatElement | IAgentsTreeSubagentElem
  * Builds the subagent elements of all requests of a chat model. A subagent that runs as its own
  * chat continues with the subagents of that chat when its model is loaded.
  * @param referencedChats collects the chat resources of subagents that run as their own chat.
+ * @param getUnloadedChatChildren returns the children of a subagent chat whose model is not loaded.
  */
-export function buildChatModelSubagentElements(chatService: IChatService, model: IChatModel, now: number, referencedChats: Set<string>, visited = new Set<string>()): IAgentsTreeSubagentElement[] {
+export function buildChatModelSubagentElements(chatService: IChatService, model: IChatModel, now: number, referencedChats: Set<string>, visited = new Set<string>(), getUnloadedChatChildren?: (chatResource: string) => AgentsTreeElement[]): IAgentsTreeSubagentElement[] {
 	const modelKey = model.sessionResource.toString();
 	if (visited.has(modelKey)) {
 		return [];
@@ -101,7 +102,9 @@ export function buildChatModelSubagentElements(chatService: IChatService, model:
 			referencedChats.add(node.chatResource);
 			const childModel = children.length === 0 ? chatService.getSession(URI.parse(node.chatResource)) : undefined;
 			if (childModel) {
-				children = buildChatModelSubagentElements(chatService, childModel, now, referencedChats, visited);
+				children = buildChatModelSubagentElements(chatService, childModel, now, referencedChats, visited, getUnloadedChatChildren);
+			} else if (children.length === 0 && getUnloadedChatChildren) {
+				children = getUnloadedChatChildren(node.chatResource);
 			}
 		}
 		return { kind: 'subagent', id: `${modelKey}#${node.id}`, node, sessionResource: model.sessionResource, responseId, children };

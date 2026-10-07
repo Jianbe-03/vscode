@@ -25,7 +25,7 @@ import { AgentsTreeStatus, orderAgentsTreeRoots } from '../../../../../workbench
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ISessionGroupsService } from '../../../../services/sessions/browser/sessionGroupsService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
-import { ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
+import { ChatOriginKind, IChat, ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 
 export const SESSIONS_AGENTS_TREE_VIEW_ID = 'workbench.sessions.auxiliaryBar.agentsTree';
@@ -107,13 +107,46 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 			const key = session.resource.toString();
 			visitedSessions.add(key);
 			const children: AgentsTreeElement[] = [];
+			const allChats = session.chats.get();
+
+			// Subagent chats know the chat that started them, so they nest under it even when no chat
+			// model is loaded. A loaded chat model adds the subagents that do not run as their own chat.
+			const getChatChildren = (chatResource: string): AgentsTreeElement[] => {
+				const result: AgentsTreeElement[] = [];
+				for (const chat of allChats) {
+					const chatKey = chat.resource.toString();
+					if (chat.origin?.kind !== ChatOriginKind.Tool || chat.origin.parentChat?.toString() !== chatResource || referencedChats.has(chatKey)) {
+						continue;
+					}
+					referencedChats.add(chatKey);
+					result.push({
+						kind: 'chat',
+						id: chatKey,
+						label: chat.title.get() || localize('sessionsAgentsTree.subagent', "Subagent"),
+						status: getSessionStatus(chat.status.get()),
+						resource: chat.resource,
+						children: getModelChildren(chat),
+					});
+				}
+				return result;
+			};
+			const getModelChildren = (chat: IChat): AgentsTreeElement[] => {
+				const chatKey = chat.resource.toString();
+				const model = this.chatService.getSession(chat.resource);
+				const modelChildren = model ? buildChatModelSubagentElements(this.chatService, model, now, referencedChats, visitedChats, getChatChildren) : [];
+				// Subagent chats that the loaded model does not mention (or all of them without a model).
+				return [...modelChildren, ...getChatChildren(chatKey)];
+			};
+
 			// The main chat goes first so that subagent chats nest under the subagent that started them.
 			const mainChat = session.mainChat.get();
-			const chats = [mainChat, ...session.chats.get().filter(chat => chat !== mainChat)];
-			for (const chat of chats) {
-				const model = referencedChats.has(chat.resource.toString()) ? undefined : this.chatService.getSession(chat.resource);
-				if (model) {
-					children.push(...buildChatModelSubagentElements(this.chatService, model, now, referencedChats, visitedChats));
+			for (const chat of [mainChat, ...allChats.filter(chat => chat !== mainChat && chat.origin?.kind !== ChatOriginKind.Tool)]) {
+				children.push(...getModelChildren(chat));
+			}
+			// Subagent chats whose parent chat is not part of the session.
+			for (const chat of allChats) {
+				if (chat.origin?.kind === ChatOriginKind.Tool && !referencedChats.has(chat.resource.toString())) {
+					children.push(...getChatChildren(chat.origin.parentChat?.toString() ?? ''));
 				}
 			}
 
@@ -160,6 +193,12 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 	}
 
 	protected async openChat(element: IAgentsTreeChatElement, preserveFocus: boolean): Promise<void> {
+		// A subagent chat opens as a chat of its session; anything else is a session.
+		const owner = this._sessionsManagementService.getSessionForChatResource(element.resource);
+		if (owner && owner.chat !== owner.session.mainChat.get()) {
+			await this._sessionsService.openChat(owner.session, owner.chat.resource, { preserveFocus, source: 'navigation' });
+			return;
+		}
 		await this._sessionsService.openSession(element.resource, { preserveFocus, source: 'navigation' });
 	}
 
