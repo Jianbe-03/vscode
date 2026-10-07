@@ -154,6 +154,9 @@ Subagents (the `agent` / `runSubagent` tool) can start their own subagents. Nest
 - Each card shows the agent's task, model and duration, and updates live. Its colored edge shows the status: running, waiting for confirmation, done or failed. The line to a running agent takes that color too.
 - Click a card to jump to it. The chevron on a card collapses its subagents; the keyboard works with the arrow keys and Enter.
 - In the Agents window the tree also shows the sessions and chat groups an agent created.
+- Ended agents stay visible, shown as turned off: finished, failed or cancelled agents, closed chats and archived sessions get a dimmed grey card with a dashed edge and line, plus an **Ended**, **Closed** or **Archived** label. Running agents come first, then idle chats, then ended ones, each newest first. Only the 20 most recent closed chats or archived sessions are kept.
+
+In the Agents window, the header of the Sessions list has two extra buttons after New, Filter and Find: **Open Agents Tree** ($(type-hierarchy-sub)) and **Open AI Costs** ($(credit-card)), which opens the [cost page](#cost-per-issue-and-chat) in the editor area.
 
 | Setting | Default | |
 | --- | --- | --- |
