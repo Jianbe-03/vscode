@@ -1171,7 +1171,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 			this.createInput(this.container, { renderFollowups, renderStyle, renderInputToolbarBelowInput });
 		}
 
-		if (this.location === ChatAgentLocation.Chat && !isInlineChat(this)) {
+		// CreaEditor: the pet lives in the Agents window only, not in the editor window's chats.
+		if (this.location === ChatAgentLocation.Chat && !isInlineChat(this) && this.viewOptions.isSessionsWindow) {
 			const inputContainer = this.inputPart.inputContainerElement;
 			const petHost = this.inputPart.element;
 			const inputHasContent = observableFromEvent(this, this.inputEditor.onDidChangeModelContent, () => this.inputEditor.getValue().length > 0);

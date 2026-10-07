@@ -66,16 +66,19 @@ export class ChatSlashCommandsContribution extends Disposable {
 	) {
 		super();
 
-		this._store.add(slashCommandService.registerSlashCommand({
-			command: 'creacoon-pet',
-			detail: nls.localize('vscodePet', "Toggle an interactive Creacoon pet (Experimental)"),
-			sortText: 'z3_vscodePet',
-			executeImmediately: true,
-			silent: true,
-			locations: [ChatAgentLocation.Chat]
-		}, async () => {
-			chatPetService.toggle();
-		}));
+		// CreaEditor: the pet lives in the Agents window only.
+		if (this.environmentService.isSessionsWindow) {
+			this._store.add(slashCommandService.registerSlashCommand({
+				command: 'creacoon-pet',
+				detail: nls.localize('vscodePet', "Toggle an interactive Creacoon pet (Experimental)"),
+				sortText: 'z3_vscodePet',
+				executeImmediately: true,
+				silent: true,
+				locations: [ChatAgentLocation.Chat]
+			}, async () => {
+				chatPetService.toggle();
+			}));
+		}
 		const clearCommandRegistration = this._register(new MutableDisposable());
 		const registerClearCommand = () => {
 			const wording = getChatSessionArchiveActionWording(configurationService);
