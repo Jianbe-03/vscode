@@ -2,7 +2,7 @@
 
 CreaEditor is Creacoon's build of Visual Studio Code (based on VS Code 1.140.0). On top of VS Code it adds:
 
-- the Creacoon look: Creacoon Dark and Creacoon Light themes, logo and app icon;
+- the Creacoon look: Creacoon Dark, Creacoon Night (near-black, for working at night) and Creacoon Light themes, listed first in the theme picker, plus logo and app icon;
 - chat that runs only on your own language models (BYOK, LiteLLM, Claude Code, Codex, ...), with all of Copilot Chat's built-in agents, prompts and tools;
 - OpenRouter and LiteLLM connections that are detected automatically, with OpenRouter presets and only the models your key's guardrails allow, so the model picker stays short;
 - tracking of every OpenRouter / LiteLLM request by chat and issue, and an **AI Costs** page with the cost per issue and per chat;

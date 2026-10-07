@@ -4,7 +4,7 @@
   "walkthrough.title": "What's in CreaEditor",
   "walkthrough.description": "Everything CreaEditor adds to CreaEditor.",
   "step.look.title": "Creacoon look and feel",
-  "step.look.description": "The Creacoon Dark and Creacoon Light themes, logo and app icon. CreaEditor follows your macOS appearance.\n[Choose a Theme](command:workbench.action.selectTheme)",
+  "step.look.description": "The Creacoon Dark, Creacoon Night (near-black, easier on the eyes at night) and Creacoon Light themes, logo and app icon. The Creacoon themes are listed first in the theme picker, and CreaEditor follows your macOS appearance.\n[Choose a Theme](command:workbench.action.selectTheme)",
   "step.models.title": "Your own models, no Copilot sign-in",
   "step.models.description": "Chat, agents, prompts and tools from Copilot Chat run on your own API keys and on models from extensions such as LiteLLM, Claude Code and Codex. No GitHub Copilot account needed.\n[Manage Models](command:workbench.action.chat.manage)",
   "step.gateways.title": "OpenRouter and LiteLLM, auto-discovered",
