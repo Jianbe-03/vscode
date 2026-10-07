@@ -24,6 +24,7 @@ import { RemoteNativeMpcDiscovery } from '../common/discovery/nativeMcpRemoteDis
 import { PluginMcpDiscovery } from '../common/discovery/pluginMcpDiscovery.js';
 import { CursorWorkspaceMcpDiscoveryAdapter } from '../common/discovery/workspaceMcpDiscoveryAdapter.js';
 import { WorkspaceDotMcpDiscovery } from '../common/discovery/workspaceDotMcpDiscovery.js';
+import { ConnectJiraAction } from './creaeditorJira.js';
 import { McpCommandIds } from '../common/mcpCommandIds.js';
 import { mcpServerSchema } from '../common/mcpConfiguration.js';
 import { IMcpCopilotGlobalConfigurationService, McpCopilotGlobalConfigurationService } from '../common/mcpCopilotGlobalConfigurationService.js';
@@ -101,6 +102,8 @@ registerAction2(McpBrowseResourcesCommand);
 registerAction2(McpConfigureSamplingModels);
 registerAction2(McpStartPromptingServerCommand);
 registerAction2(McpSkipCurrentAutostartCommand);
+// CreaEditor: Connect Jira.
+registerAction2(ConnectJiraAction);
 
 registerWorkbenchContribution2('mcpActionRendering', MCPServerActionRendering, WorkbenchPhase.BlockRestore);
 registerWorkbenchContribution2('mcpAddContext', McpAddContextContribution, WorkbenchPhase.Eventually);
