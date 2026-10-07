@@ -65,8 +65,8 @@ const trackSpans: Partial<Record<ChatPetAccessoryTrack, readonly IChatPetAccesso
 		{ firstFrame: 3, lastFrame: 7, head: defaultHeadAnchor, pose: 'upright', rightEye: defaultRightEyeAnchor },
 	],
 	love: [
-		{ firstFrame: 0, lastFrame: 3, head: { x: 48, y: 36 } },
-		{ firstFrame: 4, lastFrame: 5, head: defaultHeadAnchor },
+		{ firstFrame: 0, lastFrame: 8, head: { x: 48, y: 36 } },
+		{ firstFrame: 9, lastFrame: 15, head: defaultHeadAnchor },
 	],
 	jump: [
 		{ firstFrame: 0, lastFrame: 0, head: defaultHeadAnchor, rightEye: { x: 56, y: 56 } },

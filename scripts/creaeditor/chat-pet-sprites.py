@@ -192,8 +192,25 @@ def draw_asterisk_antenna(frame, tip_x, y0, stalk, lean, spread, pal, heart=Fals
 			fill(px, w, h, center_x + ax * PIXEL, center_y + ay * PIXEL, PIXEL, pal['light'])
 
 
-def creacoon_frame(frame, variant):
-	"""Gives one frame the Creacoon look; frames without a recognizable head are only recolored."""
+def draw_antenna_morph(frame, tip_x, y0, t, pal):
+	"""Between the folded mark (a vertical line) and the original two antennae: the line
+	shrinks while the two arms grow out diagonally from the head's tip (t from 0 to 1)."""
+	px = frame.load()
+	w, h = frame.size
+	line = max(0, round((1 - t) * (ARM * 2 + 2)))
+	arms = round(t * ARM)
+	for i in range(1, line + 1):
+		fill(px, w, h, tip_x, y0 - i * PIXEL, PIXEL, pal['light'] if i > 1 else pal['mid'])
+	for k in range(1, arms + 1):
+		fill(px, w, h, tip_x - k * PIXEL, y0 - k * PIXEL, PIXEL, pal['mid'])
+		fill(px, w, h, tip_x + k * PIXEL, y0 - k * PIXEL, PIXEL, pal['mid'])
+
+
+def creacoon_frame(frame, variant, spread_override=None, keep_antenna=False, morph=None):
+	"""Gives one frame the Creacoon look; frames without a recognizable head are only recolored.
+
+	`spread_override` forces how far the mark's arms are open, and `keep_antenna` keeps the
+	original two antennae (used while they curl into the love heart)."""
 	frame = frame.copy()
 	recolor_eyes(frame, variant)
 	body = source_body_colors(variant)
@@ -206,6 +223,9 @@ def creacoon_frame(frame, variant):
 	pal = PALETTES[variant]
 	antenna = antenna_pixels(mask, cx, y0, w)
 	heart = is_heart(antenna, cx)
+	if keep_antenna:
+		add_highlight(frame, cx, y0, variant)
+		return frame
 	# Remove the source antenna: body-colored pixels above the head near its center, and small
 	# loose pieces beside the top of the head (a drooping antenna), which only touch it diagonally.
 	head = component(mask, cx, y0)
@@ -228,8 +248,21 @@ def creacoon_frame(frame, variant):
 		spread = max(0.0, min(1.0, (widest - 8) / 56))
 	else:
 		stalk, lean, spread = 1, 0, 1.0
-	draw_asterisk_antenna(frame, cx - PIXEL // 2, y0, stalk, lean, spread, pal, heart)
-	# A soft highlight on the lit side of the head, only where the body is plain light green.
+	if spread_override is not None:
+		spread = spread_override
+	if morph is not None:
+		draw_antenna_morph(frame, cx - PIXEL // 2, y0, morph, pal)
+	else:
+		draw_asterisk_antenna(frame, cx - PIXEL // 2, y0, stalk, lean, spread, pal, heart)
+	add_highlight(frame, cx, y0, variant)
+	return frame
+
+
+def add_highlight(frame, cx, y0, variant):
+	"""A soft highlight on the lit side of the head, only where the body is plain light green."""
+	px = frame.load()
+	w, h = frame.size
+	pal = PALETTES[variant]
 	hx, hy = cx + 8, y0 + 16
 	area = [(x, y) for x in range(hx, hx + 8) for y in range(hy, hy + 8)]
 	if all(0 <= x < w and 0 <= y < h and px[x, y][3] and px[x, y][:3] == pal['light'] for x, y in area):
@@ -268,10 +301,41 @@ ANIMATIONS = {
 HEADLESS = {'speech-{v}-96', 'respawn-{v}-96'}
 
 
+def love_frames(variant):
+	"""The love animation: the mark folds into the original two antennae, they curl into the
+	heart exactly as in the original art, and then unfold back into the mark.
+
+	Sixteen frames instead of the original six; the widget's LOVE_FRAME_DURATIONS matches."""
+	source = read_source(f'buddy-love-{variant}-96.spritesheet.png')
+	originals = [pad(source.crop((f * 96, 0, f * 96 + 96, source.height))) for f in range(source.width // 96)]
+	first = originals[0]
+	# Folding, step by step: the mark's arms close onto the stalk, then the line splits into
+	# the two antennae. Unfolding plays the same steps in reverse.
+	folding = [
+		creacoon_frame(first, variant, spread_override=0.7),
+		creacoon_frame(first, variant, spread_override=0.35),
+		creacoon_frame(first, variant, spread_override=0.0),
+		creacoon_frame(first, variant, morph=0.35),
+		creacoon_frame(first, variant, morph=0.7),
+	]
+	return [
+		*folding,
+		*[creacoon_frame(frame, variant, keep_antenna=True) for frame in originals],
+		*reversed(folding),
+	]
+
+
 def write_creacoon_look():
 	"""Redraws every source animation, sheet and static frame, with the Creacoon look."""
+	for variant in PALETTES:
+		frames = love_frames(variant)
+		sheet = Image.new('RGBA', (96 * len(frames), frames[0].height))
+		for i, frame in enumerate(frames):
+			sheet.paste(frame, (i * 96, 0))
+		sheet.save(f'{SPRITE_DIR}/buddy-love-{variant}-96.spritesheet.png', optimize=True)
+		creacoon_frame(pad(read_source(f'buddy-love-{variant}-96.png')), variant, keep_antenna=True).save(f'{SPRITE_DIR}/buddy-love-{variant}-96.png', optimize=True)
 	for pattern, frame_width in ANIMATIONS.items():
-		if pattern in HEADLESS:
+		if pattern in HEADLESS or pattern == 'love-{v}-96':
 			continue
 		for variant in PALETTES:
 			name = 'buddy-' + pattern.format(v=variant)
