@@ -330,12 +330,10 @@ interface IRenderedAgentCard {
 	readonly card: HTMLElement;
 	readonly icon: HTMLElement;
 	readonly label: HTMLElement;
-	/** Pill that tells the agent is turned off. */
+	/** Quiet details after the label: agent type, model, duration and hidden agents. */
+	readonly meta: HTMLElement;
+	/** Tells that the agent is turned off. */
 	readonly state: HTMLElement;
-	readonly duration: HTMLElement;
-	readonly description: HTMLElement;
-	readonly model: HTMLElement;
-	readonly hiddenCount: HTMLElement;
 	readonly hover: IManagedHover;
 }
 
@@ -433,26 +431,23 @@ class AgentsBlockTree extends Disposable {
 			card.setAttribute('aria-expanded', String(!collapsed));
 		}
 
-		const header = dom.append(card, dom.$('.agents-tree-card-header'));
-		const icon = dom.append(header, dom.$('.agents-tree-icon'));
-		const label = dom.append(header, dom.$('.agents-tree-label'));
-		const state = dom.append(header, dom.$('.agents-tree-state'));
-		const duration = dom.append(header, dom.$('.agents-tree-duration'));
+		// The twistie keeps its slot on every row so that icons and labels line up per level.
+		const twistie = dom.append(card, dom.$('.agents-tree-twistie'));
 		if (hasChildren) {
-			const twistie = dom.append(header, dom.$(`.agents-tree-twistie${ThemeIcon.asCSSSelector(collapsed ? Codicon.chevronRight : Codicon.chevronDown)}`));
+			twistie.classList.add(...ThemeIcon.asClassNameArray(collapsed ? Codicon.chevronRight : Codicon.chevronDown));
 			this._renderStore.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), twistie, collapsed ? localize('agentsTree.expand', "Expand") : localize('agentsTree.collapse', "Collapse")));
 			this._renderStore.add(dom.addDisposableListener(twistie, dom.EventType.CLICK, e => {
 				dom.EventHelper.stop(e, true);
 				this._toggle(id);
 			}));
 		}
-		const description = dom.append(card, dom.$('.agents-tree-description'));
-		const footer = dom.append(card, dom.$('.agents-tree-card-footer'));
-		const model = dom.append(footer, dom.$('.agents-tree-model'));
-		const hiddenCount = dom.append(footer, dom.$('.agents-tree-hidden-count'));
+		const icon = dom.append(card, dom.$('.agents-tree-icon'));
+		const label = dom.append(card, dom.$('.agents-tree-label'));
+		const meta = dom.append(card, dom.$('.agents-tree-meta'));
+		const state = dom.append(card, dom.$('.agents-tree-state'));
 		const hover = this._renderStore.add(this._hoverService.setupManagedHover(getDefaultHoverDelegate('mouse'), card, ''));
 
-		const entry: IRenderedAgentCard = { id, parentId, element, node, card, icon, label, state, duration, description, model, hiddenCount, hover };
+		const entry: IRenderedAgentCard = { id, parentId, element, node, card, icon, label, meta, state, hover };
 		this._cards.push(entry);
 		this._updateCard(entry, element);
 		this._renderStore.add(dom.addDisposableListener(card, dom.EventType.CLICK, () => this._open(entry.element, true)));
@@ -480,11 +475,15 @@ class AgentsBlockTree extends Disposable {
 		const description = element.kind === 'subagent' ? element.node.description : undefined;
 		const model = element.kind === 'subagent' ? element.node.modelName : undefined;
 		const hiddenCount = entry.card.getAttribute('aria-expanded') === 'false' ? countDescendants(element) : 0;
-		entry.label.textContent = label;
-		entry.duration.textContent = duration ?? '';
-		entry.description.textContent = description ?? '';
-		entry.model.textContent = model ?? '';
-		entry.hiddenCount.textContent = !hiddenCount ? '' : hiddenCount === 1 ? localize('agentsTree.hiddenOne', "1 more agent") : localize('agentsTree.hiddenMany', "{0} more agents", hiddenCount);
+		// A subagent reads as its task; the agent type moves to the details when it has a name of its own.
+		entry.label.textContent = description || label;
+		const meta = [
+			description && element.kind === 'subagent' && element.node.name ? label : undefined,
+			model,
+			duration,
+			!hiddenCount ? undefined : hiddenCount === 1 ? localize('agentsTree.hiddenOne', "1 more agent") : localize('agentsTree.hiddenMany', "{0} more agents", hiddenCount),
+		].filter(part => !!part);
+		entry.meta.textContent = meta.join(' \u00b7 ');
 
 		const statusLabel = getStatusLabel(status);
 		const hoverLines = [description ? localize('agentsTree.hover.description', "{0}: {1}", label, description) : label];
