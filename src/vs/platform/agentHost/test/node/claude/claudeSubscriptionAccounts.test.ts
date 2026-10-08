@@ -334,6 +334,28 @@ suite('claudeSubscriptionAccounts', () => {
 			});
 		});
 
+		test('a chat pinned to an account runs there while it can take work, and on the pool otherwise', async () => {
+			const { accounts } = createAccounts(stored, () => goodTurn);
+			accounts.setToken('bad', 'bad-token');
+			accounts.setToken('good', 'good-token');
+			await accounts.refreshUsage({ explicit: true });
+			const pool = accounts.credentialForChat('chat')?.id;
+			await accounts.handleRequest({ id: 'r1', type: 'pinChat', chat: 'chat', provider: 'claude', accountId: 'good' });
+			const pinned = accounts.credentialForChat('chat')?.id;
+			const decision = accounts.handleLimit('chat', 'good', { resetsAt: Date.now() + 60 * 60 * 1000 });
+			const usedUp = accounts.credentialForChat('chat')?.id;
+			await accounts.handleRequest({ id: 'r2', type: 'pinChat', chat: 'chat', provider: 'claude' });
+			assert.deepStrictEqual({ pool, pinned, decision: decision?.kind, usedUp, pin: accounts.getPinnedAccount('chat'), otherChat: accounts.credentialForChat('other')?.id }, {
+				pool: 'bad',
+				pinned: 'good',
+				// The limit flow still offers the next account.
+				decision: 'error',
+				usedUp: 'bad',
+				pin: undefined,
+				otherChat: 'bad',
+			});
+		});
+
 		test('a refused sign-in during a chat marks the account error, offers the next account and checks the token again', async () => {
 			let revoked = false;
 			const { accounts, probes, persisted } = createAccounts(stored, token => token === 'revoked-token' && revoked ? rejectedTurn() : goodTurn);

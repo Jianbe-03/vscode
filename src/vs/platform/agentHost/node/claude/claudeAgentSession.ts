@@ -130,7 +130,8 @@ export interface IMaterializeContext {
 export interface IClaudeSessionSubscriptionLimits {
 	/** `accountId` is the account the session runs on, `undefined` for the machine's own login. */
 	resolve(turnId: string, limit: IClaudeLimitSignal, accountId: string | undefined): ClaudeLimitDecision | undefined;
-	onRateLimitInfo(info: SDKRateLimitInfo, accountId: string | undefined): void;
+	/** `turnId` is the turn whose messages carried the reading, when known. */
+	onRateLimitInfo(info: SDKRateLimitInfo, accountId: string | undefined, turnId?: string): void;
 }
 
 function resolveCurrentPermissionMode(
@@ -753,9 +754,9 @@ export class ClaudeAgentSession extends Disposable {
 		const subscriptionLimits = ctx.subscriptionLimits;
 		const limitTracker = subscriptionLimits ? new ClaudeSubscriptionLimitTracker(
 			(turnId, limit) => this._transportKind === 'native' ? subscriptionLimits.resolve(turnId, limit, this.accountId) : undefined,
-			info => {
+			(info, turnId) => {
 				if (this._transportKind === 'native') {
-					subscriptionLimits.onRateLimitInfo(info, this.accountId);
+					subscriptionLimits.onRateLimitInfo(info, this.accountId, turnId);
 				}
 			},
 		) : undefined;

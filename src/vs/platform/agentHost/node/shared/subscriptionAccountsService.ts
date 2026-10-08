@@ -19,26 +19,50 @@
 //      `setStoredAccounts`; the service writes them to `agent-subscription-accounts.json` next to the
 //      agent host config. Never store credentials there.
 //   5. Read `isAutoSwitchEnabled()` when an account hits its limit.
+//   6. When a turn of a chat runs on an account, `takeUsageNote(chat, account)` returns a note to show in
+//      that chat once the account passed the usage warning threshold (once per window, period and level).
 //
 // Credentials: the agent host has no secret storage. A Claude setup-token arrives through
 // `authenticate` with `subscriptionAccountTokenResource(id)` and is only kept in memory, so the
 // workbench re-sends the tokens it keeps in its secret storage on every connect. `login` accounts keep
 // their credentials in their own CLI config folder, where the CLI itself stores them.
 //
-// The service also refreshes the usage of every provider every ten minutes.
+// The service also refreshes the usage of every provider every ten minutes, and every two minutes for a
+// provider with an account past the usage warning threshold, so a warning comes in time. Every reading
+// is also sampled into the usage history (`agent-subscription-usage-history.jsonl`, see
+// `SubscriptionUsageHistory`).
 
 import * as fs from 'fs';
 import { IntervalTimer } from '../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
-import { dirname } from '../../../../base/common/path.js';
+import { dirname, join } from '../../../../base/common/path.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
-import { SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY, SUBSCRIPTION_ACCOUNTS_META_KEY, SUBSCRIPTION_ACCOUNTS_REQUEST_KEY, type ISubscriptionAccount, type ISubscriptionAccountsRequest, type ISubscriptionAccountsState, type SubscriptionAccountKind, type SubscriptionProvider } from '../../common/meta/subscriptionAccounts.js';
+import { SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY, SUBSCRIPTION_ACCOUNTS_META_KEY, SUBSCRIPTION_ACCOUNTS_REQUEST_KEY, SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY, SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT, formatUsageWarning, getUsageWarning, type ISubscriptionAccount, type ISubscriptionAccountsRequest, type ISubscriptionAccountsState, type SubscriptionAccountKind, type SubscriptionProvider } from '../../common/meta/subscriptionAccounts.js';
+import { SUBSCRIPTION_USAGE_HISTORY_FILE } from '../../common/meta/subscriptionUsageHistory.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
+import { SubscriptionUsageHistory } from './subscriptionUsageHistory.js';
 
 /** How often the service asks every provider to read its accounts' usage. */
 const USAGE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+/** How often a provider with an account past the usage warning threshold is read. */
+const USAGE_REFRESH_NEAR_LIMIT_INTERVAL_MS = 2 * 60 * 1000;
+
+/**
+ * Whether the periodic refresh should read the usage of a provider with `accounts` now: every ten
+ * minutes, or every two while one of them is past the warning `threshold` but not used up.
+ */
+export function isUsageRefreshDue(accounts: readonly ISubscriptionAccount[], threshold: number, lastRefreshAt: number | undefined, now: number): boolean {
+	if (!accounts.some(account => account.status === 'signedIn' || account.status === 'limited')) {
+		return false;
+	}
+	const elapsed = lastRefreshAt === undefined ? Infinity : now - lastRefreshAt;
+	if (elapsed >= USAGE_REFRESH_INTERVAL_MS) {
+		return true;
+	}
+	return elapsed >= USAGE_REFRESH_NEAR_LIMIT_INTERVAL_MS && accounts.some(account => getUsageWarning(account, threshold) !== undefined);
+}
 
 /** A user-added account as it is kept on disk: no status, no usage and never a credential. */
 export interface IStoredSubscriptionAccount {
@@ -82,6 +106,13 @@ export interface ISubscriptionAccountsService {
 	setStoredAccounts(provider: SubscriptionProvider, accounts: readonly IStoredSubscriptionAccount[]): void;
 	/** Whether a used-up account hands its chat to the next account without asking. */
 	isAutoSwitchEnabled(): boolean;
+	/** The used share from which an account counts as nearly used up; 0 when usage warnings are off. */
+	getWarningThreshold(): number;
+	/**
+	 * The note to show in `chat`, whose turn runs on `account`, when the account passed the warning
+	 * threshold; undefined below it and when the chat already got this warning.
+	 */
+	takeUsageNote(chat: string, account: ISubscriptionAccount | undefined): string | undefined;
 	/** Publishes the merged accounts now. Providers normally fire `onDidChangeAccounts` instead. */
 	publish(): void;
 }
@@ -100,6 +131,12 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	private _lastPublished: string | undefined;
 	private _lastRequestId: string | undefined;
 	private readonly _usageTimer = this._register(new IntervalTimer());
+	/** When the usage of each provider was last read (periodically or on request); providers read their accounts when they start. */
+	private readonly _lastUsageRefresh = new Map<SubscriptionProvider, number>();
+	private readonly _createdAt = Date.now();
+	/** The usage warnings each chat already showed, by chat. */
+	private readonly _notedWarnings = new Map<string, Set<string>>();
+	private readonly _history: SubscriptionUsageHistory | undefined;
 
 	/**
 	 * @param _storagePath JSON file that keeps the user-added accounts; `undefined` keeps them in memory.
@@ -111,8 +148,9 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	) {
 		super();
 		this._stored = this._read();
+		this._history = this._storagePath ? new SubscriptionUsageHistory(join(dirname(this._storagePath), SUBSCRIPTION_USAGE_HISTORY_FILE), this._logService) : undefined;
 		this._register(this._configurationService.onDidRootConfigChange(() => this._handlePendingRequest()));
-		this._usageTimer.cancelAndSet(() => this._refreshAllUsage(), USAGE_REFRESH_INTERVAL_MS);
+		this._usageTimer.cancelAndSet(() => this._refreshAllUsage(), USAGE_REFRESH_NEAR_LIMIT_INTERVAL_MS);
 	}
 
 	registerProvider(provider: ISubscriptionAccountsProvider): IDisposable {
@@ -147,6 +185,32 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 		return this._configurationService.getRootConfigValues?.()[SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY] === true;
 	}
 
+	getWarningThreshold(): number {
+		const value = this._configurationService.getRootConfigValues?.()[SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY];
+		return typeof value === 'number' && value >= 0 && value < 100 ? value : SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT;
+	}
+
+	takeUsageNote(chat: string, account: ISubscriptionAccount | undefined): string | undefined {
+		const warning = account && getUsageWarning(account, this.getWarningThreshold());
+		if (!account || !warning) {
+			return undefined;
+		}
+		let noted = this._notedWarnings.get(chat);
+		if (noted?.has(warning.key)) {
+			return undefined;
+		}
+		if (!noted) {
+			noted = new Set();
+			this._notedWarnings.set(chat, noted);
+			// Bounded: the oldest chats are forgotten first.
+			if (this._notedWarnings.size > 500) {
+				this._notedWarnings.delete(this._notedWarnings.keys().next().value!);
+			}
+		}
+		noted.add(warning.key);
+		return formatUsageWarning(account, warning, Date.now());
+	}
+
 	publish(): void {
 		const state: ISubscriptionAccountsState = {
 			accounts: [...this._providers.values()].flatMap(provider => provider.getAccounts()),
@@ -157,6 +221,12 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 		}
 		this._lastPublished = serialized;
 		this._configurationService.publishRootTransientValues?.({ [SUBSCRIPTION_ACCOUNTS_META_KEY]: state });
+		this._history?.record(state.accounts, Date.now());
+	}
+
+	/** Resolves once the usage history has everything recorded so far on disk; for tests. */
+	flushHistory(): Promise<void> {
+		return this._history?.flush() ?? Promise.resolve();
 	}
 
 	private _handlePendingRequest(): void {
@@ -177,14 +247,20 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	private async _route(request: ISubscriptionAccountsRequest, provider: ISubscriptionAccountsProvider | undefined): Promise<void> {
 		if (request.type === 'refreshUsage') {
 			const providers = request.provider ? [this._providers.get(request.provider)] : [...this._providers.values()];
-			await Promise.all(providers.map(target => target?.refreshUsage({ explicit: true })));
+			const now = Date.now();
+			await Promise.all(providers.map(target => {
+				if (target) {
+					this._lastUsageRefresh.set(target.provider, now);
+				}
+				return target?.refreshUsage({ explicit: true });
+			}));
 			return;
 		}
 		await provider?.handleRequest(request);
 	}
 
 	private _findProvider(request: ISubscriptionAccountsRequest): ISubscriptionAccountsProvider | undefined {
-		if (request.type === 'add') {
+		if (request.type === 'add' || request.type === 'pinChat') {
 			return this._providers.get(request.provider);
 		}
 		if (request.type === 'refreshUsage') {
@@ -194,8 +270,11 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	}
 
 	private _refreshAllUsage(): void {
+		const now = Date.now();
+		const threshold = this.getWarningThreshold();
 		for (const provider of this._providers.values()) {
-			if (provider.getAccounts().some(account => account.status === 'signedIn' || account.status === 'limited')) {
+			if (isUsageRefreshDue(provider.getAccounts(), threshold, this._lastUsageRefresh.get(provider.provider) ?? this._createdAt, now)) {
+				this._lastUsageRefresh.set(provider.provider, now);
 				void provider.refreshUsage().catch(error => this._logService.warn(`[SubscriptionAccounts] Periodic usage refresh of '${provider.provider}' failed`, error));
 			}
 		}

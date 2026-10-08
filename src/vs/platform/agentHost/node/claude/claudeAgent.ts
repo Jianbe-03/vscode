@@ -2487,7 +2487,14 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	private _subscriptionLimitsFor(chatKey: string): IClaudeSessionSubscriptionLimits {
 		return {
 			resolve: (_turnId, limit, accountId) => this._accounts.handleLimit(chatKey, accountId, limit),
-			onRateLimitInfo: (info, accountId) => this._accounts.applyRateLimitInfo(accountId, info),
+			onRateLimitInfo: (info, accountId, turnId) => {
+				this._accounts.applyRateLimitInfo(accountId, info);
+				// A chat whose account nears its limit says so, once per window and level.
+				const note = turnId !== undefined ? this._accounts.takeUsageNote(chatKey, accountId) : undefined;
+				if (note && turnId !== undefined) {
+					this._findChatByUri(chatKey)?.emitNote(turnId, note);
+				}
+			},
 		};
 	}
 

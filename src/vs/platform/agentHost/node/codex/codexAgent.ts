@@ -1347,6 +1347,8 @@ export class CodexAgent extends Disposable implements IAgent {
 	private readonly _accountConnectionSequencer = new Sequencer();
 	/** CreaEditor: stops the short-lived account app-servers when the agent shuts down. */
 	private readonly _accountConnectionCancellation = this._register(new CancellationTokenSource());
+	/** CreaEditor: chats the user pinned to an account in the model picker, keyed by chat URI. */
+	private readonly _pinnedCodexChats = new Map<string, string>();
 	/** CreaEditor: chats whose turn ended at an account limit, keyed by chat URI, for a `switchChat` request. */
 	private readonly _limitedChats = new Map<string, { readonly sessionId: string; readonly request: { readonly prompt: string; readonly attachments?: readonly MessageAttachment[] }; readonly madeProgress: boolean }>();
 	private _lastSignOutRequest: string | undefined;
@@ -1551,6 +1553,12 @@ export class CodexAgent extends Disposable implements IAgent {
 	/** The account whose app-server a chat uses, binding an unbound chat to the account new work starts on. */
 	private _sessionAccountId(session: ICodexSession): string {
 		const accountId = session.accountId;
+		// A new chat the user pinned to an account in the model picker starts there.
+		const pinned = accountId === undefined ? this._availablePinnedCodexAccount(session) : undefined;
+		if (pinned) {
+			session.accountId = pinned;
+			return pinned;
+		}
 		if (accountId === undefined || !this._isKnownCodexAccount(accountId)) {
 			this._setActiveCodexAccount(this._accountPool.pickAccountForNewWork(Date.now()));
 			session.accountId = this._accountPool.activeAccountId;
@@ -1715,6 +1723,8 @@ export class CodexAgent extends Disposable implements IAgent {
 				readStored();
 			}
 		}));
+		// A chat whose account nears its limit says so, once per window and level.
+		this._register(this._accountPool.onDidChange(() => this._noteCodexUsageWarnings()));
 		this._register(service.registerProvider({
 			provider: 'codex',
 			onDidChangeAccounts: this._accountPool.onDidChange,
@@ -1722,6 +1732,26 @@ export class CodexAgent extends Disposable implements IAgent {
 			handleRequest: request => this._handleSubscriptionAccountsRequest(request),
 			refreshUsage: () => this._refreshCodexAccountsUsage(),
 		}));
+	}
+
+	/** Adds the usage warning of an account past the warning threshold to the running turns on it. */
+	private _noteCodexUsageWarnings(): void {
+		const service = this._subscriptionAccountsService;
+		if (!service || !this._accountPool.hasAddedAccounts) {
+			return;
+		}
+		const accounts = this._accountPool.getAccounts(Date.now());
+		for (const session of this._sessions.values()) {
+			const turnId = session.currentTurnId;
+			if (turnId === undefined || !session.chatChannel || session.materializedModelProvider !== CODEX_OPENAI_MODEL_PROVIDER) {
+				continue;
+			}
+			const accountId = session.accountId ?? this._accountPool.activeAccountId;
+			const note = service.takeUsageNote(session.chatChannel.toString(), accounts.find(account => account.id === accountId));
+			if (note) {
+				this._fire(session.sessionUri, { type: ActionType.ChatResponsePart, turnId, part: { kind: ResponsePartKind.SystemNotification, content: note } });
+			}
+		}
 	}
 
 	private _defaultCodexHome(): string {
@@ -1894,6 +1924,9 @@ export class CodexAgent extends Disposable implements IAgent {
 				return;
 			case 'switchChat':
 				await this._switchChatToCodexAccount(request.chat, request.accountId);
+				return;
+			case 'pinChat':
+				await this._pinCodexChat(request.chat, request.accountId);
 				return;
 			case 'refreshUsage':
 				await this._refreshCodexAccountsUsage();
@@ -2129,12 +2162,51 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Before a turn: a chat whose account can no longer take work (used up, signed out, removed) moves to
-	 * the account new work starts on, when that one can.
+	 * Pins a chat to `accountId` (or, without one, lets the pool choose again). An idle chat moves there
+	 * right away; a busy one before its next turn.
+	 */
+	private async _pinCodexChat(chat: string, accountId: string | undefined): Promise<void> {
+		if (accountId === undefined) {
+			this._pinnedCodexChats.delete(chat);
+			return;
+		}
+		if (!this._isKnownCodexAccount(accountId)) {
+			this._logService.warn(`[Codex] Cannot pin chat ${chat} to unknown account ${accountId}`);
+			return;
+		}
+		this._pinnedCodexChats.set(chat, accountId);
+		const sessionId = this._sessionIdByChatUri.get(chat);
+		const session = sessionId ? this._sessions.get(sessionId) : undefined;
+		if (session && session.accountId !== undefined && session.currentTurnId === undefined && this._availablePinnedCodexAccount(session) === accountId) {
+			this._logService.info(`[Codex:${session.sessionId}] Pinned to account ${accountId}`);
+			await this._moveCodexSessionToAccount(session, accountId);
+		}
+	}
+
+	/** The account the chat of `session` is pinned to, while that account can take work. */
+	private _availablePinnedCodexAccount(session: ICodexSession): string | undefined {
+		const pinned = session.chatChannel ? this._pinnedCodexChats.get(session.chatChannel.toString()) : undefined;
+		if (pinned === undefined) {
+			return undefined;
+		}
+		const now = Date.now();
+		const account = this._accountPool.getAccounts(now).find(candidate => candidate.id === pinned);
+		return account && isCodexAccountAvailable(account, now) ? pinned : undefined;
+	}
+
+	/**
+	 * Before a turn: a chat pinned to an account that can take work moves there; a chat whose account can
+	 * no longer take work (used up, signed out, removed) moves to the account new work starts on, when
+	 * that one can.
 	 */
 	private async _rebindCodexSessionIfUnavailable(session: ICodexSession): Promise<void> {
 		const accountId = session.accountId;
 		if (accountId === undefined || !this._accountPool.hasAddedAccounts) {
+			return;
+		}
+		const pinned = this._availablePinnedCodexAccount(session);
+		if (pinned !== undefined && pinned !== accountId) {
+			await this._moveCodexSessionToAccount(session, pinned);
 			return;
 		}
 		const now = Date.now();

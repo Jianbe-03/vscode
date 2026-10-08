@@ -9,6 +9,7 @@
 // as the Codex sign-in request). Tokens never appear in root state: a pasted Claude setup-token reaches
 // the agent host through `authenticate` with {@link subscriptionAccountTokenResource}.
 
+import { localize } from '../../../../nls.js';
 import type { RootState } from '../state/protocol/state.js';
 
 /** Root `_meta` key holding {@link ISubscriptionAccountsState}. */
@@ -17,6 +18,16 @@ export const SUBSCRIPTION_ACCOUNTS_META_KEY = 'creaeditor.subscriptionAccounts';
 export const SUBSCRIPTION_ACCOUNTS_REQUEST_KEY = 'creaeditor.subscriptionAccounts.request';
 /** Root config key holding whether a used-up account hands the chat to the next account without asking. */
 export const SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY = 'creaeditor.subscriptionAccounts.autoSwitch';
+/**
+ * Root config key holding the used share (1-99) from which an account counts as nearly used up, or 0 when
+ * usage warnings are off: chats on it get a note, and the agent host reads its usage more often.
+ */
+export const SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY = 'creaeditor.subscriptionAccounts.warningThreshold';
+
+/** The default {@link SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY}. */
+export const SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT = 80;
+/** The second, last warning before the limit. */
+export const SUBSCRIPTION_USAGE_WARNING_HIGH_PERCENT = 95;
 
 export type SubscriptionProvider = 'claude' | 'codex';
 
@@ -75,7 +86,12 @@ export type ISubscriptionAccountsRequest =
 	| { readonly id: string; readonly type: 'signIn'; readonly accountId: string }
 	| { readonly id: string; readonly type: 'refreshUsage'; readonly provider?: SubscriptionProvider }
 	/** Continue the chat's interrupted turn on another account, after the user agreed to switch. */
-	| { readonly id: string; readonly type: 'switchChat'; readonly chat: string; readonly accountId: string };
+	| { readonly id: string; readonly type: 'switchChat'; readonly chat: string; readonly accountId: string }
+	/**
+	 * Pins the chat to `accountId`: its next requests run there (the limit flow still offers another
+	 * account when it is used up). Without `accountId` the chat goes back to the pool.
+	 */
+	| { readonly id: string; readonly type: 'pinChat'; readonly chat: string; readonly provider: SubscriptionProvider; readonly accountId?: string };
 
 /** The `authenticate` resource that carries the setup-token of a `token` account. */
 export function subscriptionAccountTokenResource(accountId: string): string {
@@ -139,4 +155,59 @@ export function getPoolSummary(accounts: readonly ISubscriptionAccount[], provid
 		available: own.filter(account => account.status === 'signedIn' && getRemainingPercent(account) !== 0).length,
 		total: own.length,
 	};
+}
+
+/** The window of an account that is closest to its limit, and how close: level 1 from the threshold, 2 from 95%. */
+export interface ISubscriptionUsageWarning {
+	readonly window: ISubscriptionUsageWindow;
+	readonly level: 1 | 2;
+	/** Names the account, window, reset period and level, so each warning is given once. */
+	readonly key: string;
+}
+
+/**
+ * The usage warning of an account: its tightest window once it passed `threshold` (and again at
+ * {@link SUBSCRIPTION_USAGE_WARNING_HIGH_PERCENT}), undefined below it, when warnings are off
+ * (`threshold` 0) and once the account is used up (the limit flow takes over then).
+ */
+export function getUsageWarning(account: ISubscriptionAccount, threshold: number): ISubscriptionUsageWarning | undefined {
+	if (threshold <= 0 || account.status !== 'signedIn' || !account.usage?.length) {
+		return undefined;
+	}
+	const window = account.usage.reduce((tightest, candidate) => candidate.usedPercent > tightest.usedPercent ? candidate : tightest);
+	if (window.usedPercent >= 100 || window.usedPercent < threshold) {
+		return undefined;
+	}
+	const high = Math.max(threshold, SUBSCRIPTION_USAGE_WARNING_HIGH_PERCENT);
+	const level = high > threshold && window.usedPercent >= high ? 2 : 1;
+	// Reset times can move by a few seconds between readings: the period is named by its ten minutes.
+	const period = window.resetsAt !== undefined ? Math.round(window.resetsAt / 600_000) : '';
+	return { window, level, key: `${account.id}|${window.kind}|${period}|${level}` };
+}
+
+/** A short duration such as "45m", "3h", "3h 20m" or "2d 4h". */
+export function formatShortDuration(milliseconds: number): string {
+	const minutes = Math.max(1, Math.ceil(milliseconds / 60_000));
+	if (minutes < 60) {
+		return localize('subscriptionDuration.minutes', "{0}m", minutes);
+	}
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) {
+		const rest = minutes % 60;
+		return rest && hours < 10 ? localize('subscriptionDuration.hoursMinutes', "{0}h {1}m", hours, rest) : localize('subscriptionDuration.hours', "{0}h", hours);
+	}
+	const days = Math.floor(hours / 24);
+	const restHours = hours % 24;
+	return restHours ? localize('subscriptionDuration.daysHours', "{0}d {1}h", days, restHours) : localize('subscriptionDuration.days', "{0}d", days);
+}
+
+/**
+ * The warning text, e.g. "The Claude account Work has used 82% of its 5-hour limit (resets in 1h 12m)."
+ */
+export function formatUsageWarning(account: ISubscriptionAccount, warning: ISubscriptionUsageWarning, now: number): string {
+	const provider = account.provider === 'claude' ? localize('subscriptionProvider.claude', "Claude") : localize('subscriptionProvider.codex', "Codex");
+	const used = Math.floor(warning.window.usedPercent);
+	return warning.window.resetsAt !== undefined && warning.window.resetsAt > now
+		? localize('subscriptionUsageWarning.resets', "The {0} account {1} has used {2}% of its {3} limit (resets in {4}).", provider, account.label, used, warning.window.label, formatShortDuration(warning.window.resetsAt - now))
+		: localize('subscriptionUsageWarning', "The {0} account {1} has used {2}% of its {3} limit.", provider, account.label, used, warning.window.label);
 }

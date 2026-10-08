@@ -354,13 +354,13 @@ export class ClaudeSubscriptionLimitTracker {
 
 	constructor(
 		private readonly _resolve: (turnId: string, limit: IClaudeLimitSignal) => ClaudeLimitDecision | undefined,
-		private readonly _onRateLimitInfo: (info: SDKRateLimitInfo) => void,
+		private readonly _onRateLimitInfo: (info: SDKRateLimitInfo, turnId: string | undefined) => void,
 	) { }
 
 	/** Records a limit (or a usage update) carried by a raw SDK message of `turnId`. */
 	observe(message: SDKMessage, turnId: string | undefined): void {
 		if (message.type === 'rate_limit_event') {
-			this._onRateLimitInfo(message.rate_limit_info);
+			this._onRateLimitInfo(message.rate_limit_info, turnId);
 		}
 		if (turnId !== undefined && message.type === 'assistant' && !message.error) {
 			this._progressedTurns.add(turnId);
@@ -473,6 +473,8 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	/** Fingerprints of the setup-tokens Anthropic accepted, by account; persisted with the accounts. */
 	private readonly _verifiedTokens = new Map<string, string>();
 	private readonly _chatAccounts = new Map<string, string>();
+	/** Chats the user pinned to an account in the model picker: they go back to it whenever it can take work. */
+	private readonly _pinnedChats = new Map<string, string>();
 	private readonly _usageReads = new Map<string, { readonly validate: boolean; readonly read: Promise<void> }>();
 	/** Each read starts a Claude CLI process, so with many accounts only a few run at once. */
 	private readonly _readLimiter = this._register(new Limiter<void>(MAX_PARALLEL_ACCOUNT_READS));
@@ -539,6 +541,15 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			case 'switchChat':
 				this._chatAccounts.set(request.chat, request.accountId);
 				await this._delegate.switchChat(request.chat, request.accountId);
+				return;
+			case 'pinChat':
+				if (!this.pinChat(request.chat, request.accountId)) {
+					return;
+				}
+				if (request.accountId && this._chatAccounts.get(request.chat) !== request.accountId && this._find(request.accountId) && isClaudeAccountAvailable(this._find(request.accountId)!, Date.now())) {
+					this._chatAccounts.set(request.chat, request.accountId);
+					await this._delegate.switchChat(request.chat, request.accountId);
+				}
 				return;
 			case 'refreshUsage':
 				await this.refreshUsage({ explicit: true });
@@ -625,17 +636,39 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	}
 
 	/**
-	 * The account `chat` runs on now: its current one while available, else the first available one
-	 * (remembered for the chat). Undefined when no added accounts exist, so the session keeps the
-	 * CLI's own credential resolution.
+	 * Pins `chat` to `accountId` (or, without one, lets the pool choose again). Returns whether the pin
+	 * changed; an unknown account is not pinned.
+	 */
+	pinChat(chat: string, accountId: string | undefined): boolean {
+		if (accountId === undefined) {
+			return this._pinnedChats.delete(chat);
+		}
+		if (!this._find(accountId) || this._pinnedChats.get(chat) === accountId) {
+			return false;
+		}
+		this._pinnedChats.set(chat, accountId);
+		return true;
+	}
+
+	/** The account the user pinned `chat` to, if any. */
+	getPinnedAccount(chat: string): string | undefined {
+		return this._pinnedChats.get(chat);
+	}
+
+	/**
+	 * The account `chat` runs on now: the account it is pinned to while that one is available, else its
+	 * current one while available, else the first available one (remembered for the chat). Undefined
+	 * when no added accounts exist, so the session keeps the CLI's own credential resolution.
 	 */
 	credentialForChat(chat: string): IClaudeAccountCredential | undefined {
 		if (!this.hasAddedAccounts) {
 			return undefined;
 		}
 		const accounts = this._orderedAccounts();
-		const current = this._chatAccounts.get(chat);
-		const selected = selectClaudeAccount(accounts, Date.now(), current)
+		const now = Date.now();
+		const pinned = accounts.find(account => account.id === this._pinnedChats.get(chat));
+		const current = pinned && isClaudeAccountAvailable(pinned, now) ? pinned.id : this._chatAccounts.get(chat);
+		const selected = selectClaudeAccount(accounts, now, current)
 			?? accounts.find(account => account.id === current)
 			?? accounts.find(account => account.status === 'signedIn');
 		if (!selected) {
@@ -688,6 +721,18 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			return { kind: 'retry', fromAccountLabel: account.label, toAccountLabel: next.label, ...(reason ? { reason } : {}) };
 		}
 		return { kind: 'error', meta: claudeLimitErrorMeta(account, next, reason) };
+	}
+
+	/**
+	 * The usage warning note for `chat`, whose turn runs on `accountId`, once that account passed the
+	 * warning threshold; once per window, period and level. Undefined without added accounts.
+	 */
+	takeUsageNote(chat: string, accountId: string | undefined): string | undefined {
+		if (!this.hasAddedAccounts) {
+			return undefined;
+		}
+		const id = accountId ?? CLAUDE_DEFAULT_ACCOUNT_ID;
+		return this._accountsService.takeUsageNote(chat, this.getAccounts().find(account => account.id === id));
 	}
 
 	/** Merges a `rate_limit_event` of a session running on `accountId` into that account's usage. */
@@ -779,9 +824,11 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		this._accounts.delete(id);
 		this._tokens.delete(id);
 		this._verifiedTokens.delete(id);
-		for (const [chat, accountId] of this._chatAccounts) {
-			if (accountId === id) {
-				this._chatAccounts.delete(chat);
+		for (const chats of [this._chatAccounts, this._pinnedChats]) {
+			for (const [chat, accountId] of chats) {
+				if (accountId === id) {
+					chats.delete(chat);
+				}
 			}
 		}
 		this._storeAccounts();

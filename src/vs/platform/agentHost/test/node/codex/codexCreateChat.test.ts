@@ -4607,6 +4607,8 @@ suite('CodexAgent subscription account limits', () => {
 				getStoredAccounts: () => [{ id: 'work', label: 'Work', kind: 'login' }],
 				setStoredAccounts: () => { },
 				isAutoSwitchEnabled: () => autoSwitch,
+				getWarningThreshold: () => 80,
+				takeUsageNote: () => undefined,
 				publish: () => { },
 			},
 		});
@@ -4684,6 +4686,8 @@ suite('CodexAgent subscription account limits', () => {
 				getStoredAccounts: () => [{ id: 'work', label: 'Work', kind: 'login' }],
 				setStoredAccounts: () => { },
 				isAutoSwitchEnabled: () => false,
+				getWarningThreshold: () => 80,
+				takeUsageNote: () => undefined,
 				publish: () => { },
 			},
 		});
