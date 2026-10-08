@@ -205,11 +205,19 @@ export class AgentHostByokLmHandler extends Disposable implements IAgentHostByok
 		}
 		for (const identifier of this._languageModelsService.getLanguageModelIds()) {
 			const metadata = this._languageModelsService.lookupLanguageModel(identifier);
-			if (metadata?.isBYOK && metadata.vendor === vendor && metadata.id === modelId) {
+			// CreaEditor: never fall back to a model of a provider group (`<vendor>/<group>/<id>`). A grouped
+			// model is a named API key; a request that does not name that group exactly must not silently run
+			// on another key, so it fails instead.
+			if (metadata?.isBYOK && metadata.vendor === vendor && metadata.id === modelId && metadata.providerGroupName === undefined && !this._isGroupedIdentifier(identifier, vendor, modelId)) {
 				return identifier;
 			}
 		}
 		return undefined;
+	}
+
+	/** CreaEditor: whether an LM identifier has the `<vendor>/<group>/<id>` shape of a provider group's model. */
+	private _isGroupedIdentifier(identifier: string, vendor: string, modelId: string): boolean {
+		return identifier.startsWith(`${vendor}/`) && identifier.endsWith(`/${modelId}`) && identifier.length > vendor.length + modelId.length + 2;
 	}
 
 	private _toChatMessages(request: IByokLmChatRequest): IChatMessage[] {

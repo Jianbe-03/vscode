@@ -330,6 +330,22 @@ suite('AgentHostByokLmHandler', () => {
 		assert.strictEqual(service.captured?.modelId, workIdentifier);
 	});
 
+	test('chat never falls back to a model of another provider group (API key)', async () => {
+		const service = new TestLanguageModelsService(
+			new Map([
+				['openrouter/Personal key/anthropic/claude-opus', { ...byokModel('openrouter', 'anthropic/claude-opus'), providerGroupName: 'Personal key' }],
+				['acme/claude', byokModel('acme', 'claude')],
+			]),
+			() => responseOf([]),
+		);
+		const handler = createHandler(service);
+
+		const missingGroup = await handler.chat({ vendor: 'openrouter', modelId: 'Work key/anthropic/claude-opus', input: [] }, CancellationToken.None);
+		const groupless = await handler.chat({ vendor: 'openrouter', modelId: 'anthropic/claude-opus', input: [] }, CancellationToken.None);
+
+		assert.deepStrictEqual({ missingGroup: !!missingGroup.error, groupless: !!groupless.error, captured: service.captured }, { missingGroup: true, groupless: true, captured: undefined });
+	});
+
 	test('buffers ordered thinking, text, tool calls, continuation and usage', async () => {
 		const service = new TestLanguageModelsService(
 			new Map([['id-acme-claude', byokModel('acme', 'claude')]]),
