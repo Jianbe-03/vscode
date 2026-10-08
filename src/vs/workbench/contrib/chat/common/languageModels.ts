@@ -334,6 +334,11 @@ export interface ILanguageModelChatMetadata {
 	 */
 	readonly providerGroupName?: string;
 	/**
+	 * CreaEditor: a short status of the model's provider group (named API key), such as the remaining
+	 * limit of the key ("$12.40 left of $50"). The model picker shows it next to the group.
+	 */
+	readonly providerGroupDetail?: string;
+	/**
 	 * An optional JSON schema describing the per-model configuration options.
 	 * Used to validate user-provided per-model configuration in `chatLanguageModels.json`.
 	 */

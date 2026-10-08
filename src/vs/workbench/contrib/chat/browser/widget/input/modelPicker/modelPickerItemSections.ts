@@ -370,7 +370,14 @@ function appendOtherModels(context: IGroupedContext): boolean {
 	const showHeaders = sortedGroups.length > 1;
 	for (const group of sortedGroups) {
 		if (showHeaders) {
-			items.push({ kind: ActionListItemKind.Separator, label: group.groupName, section: ModelPickerSection.Other });
+			// CreaEditor: the status of a key, e.g. its remaining limit, next to the key name.
+			const detail = group.models.find(model => model.metadata.providerGroupDetail)?.metadata.providerGroupDetail;
+			items.push({
+				kind: ActionListItemKind.Separator,
+				label: group.groupName,
+				section: ModelPickerSection.Other,
+				additionalBadges: detail ? [{ label: detail, className: 'chat-model-picker-group-detail' }] : undefined,
+			});
 		}
 		group.models.sort((left, right) => {
 			const leftEntry = options.controlModels[left.metadata.id] ?? options.controlModels[left.identifier];

@@ -247,6 +247,7 @@ export class ExtHostLanguageModels implements ExtHostLanguageModelsShape {
 					configurationSchema: m.configurationSchema as IJSONSchema | undefined,
 					warningText: m.warningText,
 					infoText: m.infoText,
+					providerGroupDetail: m.providerGroupDetail, // CreaEditor
 					promo: m.promo,
 					capabilities: m.capabilities ? {
 						vision: m.capabilities.imageInput,

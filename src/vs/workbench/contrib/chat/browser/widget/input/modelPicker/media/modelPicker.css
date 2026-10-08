@@ -1208,3 +1208,16 @@
 .chat-model-card-description p {
 	margin: 0;
 }
+
+/* CreaEditor: the status of a key (e.g. its remaining limit) next to the key name in a group header. */
+.action-widget .monaco-list-row.separator.has-label:has(.chat-model-picker-group-detail) {
+	display: flex;
+	align-items: center;
+}
+
+.action-widget .monaco-list-row.separator .action-item-badge.chat-model-picker-group-detail {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label2, 11px);
+	font-variant-numeric: tabular-nums;
+	opacity: 0.8;
+}

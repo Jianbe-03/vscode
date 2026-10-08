@@ -110,6 +110,12 @@ declare module 'vscode' {
 		readonly infoText?: Record<string, string>;
 
 		/**
+		 * CreaEditor: a short status of the provider group (named API key) the model was resolved for,
+		 * e.g. the remaining limit of the key ("$12.40 left of $50"). Shown next to the group in the model picker.
+		 */
+		readonly providerGroupDetail?: string;
+
+		/**
 		 * Optional promotional information for this model. When present, indicates the model
 		 * is currently experiencing a promotional discount.
 		 */

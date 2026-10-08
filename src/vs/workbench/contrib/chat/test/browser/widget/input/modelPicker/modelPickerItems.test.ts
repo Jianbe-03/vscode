@@ -972,6 +972,26 @@ suite('buildModelPickerItems', () => {
 		assert.deepStrictEqual(labelledSeparators.map(s => s.label), ['AWS Bedrock', 'OpenAI Compatible']);
 	});
 
+	test('Other Models shows the status of a key next to its group header (CreaEditor)', () => {
+		const auto = createAutoModel();
+		const work = createModel('claude', 'Claude (Work key)', 'openrouter');
+		const personal = { ...createModel('gpt', 'GPT (Personal)', 'openrouter'), identifier: 'openrouter-gpt-personal' };
+		const workWithDetail = { ...work, metadata: { ...work.metadata, providerGroupName: 'Work key', providerGroupDetail: '$12.40 left of $50' } };
+		const lmService = createLanguageModelsServiceStub([
+			{
+				vendor: 'openrouter',
+				displayName: 'OpenRouter',
+				groups: [
+					{ name: 'Work key', modelIdentifiers: [work.identifier] },
+					{ name: 'Personal', modelIdentifiers: [personal.identifier] },
+				],
+			},
+		]);
+		const items = callBuild([auto, workWithDetail, personal], { languageModelsService: lmService });
+		const headers = items.filter(i => i.kind === ActionListItemKind.Separator && i.label).map(i => [i.label, i.additionalBadges?.map(badge => badge.label)]);
+		assert.deepStrictEqual(headers, [['Personal', undefined], ['Work key', ['$12.40 left of $50']]]);
+	});
+
 	test('Other Models keeps a single section when a vendor has only one group (BYOK)', () => {
 		const auto = createAutoModel();
 		const gpt41 = createModel('gpt-4.1', 'gpt-4.1', 'customoai');
