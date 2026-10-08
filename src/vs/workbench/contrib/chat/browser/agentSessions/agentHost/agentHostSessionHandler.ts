@@ -50,7 +50,7 @@ import { CompletionItemKind as AhpCompletionItemKind, ContentEncoding, type Comp
 import { ConfirmationOptionKind, CustomizationType, JsonPrimitive, McpServerAuthRequiredState, McpServerStatus, SessionInputRequestKind, TerminalClaimKind, ToolCallContributorKind, ToolResultContentType, type ConfirmationOption, type ProtectedResourceMetadata, type SessionActiveClient, type SessionInputRequest, type SessionToolClientExecutionRequest } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import { compareProtocolVersions } from '../../../../../../platform/agentHost/common/state/protocol/version/registry.js';
 import { ActionType, ChatTurnStartedAction, isChatAction, type ClientChatAction, type ClientSessionAction } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
-import { AHP_AUTH_REQUIRED, AHP_NOT_FOUND, ProtocolError } from '../../../../../../platform/agentHost/common/state/sessionProtocol.js';
+import { AHP_AUTH_REQUIRED, AHP_NOT_FOUND, AHP_SESSION_NOT_FOUND, ProtocolError } from '../../../../../../platform/agentHost/common/state/sessionProtocol.js';
 import { buildChatUri, buildDefaultChatUri, buildSubagentChatUri, ChatOriginKind, getErrorResponsePart, getInlineToolInput, getTurnError, isChatReadOnly, isDefaultChatUri, isSubagentChatUri, isMessageHiddenFromTranscript, isMessageRequestHiddenFromTranscript, MessageAttachmentKind, MessageKind, PendingMessageKind, ResponsePartKind, ChatInputAnswerState, ChatInputAnswerValueKind, ChatInputQuestionKind, ChatInputResponseKind, SessionStatus, StateComponents, ToolCallCancellationReason, ToolCallConfirmationReason, ToolCallStatus, TurnState, parseChatUri, mergeSessionWithDefaultChat, readMessageSystemInitiatedLabel, readSessionWorkspaceless, readUsageInfoMeta, withMessageHiddenFromTranscript, type ChatState, type ISessionWithDefaultChat, type ICompletedToolCall, type InputRequestResponsePart, type MarkdownResponsePart, type Message, type MessageAttachment, type MessageAnnotationsAttachment, type MessageChatAttachment, type MessageResourceAttachment, type MessageEmbeddedResourceAttachment, type ModelSelection, type PendingMessage, type ReasoningResponsePart, type RootState, type ChatInputAnswer, type ChatInputQuestion, type ChatInputRequest, type ChatSummary, type SessionState, type StringOrMarkdown, type ToolCallPendingConfirmationState, type ToolCallResponsePart, type ToolCallRunningState, type ToolCallState, type ToolInput, type Turn, type UsageInfo } from '../../../../../../platform/agentHost/common/state/sessionState.js';
 import { ExtensionIdentifier } from '../../../../../../platform/extensions/common/extensions.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
@@ -402,6 +402,40 @@ export function unwrapSessionLoadErrorMessage(err: unknown): string | undefined 
 	// The session URI in the prefix contains `scheme:/…` (colon-slash), never
 	// `: ` (colon-space), so the non-greedy match stops at the wrapper separator.
 	return message.replace(/^Failed to restore session .+?: /, '');
+}
+
+/**
+ * CreaEditor: builds the history shown when a chat fails to load. A subagent chat the agent host
+ * can no longer find (its transcript left nothing to rebuild after a restart, so the subscribe
+ * reports it as not found) gets a calm notice instead of the raw "Resource not found" error.
+ */
+export function sessionLoadFailureHistory(err: unknown, chatResource: string | undefined, sessionFragment: string, participant: string): IChatSessionHistoryItem[] {
+	const isSubagentChat = (!!chatResource && isSubagentChatUri(chatResource)) || sessionFragment.startsWith('subagent/');
+	if (isSubagentChat && err instanceof ProtocolError && (err.code === AHP_SESSION_NOT_FOUND || err.code === AHP_NOT_FOUND)) {
+		return [{
+			type: 'request',
+			prompt: '',
+			participant,
+			isSystemInitiated: true,
+			systemInitiatedLabel: localize('agentHost.subagentChatUnavailableLabel', "Subagent chat unavailable"),
+		}, {
+			type: 'response',
+			parts: [{ kind: 'markdownContent', content: new MarkdownString(localize('agentHost.subagentChatUnavailable', "This subagent chat is no longer available.")) }],
+			participant,
+		}];
+	}
+	return [{
+		type: 'request',
+		prompt: '',
+		participant,
+		isSystemInitiated: true,
+		systemInitiatedLabel: localize('agentHost.sessionLoadFailedLabel', "Couldn't open session"),
+	}, {
+		type: 'response',
+		parts: [],
+		participant,
+		errorDetails: { message: unwrapSessionLoadErrorMessage(err) ?? localize('agentHost.sessionLoadFailed', "This session couldn't be loaded.") },
+	}];
 }
 
 export function resolveRestoredSubagentChatResource(parentSession: string, toolCallId: string, catalogResource: string | undefined, persistedResource: string | undefined): string {
@@ -1660,19 +1694,8 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 					// generic message.
 					// Only a root session can be an id the host has yet to learn at `createSession`.
 					if (history.length === 0 && (sessionResource.fragment || !isNotFoundError(err))) {
-						history.push({
-							type: 'request',
-							prompt: '',
-							participant: this._config.agentId,
-							isSystemInitiated: true,
-							systemInitiatedLabel: localize('agentHost.sessionLoadFailedLabel', "Couldn't open session"),
-						});
-						history.push({
-							type: 'response',
-							parts: [],
-							participant: this._config.agentId,
-							errorDetails: { message: unwrapSessionLoadErrorMessage(err) ?? localize('agentHost.sessionLoadFailed', "This session couldn't be loaded.") },
-						});
+						// CreaEditor: a restored subagent chat that is gone gets a calm notice instead of the raw error.
+						history.push(...sessionLoadFailureHistory(err, chatURI, sessionResource.fragment, this._config.agentId));
 					}
 				}
 			}
