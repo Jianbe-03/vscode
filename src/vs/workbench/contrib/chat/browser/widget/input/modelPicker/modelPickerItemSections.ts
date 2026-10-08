@@ -232,7 +232,7 @@ function appendPinnedModels(context: IGroupedContext): Set<string> {
 	if (pinnedModels.length > 0) {
 		items.push({ kind: ActionListItemKind.Separator, label: localize('chat.modelPicker.pinned', "Pinned") });
 		for (const model of pinnedModels) {
-			const groupLabel = context.showGroupLabel ? getProviderGroupForModel(model, context.modelToGroup, options.languageModelsService).groupName : undefined;
+			const groupLabel = context.showGroupLabel && !hasProviderGroupInName(model) ? getProviderGroupForModel(model, context.modelToGroup, options.languageModelsService).groupName : undefined;
 			const { action, ariaDescription } = createModelAction(model, options.selectedModelId, options.actions.onSelect, undefined, context.showGroupLabel);
 			items.push(createModelItem(action, model, options.openerService, groupLabel, options.presentation.isUBB, ariaDescription, context.makePinAction(model), options.actions.onConfigure));
 		}
@@ -317,7 +317,7 @@ function appendPromotedModels(context: IGroupedContext, autoModel: ILanguageMode
 	});
 	for (const item of promoted) {
 		if (item.kind === 'available') {
-			const groupLabel = context.showGroupLabel ? getProviderGroupForModel(item.model, context.modelToGroup, options.languageModelsService).groupName : undefined;
+			const groupLabel = context.showGroupLabel && !hasProviderGroupInName(item.model) ? getProviderGroupForModel(item.model, context.modelToGroup, options.languageModelsService).groupName : undefined;
 			const { action, ariaDescription } = createModelAction(item.model, options.selectedModelId, options.actions.onSelect, undefined, context.showGroupLabel);
 			items.push(createModelItem(action, item.model, options.openerService, groupLabel, options.presentation.isUBB, ariaDescription, context.makePinAction(item.model), options.actions.onConfigure));
 		} else {
@@ -424,4 +424,10 @@ function appendManageModelsItems(items: IActionListItem<IActionWidgetDropdownAct
 			});
 		}
 	}
+}
+
+/** CreaEditor: a gateway model already names its key, e.g. "Claude Opus (Work key)", so it needs no key badge. */
+function hasProviderGroupInName(model: ILanguageModelChatMetadataAndIdentifier): boolean {
+	const group = model.metadata.providerGroupName;
+	return !!group && model.metadata.name.endsWith(` (${group})`);
 }
