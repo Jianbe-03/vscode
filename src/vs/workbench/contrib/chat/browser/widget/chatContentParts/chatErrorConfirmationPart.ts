@@ -7,6 +7,7 @@ import * as dom from '../../../../../../base/browser/dom.js';
 import { Button, IButtonOptions } from '../../../../../../base/browser/ui/button/button.js';
 import { IMarkdownString } from '../../../../../../base/common/htmlContent.js';
 import { Disposable, IDisposable } from '../../../../../../base/common/lifecycle.js';
+import { ICommandService } from '../../../../../../platform/commands/common/commands.js';
 import { IMarkdownRenderer } from '../../../../../../platform/markdown/browser/markdownRenderer.js';
 import { IInstantiationService } from '../../../../../../platform/instantiation/common/instantiation.js';
 import { defaultButtonStyles } from '../../../../../../platform/theme/browser/defaultStyles.js';
@@ -32,6 +33,7 @@ export class ChatErrorConfirmationContentPart extends Disposable implements ICha
 		@IChatWidgetService chatWidgetService: IChatWidgetService,
 		@IChatService chatService: IChatService,
 		@IChatAccessibilityService private readonly chatAccessibilityService: IChatAccessibilityService,
+		@ICommandService commandService: ICommandService,
 	) {
 		super();
 
@@ -52,7 +54,19 @@ export class ChatErrorConfirmationContentPart extends Disposable implements ICha
 			button.label = buttonData.label;
 
 			this._register(button.onDidClick(async () => {
+				// CreaEditor: a command button (such as "Add Claude Account") leaves the request alone.
 				if (isRunning) {
+					return;
+				}
+				if (buttonData.commandId) {
+					isRunning = true;
+					buttons.forEach(button => button.enabled = false);
+					try {
+						await commandService.executeCommand(buttonData.commandId, ...(buttonData.commandArgs ?? []));
+					} finally {
+						isRunning = false;
+						buttons.forEach(button => button.enabled = true);
+					}
 					return;
 				}
 				isRunning = true;

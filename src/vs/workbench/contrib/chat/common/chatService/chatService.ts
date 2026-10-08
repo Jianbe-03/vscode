@@ -61,6 +61,10 @@ export interface IChatResponseErrorDetailsConfirmationButton {
 	resend?: boolean;
 	/** Reuse the existing request model and identifier when resending. */
 	preserveRequestId?: boolean;
+	/** CreaEditor: run this command instead of sending a request, e.g. "Add Claude Account". */
+	commandId?: string;
+	/** CreaEditor: the JSON-serializable arguments of {@link commandId}. */
+	commandArgs?: readonly (string | boolean | number)[];
 }
 
 export interface IChatResponseErrorDetails {
