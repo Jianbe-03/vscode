@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { AgentInfo, McpServerStatus, PermissionMode, Query, SDKUserMessage, SlashCommand, WarmQuery } from '@anthropic-ai/claude-agent-sdk';
+import type { AgentInfo, McpServerStatus, PermissionMode, Query, SDKMessage, SDKUserMessage, SlashCommand, WarmQuery } from '@anthropic-ai/claude-agent-sdk';
 import { CancellationError, isCancellationError } from '../../../../base/common/errors.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, IReference, toDisposable } from '../../../../base/common/lifecycle.js';
@@ -244,6 +244,14 @@ export class ClaudeSdkPipeline extends Disposable {
 	readonly onDidProduceSignal: Event<AgentSignal> = this._onDidProduceSignal.event;
 
 	private readonly _router: ClaudeSdkMessageRouter;
+
+	private readonly _onDidReceiveMessage = this._register(new Emitter<{ readonly message: SDKMessage; readonly turnId: string | undefined }>());
+	/**
+	 * CreaEditor: every raw SDK message with the protocol turn it belongs to, fired before the
+	 * message is mapped to signals. Lets the session notice a subscription limit before the
+	 * turn's error and completion signals go out.
+	 */
+	readonly onDidReceiveMessage = this._onDidReceiveMessage.event;
 
 	constructor(
 		readonly sessionId: string,
@@ -680,6 +688,7 @@ export class ClaudeSdkPipeline extends Disposable {
 				const turnId = parent?.turnId;
 				const clientContext = parent?.clientContext;
 				const turnDuration = parent?.stopWatch.elapsed();
+				this._onDidReceiveMessage.fire({ message, turnId });
 				try {
 					await this._router.handle(message, turnId, {
 						turnDuration,

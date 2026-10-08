@@ -69,7 +69,17 @@ export interface IClaudeProxyHandle extends ILoopbackProxyHandle {
  */
 export type ClaudeTransport =
 	| { readonly kind: 'proxy'; readonly handle: IClaudeProxyHandle }
-	| { readonly kind: 'native' };
+	| { readonly kind: 'native'; readonly account?: IClaudeAccountCredential };
+
+/**
+ * CreaEditor: the subscription account a `native` session runs on. `env` is laid over the
+ * subprocess environment (`CLAUDE_CODE_OAUTH_TOKEN` or `CLAUDE_CONFIG_DIR`); `undefined` values
+ * remove a variable. Absent for the machine's own login.
+ */
+export interface IClaudeAccountCredential {
+	readonly id: string;
+	readonly env: Readonly<Record<string, string | undefined>>;
+}
 
 /**
  * A per-request credits report. CAPI returns the actual billed credits

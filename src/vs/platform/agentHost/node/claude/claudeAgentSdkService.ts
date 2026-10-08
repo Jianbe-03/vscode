@@ -12,6 +12,8 @@ import { createDecorator } from '../../../instantiation/common/instantiation.js'
 import { ILogService } from '../../../log/common/log.js';
 import { IAgentSdkDownloader, IAgentSdkPackage } from '../agentSdkDownloader.js';
 import { AgentHostClaudeSdkRootEnvVar } from '../../common/agentService.js';
+import { Promises } from '../../../../base/node/pfs.js';
+import { getAppNodeModulesUri } from '../appNodeModules.js';
 
 /**
  * `@anthropic-ai/claude-agent-sdk` distribution descriptor. Lives in this
@@ -78,6 +80,13 @@ export interface IClaudeAgentSdkService {
 
 	forkSession(sessionId: string, options?: ForkSessionOptions): Promise<ForkSessionResult>;
 	deleteSession(sessionId: string, options?: SessionMutationOptions): Promise<void>;
+
+	/**
+	 * CreaEditor: path of the `claude` CLI binary the SDK ships for this platform, for commands the
+	 * SDK has no API for (`claude auth login`). `undefined` when the SDK is not on disk.
+	 */
+	resolveCliExecutable?(): Promise<string | undefined>;
+
 	createSdkMcpServer(options: {
 		name: string;
 		version?: string;
@@ -232,6 +241,26 @@ export class ClaudeAgentSdkService implements IClaudeAgentSdkService {
 	async deleteSession(sessionId: string, options?: SessionMutationOptions): Promise<void> {
 		const sdk = await this._getSdk();
 		return sdk.deleteSession(sessionId, options);
+	}
+
+	async resolveCliExecutable(): Promise<string | undefined> {
+		if (!(await this.canLoadWithoutDownload())) {
+			return undefined;
+		}
+		const override = process.env[AgentHostClaudeSdkRootEnvVar];
+		const nodeModules = override
+			? join(override, 'node_modules')
+			: this._downloader.isAvailable(ClaudeSdkPackage)
+				? join(await this._downloader.loadSdkRoot(ClaudeSdkPackage, CancellationToken.None), 'node_modules')
+				: getAppNodeModulesUri().fsPath;
+		const binary = process.platform === 'win32' ? 'claude.exe' : 'claude';
+		for (const variant of ['', '-musl']) {
+			const candidate = join(nodeModules, '@anthropic-ai', `claude-agent-sdk-${process.platform}-${process.arch}${variant}`, binary);
+			if (await Promises.exists(candidate)) {
+				return candidate;
+			}
+		}
+		return undefined;
 	}
 
 	async createSdkMcpServer(options: {

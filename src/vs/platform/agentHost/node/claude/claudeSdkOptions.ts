@@ -123,6 +123,10 @@ export async function buildOptions(
 ): Promise<Options> {
 	const isProxy = transport.kind === 'proxy';
 	const subprocessEnv = buildSubprocessEnv(isProxy);
+	// CreaEditor: run a native session on its subscription account's credential.
+	if (transport.kind === 'native' && transport.account) {
+		Object.assign(subprocessEnv, transport.account.env);
+	}
 	const telemetryEnv = buildClaudeTelemetryEnv(input.telemetry, input.traceContext);
 	Object.assign(subprocessEnv, telemetryEnv);
 	const resolvedRgDiskPath = await rgDiskPath();
@@ -278,11 +282,12 @@ export function toClaudeMcpServers(
  * because the enumeration never iterates a turn. The caller (`_fetchNativeModels`)
  * aborts the returned `abortController` during teardown, alongside `query.close()`.
  */
-export function buildModelEnumerationOptions(): Options {
+export function buildModelEnumerationOptions(accountEnv?: Readonly<Record<string, string | undefined>>): Options {
 	return {
 		cwd: tmpdir(),
 		executable: process.execPath as 'node',
-		env: buildSubprocessEnv(false),
+		// CreaEditor: `accountEnv` asks on behalf of a subscription account (usage, account info).
+		env: { ...buildSubprocessEnv(false), ...accountEnv },
 		abortController: new AbortController(),
 		systemPrompt: { type: 'preset', preset: 'claude_code' },
 		settings: {
