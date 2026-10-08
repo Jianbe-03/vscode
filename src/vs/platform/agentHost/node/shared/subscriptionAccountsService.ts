@@ -56,8 +56,11 @@ export interface ISubscriptionAccountsProvider {
 	getAccounts(): readonly ISubscriptionAccount[];
 	/** Handles `add`, `remove`, `rename`, `move`, `signIn` and `switchChat` for this provider. */
 	handleRequest(request: ISubscriptionAccountsRequest): Promise<void>;
-	/** Reads the usage of the provider's signed-in accounts. */
-	refreshUsage(): Promise<void>;
+	/**
+	 * Reads the usage of the provider's signed-in accounts. `explicit` is set when the user asked for
+	 * it (not the periodic refresh): the provider may then spend a little quota to get a reading.
+	 */
+	refreshUsage(options?: { readonly explicit?: boolean }): Promise<void>;
 }
 
 export const ISubscriptionAccountsService = createDecorator<ISubscriptionAccountsService>('subscriptionAccountsService');
@@ -169,7 +172,7 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	private async _route(request: ISubscriptionAccountsRequest, provider: ISubscriptionAccountsProvider | undefined): Promise<void> {
 		if (request.type === 'refreshUsage') {
 			const providers = request.provider ? [this._providers.get(request.provider)] : [...this._providers.values()];
-			await Promise.all(providers.map(target => target?.refreshUsage()));
+			await Promise.all(providers.map(target => target?.refreshUsage({ explicit: true })));
 			return;
 		}
 		await provider?.handleRequest(request);

@@ -88,7 +88,7 @@ export function parseSubscriptionAccountTokenResource(resource: string): string 
 }
 
 /**
- * `_meta` of a chat error when the chat's account hit its limit. Without auto-switch the client offers
+ * `_meta` of a chat error when the chat's account hit its limit (or its sign-in was refused). Without auto-switch the client offers
  * to continue on {@link nextAccountId} by sending a `switchChat` request.
  */
 export const SUBSCRIPTION_LIMIT_ERROR_META_KEY = 'creaeditor.subscriptionLimit';
@@ -100,6 +100,8 @@ export interface ISubscriptionLimitErrorMeta {
 	readonly resetsAt?: number;
 	readonly nextAccountId?: string;
 	readonly nextAccountLabel?: string;
+	/** Why the account stopped: its usage limit (the default) or its provider refused its sign-in. */
+	readonly reason?: 'usageLimit' | 'authentication';
 }
 
 /**
