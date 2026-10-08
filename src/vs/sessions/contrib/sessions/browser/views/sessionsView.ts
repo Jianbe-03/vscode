@@ -837,9 +837,11 @@ export class SessionsView extends ViewPane {
 			if (this._customizationsWidget) {
 				this.sidebarSplitView.resizeView(this.customizationsPaneIndex, this.getCustomizationsPaneHeight());
 			}
-			if (this.agentsTreeSection) {
-				this.sidebarSplitView.resizeView(AGENTS_TREE_PANE_INDEX, this.agentsTreeSection.collapsed ? this.agentsTreeSection.collapsedHeight : this.agentsTreeSection.openHeight);
-			}
+		}
+		// CreaEditor: the first layouts run before the sidebar has its full height and shrink the Agents pane,
+		// so give it back the height the user chose whenever the sidebar is laid out.
+		if (this.agentsTreeSection) {
+			this.sidebarSplitView.resizeView(AGENTS_TREE_PANE_INDEX, this.agentsTreeSection.collapsed ? this.agentsTreeSection.collapsedHeight : this.agentsTreeSection.openHeight);
 		}
 	}
 
