@@ -102,8 +102,12 @@ export interface ISubscriptionLimitErrorMeta {
 	readonly nextAccountLabel?: string;
 }
 
+/**
+ * The agent host publishes the accounts as a transient root config value (root `_meta` cannot change
+ * after the first snapshot); `_meta` is still read for hosts that put it there.
+ */
 export function readSubscriptionAccountsState(state: RootState | undefined): ISubscriptionAccountsState {
-	const value = state?._meta?.[SUBSCRIPTION_ACCOUNTS_META_KEY];
+	const value = state?.config?.values[SUBSCRIPTION_ACCOUNTS_META_KEY] ?? state?._meta?.[SUBSCRIPTION_ACCOUNTS_META_KEY];
 	if (!value || typeof value !== 'object' || !Array.isArray((value as ISubscriptionAccountsState).accounts)) {
 		return { accounts: [] };
 	}

@@ -69,6 +69,7 @@ import { EditArcReporterService, IEditArcReporterService } from './shared/editAr
 import { EditSurvivalReporterFactory, IEditSurvivalReporterFactory } from './shared/editSurvivalReporter.js';
 import { IAgentHostWorktreeIsolation, WorktreeIsolation } from './shared/worktreeIsolation.js';
 import { AgentBranchNameGenerator, IAgentBranchNameGenerator } from './shared/agentBranchNameGenerator.js';
+import { ISubscriptionAccountsService, SubscriptionAccountsService } from './shared/subscriptionAccountsService.js';
 import { AgentHostTurnService, IAgentHostTurnService } from './agentHostTurnService.js';
 import { IDevContainerAgentHostMainService } from '../common/devContainerAgentHost.js';
 import { RemoteDevContainerAgentHostService } from './devContainerAgentHostService.js';
@@ -128,6 +129,8 @@ export function registerAgentHostCoreServices(services: ServiceCollection, input
 	services.set(IAgentBranchNameGenerator, new SyncDescriptor(AgentBranchNameGenerator));
 	services.set(IAgentHostWorktreeIsolation, new SyncDescriptor(WorktreeIsolation));
 	services.set(IAdditionalWorktreeLifecycleService, new SyncDescriptor(AdditionalWorktreeLifecycleService));
+	// CreaEditor: pooled Claude and Codex subscription accounts, kept next to the agent host config.
+	services.set(ISubscriptionAccountsService, new SyncDescriptor(SubscriptionAccountsService, [inputs.rootConfigResource ? joinPath(dirname(inputs.rootConfigResource), 'agent-subscription-accounts.json').fsPath : undefined]));
 }
 
 export interface IAgentHostHostServiceInputs {
