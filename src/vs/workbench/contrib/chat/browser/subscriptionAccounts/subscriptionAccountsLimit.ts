@@ -5,13 +5,15 @@
 
 // CreaEditor: the chat prompt when a Claude or Codex subscription account is used up. The agent host
 // ends the turn with an error carrying `ISubscriptionLimitErrorMeta`; the chat then offers to continue
-// on the next account of the pool, or to always switch without asking.
+// on the next account of the pool, or to always switch without asking, or to continue once the
+// account's usage resets (see `subscriptionAccountsResetWait.ts`).
 
 import { localize } from '../../../../../nls.js';
 import { ISubscriptionLimitErrorMeta, SUBSCRIPTION_LIMIT_ERROR_META_KEY } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import type { ErrorInfo } from '../../../../../platform/agentHost/common/state/protocol/common/state.js';
 import { formatShortDuration, getSubscriptionProviderLabel } from '../../../../services/agentHost/browser/subscriptionAccountsService.js';
 import { ChatErrorLevel, IChatResponseErrorDetails, IChatResponseErrorDetailsConfirmationButton } from '../../common/chatService/chatService.js';
+import type { ISubscriptionResetWait } from './subscriptionAccountsResetWait.js';
 
 export const ADD_CLAUDE_ACCOUNT_COMMAND_ID = 'workbench.action.chat.addClaudeAccount';
 export const ADD_CODEX_ACCOUNT_COMMAND_ID = 'workbench.action.chat.addCodexAccount';
@@ -31,6 +33,39 @@ export interface ISubscriptionSwitchConfirmationData {
 		/** "Always Switch Automatically": also turn on the auto-switch setting. */
 		readonly alwaysSwitch: boolean;
 	};
+}
+
+/**
+ * Confirmation data of "Continue When Usage Resets": the chat resends the failed request, which then
+ * waits for the reset and continues on the same account. For Claude it is also a resume of the failed
+ * turn (`agentHostResumeTurn`); Codex starts the continuation turn itself after a `switchChat`.
+ */
+export interface ISubscriptionWaitConfirmationData {
+	readonly agentHostResumeTurn?: true;
+	readonly subscriptionWait: ISubscriptionResetWait;
+}
+
+export function getSubscriptionWaitData(confirmationData: readonly unknown[] | undefined): ISubscriptionWaitConfirmationData | undefined {
+	for (const data of confirmationData ?? []) {
+		const candidate = typeof data === 'object' && data !== null ? data as Partial<ISubscriptionWaitConfirmationData> : undefined;
+		const wait = candidate?.subscriptionWait;
+		if (wait && (wait.provider === 'claude' || wait.provider === 'codex') && typeof wait.accountId === 'string' && typeof wait.resetsAt === 'number') {
+			return candidate as ISubscriptionWaitConfirmationData;
+		}
+	}
+	return undefined;
+}
+
+/** What "Continue When Usage Resets" waits for: the used-up account until its reset; undefined without one. */
+export function getSubscriptionResetWait(meta: ISubscriptionLimitErrorMeta, now: number): ISubscriptionResetWait | undefined {
+	return meta.reason !== 'authentication' && meta.resetsAt !== undefined && meta.resetsAt > now
+		? { provider: meta.provider, accountId: meta.accountId, accountLabel: meta.accountLabel, resetsAt: meta.resetsAt }
+		: undefined;
+}
+
+/** The confirmation data that makes the chat wait for `wait` and continue then. */
+export function createSubscriptionWaitData(wait: ISubscriptionResetWait): ISubscriptionWaitConfirmationData {
+	return wait.provider === 'claude' ? { agentHostResumeTurn: true, subscriptionWait: wait } : { subscriptionWait: wait };
 }
 
 export function readSubscriptionLimitErrorMeta(error: ErrorInfo | undefined): ISubscriptionLimitErrorMeta | undefined {
@@ -67,6 +102,13 @@ export function getSubscriptionSwitchData(confirmationData: readonly unknown[] |
  */
 export function getSubscriptionLimitErrorDetails(meta: ISubscriptionLimitErrorMeta, now: number, chat: string | undefined): IChatResponseErrorDetails {
 	const provider = getSubscriptionProviderLabel(meta.provider);
+	const resetWait = chat ? getSubscriptionResetWait(meta, now) : undefined;
+	const waitButton: IChatResponseErrorDetailsConfirmationButton[] = resetWait ? [{
+		data: createSubscriptionWaitData(resetWait),
+		label: localize('subscriptionLimit.continueWhenReset', "Continue When Usage Resets"),
+		resend: true,
+		preserveRequestId: true,
+	}] : [];
 	if (meta.nextAccountId && meta.nextAccountLabel) {
 		const message = meta.reason === 'authentication'
 			? localize('subscriptionLimit.refused', "The sign-in of the {0} account {1} was refused.", provider, meta.accountLabel)
@@ -89,6 +131,7 @@ export function getSubscriptionLimitErrorDetails(meta: ISubscriptionLimitErrorMe
 			confirmationButtons: chat ? [
 				switchButton(localize('subscriptionLimit.continueOn', "Continue on {0}", meta.nextAccountLabel), false),
 				switchButton(localize('subscriptionLimit.alwaysSwitch', "Always Switch Automatically"), true),
+				...waitButton,
 			] : undefined,
 		};
 	}
@@ -101,7 +144,7 @@ export function getSubscriptionLimitErrorDetails(meta: ISubscriptionLimitErrorMe
 		message,
 		isExpectedError: true,
 		level: ChatErrorLevel.Warning,
-		confirmationButtons: [{
+		confirmationButtons: [...waitButton, {
 			data: undefined,
 			label: meta.provider === 'claude' ? localize('subscriptionLimit.addClaude', "Add Claude Account") : localize('subscriptionLimit.addCodex', "Add Codex Account"),
 			commandId: meta.provider === 'claude' ? ADD_CLAUDE_ACCOUNT_COMMAND_ID : ADD_CODEX_ACCOUNT_COMMAND_ID,

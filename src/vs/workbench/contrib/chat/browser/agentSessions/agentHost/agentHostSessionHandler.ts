@@ -113,8 +113,9 @@ import { AgentHostResponseFileChangesProvider } from './agentHostResponseFileCha
 import type { AgentHostPromptCacheNotification } from './agentHostPromptCacheNotification.js';
 import { AgentHostChatInputState, codexWriterLockMessage } from './agentHostChatInputState.js';
 import { readChatInputState } from '../../../../../../platform/agentHost/common/meta/agentHostChatInputState.js';
-import { SubscriptionAccountsAutoSwitchSettingId, dispatchSubscriptionAccountsRequest, waitForSubscriptionAccountsRequest } from '../../../../../services/agentHost/browser/subscriptionAccountsService.js';
-import { getSubscriptionLimitErrorDetails, getSubscriptionSwitchData, readSubscriptionLimitErrorMeta } from '../../subscriptionAccounts/subscriptionAccountsLimit.js';
+import { ISubscriptionAccountsService, SubscriptionAccountsAutoSwitchSettingId, SubscriptionAccountsWhenNoAccountLeftSettingId, dispatchSubscriptionAccountsRequest, waitForSubscriptionAccountsRequest } from '../../../../../services/agentHost/browser/subscriptionAccountsService.js';
+import { createSubscriptionWaitData, getSubscriptionLimitErrorDetails, getSubscriptionResetWait, getSubscriptionSwitchData, getSubscriptionWaitData, readSubscriptionLimitErrorMeta, type ISubscriptionWaitConfirmationData } from '../../subscriptionAccounts/subscriptionAccountsLimit.js';
+import { waitForSubscriptionReset } from '../../subscriptionAccounts/subscriptionAccountsResetWait.js';
 import { AgentHostSandboxNotification } from './agentHostSandboxNotification.js';
 import { IChatResponseFileChangesService } from '../../chatResponseFileChangesService.js';
 import { AgentHostSessionReferenceAttachmentDisplayKind, AgentHostSessionReferenceTrajectoryAttachmentDisplayKind, toSessionReferenceAttachmentMeta, toSessionReferenceModelRepresentation } from './agentHostSessionReferenceAttachment.js';
@@ -1084,6 +1085,8 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 
 	private readonly _activeSessions = new ResourceMap<AgentHostChatSession>();
 	private readonly _chatURIsBySessionResource = new ResourceMap<string>();
+	/** CreaEditor: chats (agent host chat URIs) this handler told the agent host about a subscription account pin. */
+	private readonly _sentSubscriptionPins = new Set<string>();
 	/** Per-session subscription to chat model pending request changes. */
 	private readonly _pendingMessageSubscriptions = this._register(new DisposableResourceMap());
 	private readonly _remotePendingMessageProjections = new ResourceSet();
@@ -1243,6 +1246,8 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		@IAgentHostCustomizationService private readonly _customizationService: IAgentHostCustomizationService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 		@IWorkbenchAssignmentService assignmentService: IWorkbenchAssignmentService,
+		// CreaEditor: the model picker's account pins. Missing where a test does not provide it.
+		@ISubscriptionAccountsService private readonly _subscriptionAccountsService: ISubscriptionAccountsService,
 	) {
 		super();
 		this._config = config;
@@ -2016,7 +2021,12 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			};
 
 			failureStage = 'prepareTurn';
-			const completedTurn = await this._handleTurn(resolvedSession, request, measuredProgress, cancellationToken, stage => failureStage = stage, invocationKind === 'newTurn' ? text => firstResponse.observeText(text) : undefined);
+			let completedTurn = await this._handleTurn(resolvedSession, request, measuredProgress, cancellationToken, stage => failureStage = stage, invocationKind === 'newTurn' ? text => firstResponse.observeText(text) : undefined);
+			// CreaEditor: the last account of the pool is used up and the chat waits for its reset by itself.
+			const automaticWait = this._getAutomaticSubscriptionWait(completedTurn, resolvedSession, chatId);
+			if (automaticWait) {
+				completedTurn = await this._continueWhenUsageResets(automaticWait, resolvedSession, request, measuredProgress, cancellationToken);
+			}
 			outcome = completedTurn?.state === TurnState.Error ? 'error'
 				: completedTurn?.state === TurnState.Cancelled || cancellationToken.isCancellationRequested ? 'cancelled'
 					: completedTurn ? 'success' : 'notDispatched';
@@ -3169,6 +3179,13 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			const switchRequest = dispatchSubscriptionAccountsRequest(this._config.connection, { type: 'switchChat', chat: this._getChatURI(request.sessionResource), accountId: subscriptionSwitch.subscriptionSwitch.accountId });
 			await waitForSubscriptionAccountsRequest(this._config.connection, switchRequest, cancellationToken);
 		}
+		// CreaEditor: a chat pinned to a subscription account in the model picker runs there.
+		await this._syncSubscriptionPin(request.sessionResource, cancellationToken);
+		// CreaEditor: "Continue When Usage Resets" waits in this request, then continues on the same account.
+		const subscriptionWait = getSubscriptionWaitData(request.acceptedConfirmationData);
+		if (subscriptionWait) {
+			return this._continueWhenUsageResets(subscriptionWait, session, request, progress, cancellationToken);
+		}
 		if (request.acceptedConfirmationData?.some(isResumeTurnConfirmationData)) {
 			return this._handleResumedTurn(session, request, progress, cancellationToken);
 		}
@@ -3286,6 +3303,75 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				},
 			}));
 		});
+	}
+
+	/**
+	 * CreaEditor: hands the agent host the account the user pinned this chat to in the model picker
+	 * before every request (a restarted agent host learns it again), and once that it went back to the
+	 * pool. Only Claude and Codex chats have accounts.
+	 */
+	private async _syncSubscriptionPin(sessionResource: URI, cancellationToken: CancellationToken): Promise<void> {
+		const sessionType = getChatSessionType(sessionResource);
+		const provider = sessionType === SessionType.AgentHostClaude ? 'claude' : sessionType === SessionType.AgentHostCodex ? 'codex' : undefined;
+		const chat = provider ? this._chatURIsBySessionResource.get(sessionResource) : undefined;
+		if (!provider || !chat) {
+			return;
+		}
+		const accountId = this._subscriptionAccountsService?.pinnedAccounts.get().get(sessionResource.toString());
+		if (!accountId && !this._sentSubscriptionPins.has(chat)) {
+			return;
+		}
+		if (accountId) {
+			this._sentSubscriptionPins.add(chat);
+		} else {
+			this._sentSubscriptionPins.delete(chat);
+		}
+		const requestId = dispatchSubscriptionAccountsRequest(this._config.connection, { type: 'pinChat', chat, provider, ...(accountId ? { accountId } : {}) });
+		await waitForSubscriptionAccountsRequest(this._config.connection, requestId, cancellationToken);
+	}
+
+	/**
+	 * CreaEditor: waits until the used-up subscription account of a failed turn resets, shown as the
+	 * request's progress (Stop cancels it), then continues there: a Claude turn resumes after the chat
+	 * moved to the account again, a Codex chat continues in a turn the agent host starts.
+	 */
+	private async _continueWhenUsageResets(
+		data: ISubscriptionWaitConfirmationData,
+		session: URI,
+		request: IChatAgentRequest,
+		progress: (parts: IChatProgress[]) => void,
+		cancellationToken: CancellationToken,
+	): Promise<Turn | undefined> {
+		const wait = data.subscriptionWait;
+		const chat = this._getChatURI(request.sessionResource);
+		const available = await waitForSubscriptionReset(this._config.connection, wait,
+			message => progress([{ kind: 'progressMessage', content: new MarkdownString(message), shimmer: true }]), cancellationToken);
+		if (!available) {
+			throw new Error(localize('agentHost.subscriptionResetUnavailable', "The {0} account cannot take work after its reset. Check it on the Subscription Usage page.", wait.accountLabel));
+		}
+		const switchRequest = dispatchSubscriptionAccountsRequest(this._config.connection, { type: 'switchChat', chat, accountId: wait.accountId });
+		await waitForSubscriptionAccountsRequest(this._config.connection, switchRequest, cancellationToken);
+		if (data.agentHostResumeTurn) {
+			return this._handleResumedTurn(session, request, progress, cancellationToken);
+		}
+		progress([{ kind: 'markdownContent', content: new MarkdownString(localize('agentHost.subscriptionResetContinued', "The usage of {0} reset; the chat continues there.", wait.accountLabel)) }]);
+		return undefined;
+	}
+
+	/**
+	 * CreaEditor: with "When no account is left: Wait for Reset Automatically", the wait that a turn
+	 * which used up the last account of its pool starts by itself; undefined otherwise.
+	 */
+	private _getAutomaticSubscriptionWait(turn: Turn | undefined, session: URI, chatURI: string): ISubscriptionWaitConfirmationData | undefined {
+		if (turn?.state !== TurnState.Error || this._configurationService.getValue<string>(SubscriptionAccountsWhenNoAccountLeftSettingId) !== 'waitForReset') {
+			return undefined;
+		}
+		const meta = readSubscriptionLimitErrorMeta(getTurnError(turn));
+		if (!meta || meta.nextAccountId || this._isChatReadOnly(session.toString(), chatURI)) {
+			return undefined;
+		}
+		const wait = getSubscriptionResetWait(meta, Date.now());
+		return wait ? createSubscriptionWaitData(wait) : undefined;
 	}
 
 	private async _handleResumedTurn(
