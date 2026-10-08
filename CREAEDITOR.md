@@ -171,7 +171,7 @@ Subagents (the `agent` / `runSubagent` tool) can start their own subagents. Nest
 - In the Agents window the tree also shows the sessions and chat groups an agent created.
 - Ended agents stay visible as turned off: finished, failed or cancelled agents, closed chats and archived sessions keep their card in a quieter grey, and their subagents fold away (click the chevron to unfold them; they stay open). Running agents come first, then idle chats, then ended ones, each newest first. Only the 20 most recent closed chats or archived sessions are kept.
 
-In the Agents window, the header of the Sessions list has two extra buttons after New, Filter and Find: **Show Agents Tree** ($(type-hierarchy-sub)), which shows the tree in place of the Sessions list (**Show Sessions** ($(list-flat)) at the top of the tree switches back), and **Open AI Costs** ($(credit-card)), which opens the [cost page](#cost-per-issue-and-chat) full screen over the chat. Subagent chats nest under the chat that started them, also when you never opened them.
+In the Agents window, the header of the Sessions list has two extra buttons after New, Filter and Find: **Toggle Agents Tree** ($(type-hierarchy-sub)), which folds the **Agents** section below the Sessions list open or closed (clicking the section's header does the same), and **Open AI Costs** ($(credit-card)), which opens the [cost page](#cost-per-issue-and-chat) full screen over the chat. The section shows the subagents of running and recent sessions, also when you never opened them, each nested under the subagent that started it (the agent host records that parent as `spawningChat` on the chat's tool origin).
 
 | Setting | Default | |
 | --- | --- | --- |
