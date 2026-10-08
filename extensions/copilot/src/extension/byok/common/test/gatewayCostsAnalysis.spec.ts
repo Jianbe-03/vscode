@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { IGatewayCostEntry } from '../../../../platform/endpoint/common/gatewayTrackingService';
-import { chooseCostBucket, computeCostBreakdown, computeCostKpis, computeCostPivot, computeCostTimeline, filterCostRows, ICostQueryOptions, OTHER_VALUE, percentile, prepareCostDataset, resolveCostRange, runCostQuery, sortCostRows } from '../gatewayCostsAnalysis';
+import { chooseCostBucket, computeCostBreakdown, computeCostChange, computeCostComparison, computeCostKpis, computeCostPivot, computeCostTimeline, filterCostRows, ICostQueryOptions, OTHER_VALUE, percentile, prepareCostDataset, resolveCostRange, resolvePreviousCostRange, runCostQuery, sortCostRows } from '../gatewayCostsAnalysis';
 
 /** Wednesday 15 October 2025, 12:00 local time. */
 const NOW = new Date(2025, 9, 15, 12).getTime();
@@ -66,6 +66,8 @@ describe('filterCostRows', () => {
 			range: ids({ range: '7' }),
 			key: ids({ range: 'all', values: { key: ['Private'] } }),
 			keyAndModel: ids({ range: 'all', values: { key: ['Team'], model: ['model-a'] } }),
+			twoKeys: ids({ range: 'all', values: { key: ['Team', 'Private'] } }),
+			twoModelsAndKey: ids({ range: 'all', values: { model: ['model-b', 'model-c'], key: ['Private'] } }),
 			gateway: ids({ range: 'all', values: { gateway: ['litellm:proxy:4000'] } }),
 			issue: ids({ range: 'all', values: { issue: ['acme/web#42'] } }),
 			noRepo: ids({ range: 'all', values: { repo: [''] } }),
@@ -80,6 +82,8 @@ describe('filterCostRows', () => {
 			range: [login, sub, noCost, header],
 			key: [noCost, header],
 			keyAndModel: [login, sub],
+			twoKeys: [old, login, sub, noCost, header],
+			twoModelsAndKey: [noCost, header],
 			gateway: [noCost, header],
 			issue: [login],
 			noRepo: [old, noCost, header],
@@ -210,5 +214,61 @@ describe('runCostQuery', () => {
 			[0.25, 0.5, 1, 2, undefined],
 			[2, 1, 0.5, 0.25, undefined],
 		]);
+	});
+});
+
+describe('comparison with the previous period', () => {
+	it('picks the period of the same length before the range', () => {
+		const periods = (filters: Parameters<typeof resolvePreviousCostRange>[0]) => {
+			const result = resolvePreviousCostRange(filters, NOW);
+			return result && [result.current.from, result.current.to, result.previous.from, result.previous.to].map(time => new Date(time).toDateString());
+		};
+		expect({
+			today: periods({ range: 'today' }),
+			week: periods({ range: '7' }),
+			thisMonth: periods({ range: 'thisMonth' }),
+			lastMonth: periods({ range: 'lastMonth' }),
+			custom: periods({ range: 'custom', from: '2025-10-01', to: '2025-10-03' }),
+			all: periods({ range: 'all' }),
+		}).toEqual({
+			today: ['Wed Oct 15 2025', 'Thu Oct 16 2025', 'Tue Oct 14 2025', 'Wed Oct 15 2025'],
+			week: ['Thu Oct 09 2025', 'Thu Oct 16 2025', 'Thu Oct 02 2025', 'Thu Oct 09 2025'],
+			thisMonth: ['Wed Oct 01 2025', 'Sat Nov 01 2025', 'Mon Sep 01 2025', 'Wed Oct 01 2025'],
+			lastMonth: ['Mon Sep 01 2025', 'Wed Oct 01 2025', 'Fri Aug 01 2025', 'Mon Sep 01 2025'],
+			custom: ['Wed Oct 01 2025', 'Sat Oct 04 2025', 'Sun Sep 28 2025', 'Wed Oct 01 2025'],
+			all: undefined,
+		});
+	});
+
+	it('computes the change, without a percentage from zero', () => {
+		expect([computeCostChange(3, 2), computeCostChange(1, 2), computeCostChange(1, 0), computeCostChange(0, 0)]).toEqual([
+			{ absolute: 1, percent: 0.5 },
+			{ absolute: -1, percent: -0.5 },
+			{ absolute: 1, percent: undefined },
+			{ absolute: 0, percent: undefined },
+		]);
+	});
+
+	it('compares this month with last month per key and model, with the other filters applied', () => {
+		const dataset = prepareCostDataset([...ENTRIES, entry(at(9, 20), { cost: 3, providerGroup: 'Private', model: 'model-c', promptTokens: 10 })]);
+		const comparison = computeCostComparison(dataset, { range: 'thisMonth', kind: 'main' }, NOW)!;
+		const pair = (row: { value: string; current: { cost: number; requests: number }; previous: { cost: number; requests: number } }) => [row.value, row.current.cost, row.previous.cost, row.current.requests, row.previous.requests];
+		expect({
+			total: [comparison.total.current.cost, comparison.total.previous.cost],
+			previousRequests: comparison.previousKpis.requests,
+			previousProjection: comparison.previousKpis.projection,
+			byKey: comparison.byKey.map(pair),
+			byModel: comparison.byModel.map(pair),
+			viaQuery: runCostQuery(dataset, { range: 'thisMonth', kind: 'main' }, { ...OPTIONS, compare: true }, NOW).comparison?.total.previous.cost,
+			notAsked: runCostQuery(dataset, { range: 'thisMonth' }, OPTIONS, NOW).comparison,
+		}).toEqual({
+			total: [2.5, 4],
+			previousRequests: 2,
+			previousProjection: undefined,
+			byKey: [['Private', 2, 3, 2, 1], ['Team', 0.5, 1, 1, 1]],
+			byModel: [['model-c', 2, 3, 2, 1], ['model-a', 0.5, 0, 1, 0], ['model-b', 0, 1, 0, 1]],
+			viaQuery: 4,
+			notAsked: undefined,
+		});
 	});
 });

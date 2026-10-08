@@ -56,6 +56,8 @@ export interface ICostQueryOptions {
 	/** Zero based page of the requests table. */
 	readonly page: number;
 	readonly pageSize: number;
+	/** Also compare the range with the period before it, see {@link computeCostComparison}. */
+	readonly compare?: boolean;
 }
 
 /** A recorded request plus the values derived from it. */
@@ -169,6 +171,32 @@ export interface ICostQueryResult {
 	readonly requests: { readonly rows: readonly ICostRow[]; readonly page: number; readonly pageCount: number };
 	/** Values to choose from per filter, over all recorded requests, most used first. */
 	readonly options: Record<CostFilterDimension, readonly ICostOption[]>;
+	/** Only when asked for and the range has a start. */
+	readonly comparison?: ICostComparison;
+}
+
+/** A value of a dimension in the current and in the previous period. */
+export interface ICostComparisonRow extends ICostGroupKey {
+	readonly current: ICostAggregate;
+	readonly previous: ICostAggregate;
+}
+
+/** The range of the filters against the period of the same length just before it. */
+export interface ICostComparison {
+	/** Epoch milliseconds, `to` exclusive. */
+	readonly current: { readonly from: number; readonly to: number };
+	readonly previous: { readonly from: number; readonly to: number };
+	/** The KPI cards of the previous period, with the same filters. */
+	readonly previousKpis: ICostKpis;
+	readonly total: { readonly current: ICostAggregate; readonly previous: ICostAggregate };
+	readonly byKey: readonly ICostComparisonRow[];
+	readonly byModel: readonly ICostComparisonRow[];
+}
+
+/** The change from a previous to a current value; `percent` is undefined when the previous value is 0. */
+export interface ICostChange {
+	readonly absolute: number;
+	readonly percent?: number;
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -304,8 +332,7 @@ function matches(prepared: IPreparedRow, filters: ICostFilters, range: { from?: 
 	return selections.every(([dimension, values]) => values.has(getDimensionKey(row, dimension).value));
 }
 
-function filterPrepared(dataset: ICostDataset, filters: ICostFilters, now: number): IPreparedRow[] {
-	const range = resolveCostRange(filters, now);
+function filterPrepared(dataset: ICostDataset, filters: ICostFilters, range: { from?: number; to?: number }): IPreparedRow[] {
 	const selections: [CostFilterDimension, ReadonlySet<string>][] = [];
 	for (const dimension of COST_FILTER_DIMENSIONS) {
 		const values = filters.values?.[dimension];
@@ -319,7 +346,7 @@ function filterPrepared(dataset: ICostDataset, filters: ICostFilters, now: numbe
 
 /** Returns the requests matching the filters, oldest first. */
 export function filterCostRows(dataset: ICostDataset, filters: ICostFilters, now: number): ICostRow[] {
-	return filterPrepared(dataset, filters, now).map(prepared => prepared.row);
+	return filterPrepared(dataset, filters, resolveCostRange(filters, now)).map(prepared => prepared.row);
 }
 
 /** Nearest-rank percentile of sorted values; `undefined` for no values. */
@@ -357,6 +384,15 @@ class Aggregate implements ICostAggregate {
 		this.promptTokens += row.promptTokens ?? 0;
 		this.completionTokens += row.completionTokens ?? 0;
 		this.cachedTokens += row.cachedTokens ?? 0;
+	}
+
+	merge(other: ICostAggregate): void {
+		this.cost += other.cost;
+		this.requests += other.requests;
+		this.costed += other.costed;
+		this.promptTokens += other.promptTokens;
+		this.completionTokens += other.completionTokens;
+		this.cachedTokens += other.cachedTokens;
 	}
 
 	toJSON(): ICostAggregate {
@@ -524,12 +560,7 @@ export function computeCostBreakdown(rows: readonly ICostRow[], dimension: CostD
 	if (groups.length > BREAKDOWN_LIMIT) {
 		const other = new Aggregate();
 		for (const group of groups.slice(BREAKDOWN_LIMIT)) {
-			other.cost += group.aggregate.cost;
-			other.requests += group.aggregate.requests;
-			other.costed += group.aggregate.costed;
-			other.promptTokens += group.aggregate.promptTokens;
-			other.completionTokens += group.aggregate.completionTokens;
-			other.cachedTokens += group.aggregate.cachedTokens;
+			other.merge(group.aggregate);
 		}
 		result.push({ value: OTHER_VALUE, ...other.toJSON(), share: totalCost ? other.cost / totalCost : 0 });
 	}
@@ -637,6 +668,88 @@ export function runCostQuery(dataset: ICostDataset, filters: ICostFilters, optio
 		pivot: computeCostPivot(rows, options.pivotRows, options.pivotColumns),
 		requests: { rows: sorted.slice(page * pageSize, (page + 1) * pageSize), page, pageCount },
 		options: dataset.options,
+		comparison: options.compare ? computeCostComparison(dataset, filters, now) : undefined,
+	};
+}
 
+/**
+ * Returns the period just before the range of the filters, of the same length: the previous month
+ * for "this month" and "last month", otherwise as many whole days before. `undefined` without a start.
+ */
+export function resolvePreviousCostRange(filters: Pick<ICostFilters, 'range' | 'from' | 'to'>, now: number): { readonly current: { readonly from: number; readonly to: number }; readonly previous: { readonly from: number; readonly to: number } } | undefined {
+	const range = resolveCostRange(filters, now);
+	if (range.from === undefined) {
+		return undefined;
+	}
+	const current = { from: range.from, to: range.to ?? addDays(startOfDay(now), 1).getTime() };
+	if (filters.range === 'thisMonth' || filters.range === 'lastMonth') {
+		const monthStart = new Date(current.from);
+		return { current, previous: { from: new Date(monthStart.getFullYear(), monthStart.getMonth() - 1, 1).getTime(), to: current.from } };
+	}
+	// Whole local days, so a change to or from daylight saving time keeps the days aligned.
+	const days = Math.max(1, Math.round((current.to - current.from) / DAY));
+	return { current, previous: { from: addDays(new Date(current.from), -days).getTime(), to: current.from } };
+}
+
+/** The change from `previous` to `current`. */
+export function computeCostChange(current: number, previous: number): ICostChange {
+	return { absolute: current - previous, percent: previous ? (current - previous) / Math.abs(previous) : undefined };
+}
+
+function compareBy(current: readonly ICostRow[], previous: readonly ICostRow[], dimension: CostDimension): ICostComparisonRow[] {
+	const groups = new Map<string, { key: ICostGroupKey; current: Aggregate; previous: Aggregate }>();
+	const add = (rows: readonly ICostRow[], period: 'current' | 'previous') => {
+		for (const row of rows) {
+			const key = getDimensionKey(row, dimension);
+			let group = groups.get(key.value);
+			if (!group) {
+				group = { key, current: new Aggregate(), previous: new Aggregate() };
+				groups.set(key.value, group);
+			} else if (!group.key.label && key.label) {
+				group.key = key;
+			}
+			group[period].add(row);
+		}
+	};
+	add(current, 'current');
+	add(previous, 'previous');
+	const sorted = [...groups.values()].sort((a, b) => b.current.cost - a.current.cost || b.previous.cost - a.previous.cost || b.current.requests - a.current.requests || a.key.value.localeCompare(b.key.value));
+	const result: ICostComparisonRow[] = sorted.slice(0, BREAKDOWN_LIMIT).map(group => ({ ...group.key, current: group.current.toJSON(), previous: group.previous.toJSON() }));
+	if (sorted.length > BREAKDOWN_LIMIT) {
+		const other = { current: new Aggregate(), previous: new Aggregate() };
+		for (const group of sorted.slice(BREAKDOWN_LIMIT)) {
+			other.current.merge(group.current);
+			other.previous.merge(group.previous);
+		}
+		result.push({ value: OTHER_VALUE, current: other.current.toJSON(), previous: other.previous.toJSON() });
+	}
+	return result;
+}
+
+/**
+ * Compares the range of the filters with the period before it (see {@link resolvePreviousCostRange}),
+ * with all other filters the same: totals, KPI cards, and cost, requests and tokens per key and per model.
+ */
+export function computeCostComparison(dataset: ICostDataset, filters: ICostFilters, now: number): ICostComparison | undefined {
+	const periods = resolvePreviousCostRange(filters, now);
+	if (!periods) {
+		return undefined;
+	}
+	const current = filterPrepared(dataset, filters, periods.current).map(prepared => prepared.row);
+	const previous = filterPrepared(dataset, filters, periods.previous).map(prepared => prepared.row);
+	const total = (rows: readonly ICostRow[]) => {
+		const aggregate = new Aggregate();
+		for (const row of rows) {
+			aggregate.add(row);
+		}
+		return aggregate.toJSON();
+	};
+	return {
+		current: periods.current,
+		previous: periods.previous,
+		previousKpis: computeCostKpis(previous, periods.previous, now),
+		total: { current: total(current), previous: total(previous) },
+		byKey: compareBy(current, previous, 'key'),
+		byModel: compareBy(current, previous, 'model'),
 	};
 }
