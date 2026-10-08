@@ -31,6 +31,7 @@ import { localize } from '../../../../../nls.js';
 import { SessionsList, SessionsGrouping, SessionsSorting } from './sessionsList.js';
 import { SessionStatus } from '../../../../services/sessions/common/session.js';
 import { AICustomizationShortcutsWidget } from '../aiCustomizationShortcutsWidget.js';
+import { SessionsAgentsTreeSection } from '../agentsTree/sessionsAgentsTreeSection.js';
 import { AgentHostShortcutsWidget } from '../agentHostShortcutsWidget.js';
 import { Action2, MenuId, registerAction2, SubmenuItemAction } from '../../../../../platform/actions/common/actions.js';
 import { SubmenuEntryActionViewItem } from '../../../../../platform/actions/browser/menuEntryActionViewItem.js';
@@ -155,6 +156,8 @@ export class SessionsView extends ViewPane {
 	private isFindWidgetOpen = false;
 	sessionsControl: SessionsList | undefined;
 	private _customizationsWidget: AICustomizationShortcutsWidget | undefined;
+	/** CreaEditor: the Agents section below the Sessions list. */
+	private agentsTreeSection: SessionsAgentsTreeSection | undefined;
 	private readonly sessionsListRearrangeExperimentState: SessionsListRearrangeExperimentState;
 	private readonly customizationsNavigationVisible = observableValue(this, false);
 	private readonly customizationsNavigationState: CustomizationsNavigationState;
@@ -359,6 +362,14 @@ export class SessionsView extends ViewPane {
 			}
 		}));
 
+		// CreaEditor: the Agents section folds open below the Sessions list to show the Agents tree.
+		if (!phoneLayout) {
+			const agentsTreeSection = this.agentsTreeSection = this._register(this.instantiationService.createInstance(SessionsAgentsTreeSection, sessionsContent));
+			agentsTreeSection.setHostVisible(this.isBodyVisible());
+			this._register(this.onDidChangeBodyVisibility(visible => agentsTreeSection.setHostVisible(visible)));
+			this._register(agentsTreeSection.onDidChangeHeight(() => this.layoutSidebarSplitView()));
+		}
+
 		// Mobile filter chips (phone layout only) — created after sessionsControl
 		// so we can wire it as the filter host.
 		if (filterChipsContainer) {
@@ -395,6 +406,7 @@ export class SessionsView extends ViewPane {
 			onDidChange: Event.None,
 			layout: height => {
 				sessionsSection.style.height = `${height}px`;
+				this.agentsTreeSection?.layout(height);
 				this.sessionsControl?.layout(this.sessionsControlContainer?.offsetHeight ?? 0, this.currentBodyWidth);
 			},
 		};
@@ -816,6 +828,15 @@ export class SessionsView extends ViewPane {
 
 	refresh(): void {
 		this.sessionsControl?.refresh();
+	}
+
+	/** CreaEditor: folds the Agents section below the Sessions list open (and focuses it) or closed. */
+	toggleAgentsTree(): void {
+		if (this.agentsTreeSection?.collapsed) {
+			this.agentsTreeSection.reveal();
+		} else {
+			this.agentsTreeSection?.setCollapsed(true);
+		}
 	}
 
 	openFind(): void {

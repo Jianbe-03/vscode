@@ -25,7 +25,6 @@ import { SessionsMouseNavigationContribution } from './sessionsMouseNavigation.j
 import './sessionDetailsAction.js';
 import { SESSIONS_MARK_AS_DONE_CONFETTI_SETTING } from '../../../../platform/chat/common/sessionArchiveActions.js';
 import { SessionsWindowNotifier } from './sessionsWindowNotifier.js';
-import { SessionsAgentsTreeShownContext } from '../../../common/contextkeys.js';
 import { SESSIONS_CHAT_TABS_DEFAULT, SESSIONS_CHAT_TABS_SETTING, SESSIONS_LIST_GROUP_EXTERNAL_SESSIONS_SETTING, SessionsChatTabsMode, USE_WORKTREE_SETTING, USE_WORKTREE_SETTING_TREATMENT } from '../../../common/sessionConfig.js';
 
 const agentSessionsViewIcon = registerIcon('chat-sessions-icon', Codicon.commentDiscussionSparkle, localize('agentSessionsViewIcon', 'Icon for Agent Sessions View'));
@@ -59,8 +58,6 @@ const sessionsViewPaneDescriptor: IViewDescriptor = {
 	canToggleVisibility: true,
 	canMoveView: false,
 	ctorDescriptor: new SyncDescriptor(SessionsView),
-	// CreaEditor: the Agents tree takes the place of the Sessions list while it is shown.
-	when: SessionsAgentsTreeShownContext.negate(),
 	windowEnablement: WindowEnablement.Sessions
 };
 

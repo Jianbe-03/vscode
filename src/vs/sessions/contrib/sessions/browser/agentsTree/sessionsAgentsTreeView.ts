@@ -3,35 +3,23 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: the Agents view of the Agents window: sessions, their subagents and the sessions they created,
+// CreaEditor: the Agents tree of the Agents window: sessions, their subagents and the sessions they created,
 // including the most recently archived sessions, shown as turned off.
 
-import { $, append } from '../../../../../base/browser/dom.js';
-import { autorun, observableFromEvent } from '../../../../../base/common/observable.js';
+import { DisposableMap, IDisposable } from '../../../../../base/common/lifecycle.js';
+import { autorun, IReader, observableFromEvent, observableValue } from '../../../../../base/common/observable.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
-import { HiddenItemStrategy, MenuWorkbenchToolBar } from '../../../../../platform/actions/browser/toolbar.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
-import { IContextMenuService } from '../../../../../platform/contextview/browser/contextView.js';
-import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
-import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
-import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
-import { IThemeService } from '../../../../../platform/theme/common/themeService.js';
-import { IViewPaneOptions } from '../../../../../workbench/browser/parts/views/viewPane.js';
-import { IViewDescriptorService } from '../../../../../workbench/common/views.js';
-import { AgentsTreeElement, AgentsTreeViewPane, buildChatModelSubagentElements, IAgentsTreeChatElement, IAgentsTreeGroupElement, IAgentsTreeSubagentElement } from '../../../../../workbench/contrib/chat/browser/agentsTree/agentsTreeView.js';
+import { AgentsTreeControl, AgentsTreeElement, buildChatModelSubagentElements, collectChatModelSubagentNodes, IAgentsTreeChatElement, IAgentsTreeGroupElement, IAgentsTreeSubagentElement } from '../../../../../workbench/contrib/chat/browser/agentsTree/agentsTreeView.js';
 import { IChatWidget, IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
-import { AgentsTreeStatus, orderAgentsTreeRoots } from '../../../../../workbench/contrib/chat/common/agentsTree/agentsTreeModel.js';
+import { AgentsTreeStatus, IAgentsTreeSubagentNode, orderAgentsTreeRoots } from '../../../../../workbench/contrib/chat/common/agentsTree/agentsTreeModel.js';
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
-import { Menus } from '../../../../browser/menus.js';
 import { ISessionGroupsService } from '../../../../services/sessions/browser/sessionGroupsService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { ChatOriginKind, IChat, ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
-
-export const SESSIONS_AGENTS_TREE_VIEW_ID = 'workbench.sessions.auxiliaryBar.agentsTree';
 
 function getSessionStatus(status: SessionStatus): AgentsTreeStatus | undefined {
 	switch (status) {
@@ -43,26 +31,31 @@ function getSessionStatus(status: SessionStatus): AgentsTreeStatus | undefined {
 	}
 }
 
-/**
- * Shows the sessions of the Agents window with the subagents of their loaded chats, and the
- * sessions they created (`create_session`), grouped by their agent-created session group.
- * Archived sessions stay visible as turned off; at the top level only the most recent ones are kept.
- */
-export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
+/** How many of the most recent sessions keep their subagent chats listed, on top of the running ones. */
+const RECENT_SESSIONS_TO_RETAIN = 20;
 
-	private _header: HTMLElement | undefined;
+/**
+ * Returns the sessions whose subagents the tree shows: the running ones and the most recent ones that are not archived.
+ */
+function getSessionsToRetain(sessions: readonly ISession[], reader: IReader): ISession[] {
+	const active = sessions
+		.filter(session => !session.isArchived.read(reader))
+		.sort((a, b) => b.updatedAt.read(reader).getTime() - a.updatedAt.read(reader).getTime());
+	return active.filter((session, index) => index < RECENT_SESSIONS_TO_RETAIN || session.status.read(reader) === SessionStatus.InProgress || session.status.read(reader) === SessionStatus.NeedsInput);
+}
+
+/**
+ * Shows the sessions of the Agents window with their subagents, nested under the subagent that
+ * started them, and the sessions they created (`create_session`), grouped by their agent-created
+ * session group. Archived sessions stay visible as turned off; at the top level only the most recent ones are kept.
+ */
+export class SessionsAgentsTreeControl extends AgentsTreeControl {
+
+	private readonly _retainedSessions = this._register(new DisposableMap<string, IDisposable>());
+	private readonly _visibleObs = observableValue(this, false);
 
 	constructor(
-		options: IViewPaneOptions,
-		@IKeybindingService keybindingService: IKeybindingService,
-		@IContextMenuService contextMenuService: IContextMenuService,
-		@IConfigurationService configurationService: IConfigurationService,
-		@IContextKeyService contextKeyService: IContextKeyService,
-		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@IOpenerService openerService: IOpenerService,
-		@IThemeService themeService: IThemeService,
-		@IHoverService hoverService: IHoverService,
 		@IChatService chatService: IChatService,
 		@IChatWidgetService chatWidgetService: IChatWidgetService,
 		@ICommandService commandService: ICommandService,
@@ -70,7 +63,7 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 		@ISessionsService private readonly _sessionsService: ISessionsService,
 		@ISessionGroupsService private readonly _sessionGroupsService: ISessionGroupsService,
 	) {
-		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService, chatService, chatWidgetService, commandService);
+		super(instantiationService, chatService, chatWidgetService, commandService);
 
 		const sessions = observableFromEvent(this, this._sessionsManagementService.onDidChangeSessions, () => this._sessionsManagementService.getSessions());
 		this._register(autorun(reader => {
@@ -78,30 +71,37 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 				session.title.read(reader);
 				session.status.read(reader);
 				session.isArchived.read(reader);
-				session.chats.read(reader);
 				session.createdBySession?.read(reader);
+				for (const chat of session.chats.read(reader)) {
+					if (chat.origin?.kind === ChatOriginKind.Tool) {
+						chat.title.read(reader);
+						chat.status.read(reader);
+					}
+				}
 			}
 			this.scheduleRefresh();
+		}));
+		// Sessions only list the subagent chats their agent starts while someone holds on to their chats.
+		this._register(autorun(reader => {
+			const retain = this._visibleObs.read(reader) ? getSessionsToRetain(sessions.read(reader), reader) : [];
+			const keys = new Set(retain.map(session => session.sessionId));
+			for (const key of [...this._retainedSessions.keys()]) {
+				if (!keys.has(key)) {
+					this._retainedSessions.deleteAndDispose(key);
+				}
+			}
+			for (const session of retain) {
+				if (!this._retainedSessions.has(session.sessionId) && session.retainChats) {
+					this._retainedSessions.set(session.sessionId, session.retainChats());
+				}
+			}
 		}));
 		this._register(this._sessionGroupsService.onDidChange(() => this.scheduleRefresh()));
 	}
 
-	protected override renderBody(container: HTMLElement): void {
-		super.renderBody(container);
-
-		// The Agents window shows no view titles, so the tree gets a header like the Sessions list it replaces.
-		container.classList.add('agent-sessions-viewpane');
-		const header = this._header = $('.agent-sessions-header-row');
-		container.prepend(header);
-		append(header, $('.agent-sessions-header-label')).textContent = localize('sessionsAgentsTree.header', "Agents");
-		this._register(this.instantiationService.createInstance(MenuWorkbenchToolBar, append(header, $('.agent-sessions-header-actions')), Menus.SidebarAgentsTreeHeader, {
-			hiddenItemStrategy: HiddenItemStrategy.NoHide,
-			toolbarOptions: { primaryGroup: () => true },
-		}));
-	}
-
-	protected override layoutBody(height: number, width: number): void {
-		super.layoutBody(height - (this._header?.offsetHeight ?? 0), width);
+	override setVisible(visible: boolean): void {
+		super.setVisible(visible);
+		this._visibleObs.set(visible, undefined);
 	}
 
 	protected computeRoots(now: number): AgentsTreeElement[] {
@@ -131,45 +131,17 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 			visitedSessions.add(key);
 			const children: AgentsTreeElement[] = [];
 			const allChats = session.chats.get();
-
-			// Subagent chats know the chat that started them, so they nest under it even when no chat
-			// model is loaded. A loaded chat model adds the subagents that do not run as their own chat.
-			const getChatChildren = (chatResource: string): AgentsTreeElement[] => {
-				const result: AgentsTreeElement[] = [];
-				for (const chat of allChats) {
-					const chatKey = chat.resource.toString();
-					if (chat.origin?.kind !== ChatOriginKind.Tool || chat.origin.parentChat?.toString() !== chatResource || referencedChats.has(chatKey)) {
-						continue;
-					}
-					referencedChats.add(chatKey);
-					result.push({
-						kind: 'chat',
-						id: chatKey,
-						label: chat.title.get() || localize('sessionsAgentsTree.subagent', "Subagent"),
-						status: getSessionStatus(chat.status.get()),
-						resource: chat.resource,
-						children: getModelChildren(chat),
-					});
-				}
-				return result;
-			};
-			const getModelChildren = (chat: IChat): AgentsTreeElement[] => {
-				const chatKey = chat.resource.toString();
-				const model = this.chatService.getSession(chat.resource);
-				const modelChildren = model ? buildChatModelSubagentElements(this.chatService, model, now, referencedChats, visitedChats, getChatChildren) : [];
-				// Subagent chats that the loaded model does not mention (or all of them without a model).
-				return [...modelChildren, ...getChatChildren(chatKey)];
-			};
-
-			// The main chat goes first so that subagent chats nest under the subagent that started them.
 			const mainChat = session.mainChat.get();
-			for (const chat of [mainChat, ...allChats.filter(chat => chat !== mainChat && chat.origin?.kind !== ChatOriginKind.Tool)]) {
-				children.push(...getModelChildren(chat));
-			}
-			// Subagent chats whose parent chat is not part of the session.
-			for (const chat of allChats) {
-				if (chat.origin?.kind === ChatOriginKind.Tool && !referencedChats.has(chat.resource.toString())) {
-					children.push(...getChatChildren(chat.origin.parentChat?.toString() ?? ''));
+			const subagentChats = allChats.filter(chat => chat.origin?.kind === ChatOriginKind.Tool);
+			if (subagentChats.length > 0) {
+				children.push(...this._getSubagentChatElements(mainChat, allChats, subagentChats, now));
+			} else {
+				// Sessions whose subagents do not run as their own chats: read them from the loaded chat models.
+				for (const chat of allChats) {
+					const model = this.chatService.getSession(chat.resource);
+					if (model) {
+						children.push(...buildChatModelSubagentElements(this.chatService, model, now, referencedChats, visitedChats));
+					}
 				}
 			}
 
@@ -213,6 +185,76 @@ export class SessionsAgentsTreeViewPane extends AgentsTreeViewPane {
 			lastActivity: session.updatedAt.get().getTime(),
 		}));
 		return ordered.map(toElement);
+	}
+
+	/**
+	 * Builds the subagents of a session from its subagent chats, which the session lists whether or not
+	 * a chat is open. Each subagent nests under the subagent that started it; a loaded chat model adds
+	 * the agent name, model and duration of the subagents it started.
+	 */
+	private _getSubagentChatElements(mainChat: IChat, allChats: readonly IChat[], subagentChats: readonly IChat[], now: number): IAgentsTreeSubagentElement[] {
+		const nodes = new Map<string, IAgentsTreeSubagentNode>();
+		for (const chat of allChats) {
+			const model = this.chatService.getSession(chat.resource);
+			if (model) {
+				collectChatModelSubagentNodes(model, now, nodes);
+			}
+		}
+
+		const subagentKeys = new Set(subagentChats.map(chat => chat.resource.toString()));
+		const byParent = new Map<string, IChat[]>();
+		const mainKey = mainChat.resource.toString();
+		for (const chat of subagentChats) {
+			const parent = (chat.origin?.spawningChat ?? chat.origin?.parentChat)?.toString();
+			// Subagents started by a chat the user talks to show at the top of the session.
+			const parentKey = parent && subagentKeys.has(parent) ? parent : mainKey;
+			let siblings = byParent.get(parentKey);
+			if (!siblings) {
+				siblings = [];
+				byParent.set(parentKey, siblings);
+			}
+			siblings.push(chat);
+		}
+
+		const visited = new Set<string>();
+		const toElements = (parent: IChat): IAgentsTreeSubagentElement[] => {
+			const result: IAgentsTreeSubagentElement[] = [];
+			for (const chat of byParent.get(parent.resource.toString()) ?? []) {
+				const key = chat.resource.toString();
+				if (visited.has(key)) {
+					continue;
+				}
+				visited.add(key);
+				const toolCallId = chat.origin?.toolCallId;
+				const known = toolCallId ? nodes.get(toolCallId) : undefined;
+				const status = getSessionStatus(chat.status.get()) ?? known?.status ?? AgentsTreeStatus.Done;
+				const running = status === AgentsTreeStatus.Running || status === AgentsTreeStatus.WaitingForConfirmation;
+				const elapsed = (running ? now : chat.updatedAt.get().getTime()) - chat.createdAt.getTime();
+				const node: IAgentsTreeSubagentNode = {
+					id: toolCallId ?? key,
+					name: known?.name,
+					description: chat.title.get() || known?.description,
+					modelName: known?.modelName,
+					status,
+					duration: known?.duration ?? (elapsed > 0 ? elapsed : undefined),
+					chatResource: key,
+					children: [],
+				};
+				result.push({ kind: 'subagent', id: key, node, sessionResource: parent.resource, responseId: '', children: toElements(chat) });
+			}
+			return result;
+		};
+		return toElements(mainChat);
+	}
+
+	protected override async openSubagent(element: IAgentsTreeSubagentElement, preserveFocus: boolean): Promise<void> {
+		// A subagent chat of a session opens as a chat of that session.
+		const owner = element.node.chatResource ? this._sessionsManagementService.getSessionForChatResource(URI.parse(element.node.chatResource)) : undefined;
+		if (owner) {
+			await this._sessionsService.openChat(owner.session, owner.chat.resource, { preserveFocus, source: 'navigation' });
+			return;
+		}
+		return super.openSubagent(element, preserveFocus);
 	}
 
 	protected async openChat(element: IAgentsTreeChatElement, preserveFocus: boolean): Promise<void> {

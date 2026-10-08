@@ -189,6 +189,45 @@
 		overflow: hidden;
 		min-height: 0;
 	}
+
+	/* CreaEditor: the Agents section below the Sessions list, with a header like the Chats section. */
+	.agent-sessions-agents-tree-section {
+		display: flex;
+		flex-direction: column;
+		flex-shrink: 0;
+		overflow: hidden;
+	}
+
+	.agent-sessions-agents-tree-section .agents-tree-section-header {
+		flex-shrink: 0;
+		height: 26px;
+		margin: 0 var(--vscode-spacing-size80, 8px);
+		border-radius: var(--vscode-cornerRadius-medium, 6px);
+		cursor: pointer;
+		outline-offset: -1px;
+	}
+
+	.agent-sessions-agents-tree-section .agents-tree-section-header:is(:hover, :focus-visible) {
+		background-color: var(--vscode-list-hoverBackground);
+
+		.session-section-label {
+			color: var(--vscode-strongForeground);
+		}
+
+		.session-section-chevron {
+			display: flex;
+			align-items: center;
+		}
+
+		.session-section-chevron + .session-section-icon {
+			display: none;
+		}
+	}
+
+	.agent-sessions-agents-tree-section .agents-tree-section-tree {
+		flex: 1;
+		min-height: 0;
+	}
 }
 
 .agent-sessions-workbench:not(.phone-layout) .agent-sessions-viewpane .agent-sessions-header-row {

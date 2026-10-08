@@ -35,8 +35,6 @@ export const Menus = {
 	PanelTitle: new MenuId('SessionsPanelTitle'),
 	SidebarTitle: new MenuId('SessionsSidebarTitle'),
 	SidebarSessionsHeader: new MenuId('SessionsSidebarSessionsHeader'),
-	/** CreaEditor: header of the Agents tree when it takes the place of the Sessions list. */
-	SidebarAgentsTreeHeader: new MenuId('SessionsSidebarAgentsTreeHeader'),
 	SessionSectionNewSession: new MenuId('SessionsSessionSectionNewSession'),
 	SessionsViewExternalFilter: new MenuId('SessionsViewExternalFilter'),
 	AuxiliaryBarTitle: new MenuId('SessionsAuxiliaryBarTitle'),

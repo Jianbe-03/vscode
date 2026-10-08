@@ -84,12 +84,28 @@ export interface IAgentsTreeGroupElement {
 export type AgentsTreeElement = IAgentsTreeChatElement | IAgentsTreeSubagentElement | IAgentsTreeGroupElement;
 
 /**
+ * Collects the subagents of all requests of a chat model, nested ones included, by the tool call id that started them.
+ */
+export function collectChatModelSubagentNodes(model: IChatModel, now: number, result = new Map<string, IAgentsTreeSubagentNode>()): Map<string, IAgentsTreeSubagentNode> {
+	const visit = (node: IAgentsTreeSubagentNode): void => {
+		result.set(node.id, node);
+		node.children.forEach(visit);
+	};
+	for (const request of model.getRequests()) {
+		const invocations = request.response?.response.value.filter(part => part.kind === 'toolInvocation' || part.kind === 'toolInvocationSerialized');
+		if (invocations) {
+			buildSubagentNodes(invocations, now).forEach(visit);
+		}
+	}
+	return result;
+}
+
+/**
  * Builds the subagent elements of all requests of a chat model. A subagent that runs as its own
  * chat continues with the subagents of that chat when its model is loaded.
  * @param referencedChats collects the chat resources of subagents that run as their own chat.
- * @param getUnloadedChatChildren returns the children of a subagent chat whose model is not loaded.
  */
-export function buildChatModelSubagentElements(chatService: IChatService, model: IChatModel, now: number, referencedChats: Set<string>, visited = new Set<string>(), getUnloadedChatChildren?: (chatResource: string) => AgentsTreeElement[]): IAgentsTreeSubagentElement[] {
+export function buildChatModelSubagentElements(chatService: IChatService, model: IChatModel, now: number, referencedChats: Set<string>, visited = new Set<string>()): IAgentsTreeSubagentElement[] {
 	const modelKey = model.sessionResource.toString();
 	if (visited.has(modelKey)) {
 		return [];
@@ -102,9 +118,7 @@ export function buildChatModelSubagentElements(chatService: IChatService, model:
 			referencedChats.add(node.chatResource);
 			const childModel = children.length === 0 ? chatService.getSession(URI.parse(node.chatResource)) : undefined;
 			if (childModel) {
-				children = buildChatModelSubagentElements(chatService, childModel, now, referencedChats, visited, getUnloadedChatChildren);
-			} else if (children.length === 0 && getUnloadedChatChildren) {
-				children = getUnloadedChatChildren(node.chatResource);
+				children = buildChatModelSubagentElements(chatService, childModel, now, referencedChats, visited);
 			}
 		}
 		return { kind: 'subagent', id: `${modelKey}#${node.id}`, node, sessionResource: model.sessionResource, responseId, children };
@@ -624,9 +638,10 @@ function findRenderedSubagentPart(widget: IChatWidget, responseId: string, subAg
 }
 
 /**
- * Base view of the live Agents tree. Subclasses supply the root elements and how to open them.
+ * The live Agents tree. Subclasses supply the root elements and how to open them; hosts render it,
+ * lay it out and tell it whether it is visible.
  */
-export abstract class AgentsTreeViewPane extends ViewPane {
+export abstract class AgentsTreeControl extends Disposable {
 
 	private _tree: AgentsBlockTree | undefined;
 	private _scrollContainer: HTMLElement | undefined;
@@ -634,29 +649,16 @@ export abstract class AgentsTreeViewPane extends ViewPane {
 	private readonly _tickScheduler = this._register(new RunOnceScheduler(() => this._refresh(), 1000));
 	private readonly _pendingReveal = this._register(new MutableDisposable());
 	private _isDirty = true;
+	private _visible = false;
 
 	constructor(
-		options: IViewPaneOptions,
-		@IKeybindingService keybindingService: IKeybindingService,
-		@IContextMenuService contextMenuService: IContextMenuService,
-		@IConfigurationService configurationService: IConfigurationService,
-		@IContextKeyService contextKeyService: IContextKeyService,
-		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
-		@IInstantiationService instantiationService: IInstantiationService,
-		@IOpenerService openerService: IOpenerService,
-		@IThemeService themeService: IThemeService,
-		@IHoverService hoverService: IHoverService,
+		@IInstantiationService protected readonly instantiationService: IInstantiationService,
 		@IChatService protected readonly chatService: IChatService,
 		@IChatWidgetService protected readonly chatWidgetService: IChatWidgetService,
 		@ICommandService protected readonly commandService: ICommandService,
 	) {
-		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
+		super();
 		this._register(instantiationService.createInstance(ChatModelsActivityTracker, () => this.scheduleRefresh()));
-		this._register(this.onDidChangeBodyVisibility(visible => {
-			if (visible && this._isDirty) {
-				this._refresh();
-			}
-		}));
 	}
 
 	/**
@@ -673,32 +675,42 @@ export abstract class AgentsTreeViewPane extends ViewPane {
 		return this.chatWidgetService.openSession(element.sessionResource, undefined, { preserveFocus });
 	}
 
-	protected scheduleRefresh(): void {
-		this._isDirty = true;
-		if (this._tree && this.isBodyVisible()) {
-			this._refreshScheduler.schedule();
-		}
+	get isVisible(): boolean {
+		return this._visible;
 	}
 
-	protected override renderBody(container: HTMLElement): void {
-		super.renderBody(container);
+	/** Renders the tree into a container whose height {@link layout} sets. */
+	render(container: HTMLElement): void {
 		container.classList.add('agents-tree-view');
 		this._scrollContainer = dom.append(container, dom.$('.agents-tree-scroll'));
 		this._tree = this._register(this.instantiationService.createInstance(AgentsBlockTree, this._scrollContainer, (element: AgentsTreeElement, preserveFocus: boolean) => void this._open(element, preserveFocus)));
 		this._refresh();
 	}
 
-	protected override layoutBody(height: number, width: number): void {
-		super.layoutBody(height, width);
+	layout(height: number): void {
 		if (this._scrollContainer) {
 			this._scrollContainer.style.height = `${height}px`;
+		}
+	}
+
+	setVisible(visible: boolean): void {
+		this._visible = visible;
+		if (visible && this._isDirty) {
+			this._refresh();
+		}
+	}
+
+	scheduleRefresh(): void {
+		this._isDirty = true;
+		if (this._tree && this._visible) {
+			this._refreshScheduler.schedule();
 		}
 	}
 
 	private _refresh(): void {
 		this._refreshScheduler.cancel();
 		this._tickScheduler.cancel();
-		if (!this._tree || !this.isBodyVisible()) {
+		if (!this._tree || !this._visible) {
 			return;
 		}
 		this._isDirty = false;
@@ -726,11 +738,11 @@ export abstract class AgentsTreeViewPane extends ViewPane {
 			case 'group':
 				return;
 			case 'subagent':
-				return this._openSubagent(element, preserveFocus);
+				return this.openSubagent(element, preserveFocus);
 		}
 	}
 
-	private async _openSubagent(element: IAgentsTreeSubagentElement, preserveFocus: boolean): Promise<void> {
+	protected async openSubagent(element: IAgentsTreeSubagentElement, preserveFocus: boolean): Promise<void> {
 		const node = element.node;
 		if (node.chatResource) {
 			const context: IOpenSubagentChatContext = {
@@ -775,31 +787,22 @@ export function toClosedChatElement(detail: IChatDetail): IAgentsTreeChatElement
 }
 
 /**
- * The Agents view of the editor window: the chats of the Chat view and chat editors, with their subagents,
+ * The Agents tree of the editor window: the chats of the Chat view and chat editors, with their subagents,
  * and the most recently closed chats, shown as turned off.
  */
-export class ChatAgentsTreeViewPane extends AgentsTreeViewPane {
+class ChatAgentsTreeControl extends AgentsTreeControl {
 
 	private _closedChats: readonly IChatDetail[] = [];
 	private _isDisposed = false;
 	private readonly _closedChatsScheduler = this._register(new RunOnceScheduler(() => void this._loadClosedChats(), 250));
 
 	constructor(
-		options: IViewPaneOptions,
-		@IKeybindingService keybindingService: IKeybindingService,
-		@IContextMenuService contextMenuService: IContextMenuService,
-		@IConfigurationService configurationService: IConfigurationService,
-		@IContextKeyService contextKeyService: IContextKeyService,
-		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
 		@IInstantiationService instantiationService: IInstantiationService,
-		@IOpenerService openerService: IOpenerService,
-		@IThemeService themeService: IThemeService,
-		@IHoverService hoverService: IHoverService,
 		@IChatService chatService: IChatService,
 		@IChatWidgetService chatWidgetService: IChatWidgetService,
 		@ICommandService commandService: ICommandService,
 	) {
-		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService, chatService, chatWidgetService, commandService);
+		super(instantiationService, chatService, chatWidgetService, commandService);
 		// A chat that closes moves to the chat history; a deleted one leaves it.
 		this._register(autorun(reader => {
 			chatService.chatModels.read(reader);
@@ -863,5 +866,41 @@ export class ChatAgentsTreeViewPane extends AgentsTreeViewPane {
 
 	protected async openChat(element: IAgentsTreeChatElement, preserveFocus: boolean): Promise<void> {
 		await this.chatWidgetService.openSession(element.resource, undefined, { preserveFocus });
+	}
+}
+
+/**
+ * The Agents view of the editor window, see {@link ChatAgentsTreeControl}.
+ */
+export class ChatAgentsTreeViewPane extends ViewPane {
+
+	private readonly _control: ChatAgentsTreeControl;
+
+	constructor(
+		options: IViewPaneOptions,
+		@IKeybindingService keybindingService: IKeybindingService,
+		@IContextMenuService contextMenuService: IContextMenuService,
+		@IConfigurationService configurationService: IConfigurationService,
+		@IContextKeyService contextKeyService: IContextKeyService,
+		@IViewDescriptorService viewDescriptorService: IViewDescriptorService,
+		@IInstantiationService instantiationService: IInstantiationService,
+		@IOpenerService openerService: IOpenerService,
+		@IThemeService themeService: IThemeService,
+		@IHoverService hoverService: IHoverService,
+	) {
+		super(options, keybindingService, contextMenuService, configurationService, contextKeyService, viewDescriptorService, instantiationService, openerService, themeService, hoverService);
+		this._control = this._register(instantiationService.createInstance(ChatAgentsTreeControl));
+		this._register(this.onDidChangeBodyVisibility(visible => this._control.setVisible(visible)));
+	}
+
+	protected override renderBody(container: HTMLElement): void {
+		super.renderBody(container);
+		this._control.setVisible(this.isBodyVisible());
+		this._control.render(container);
+	}
+
+	protected override layoutBody(height: number, width: number): void {
+		super.layoutBody(height, width);
+		this._control.layout(height);
 	}
 }
