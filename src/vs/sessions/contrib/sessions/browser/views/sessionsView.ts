@@ -11,7 +11,7 @@ import { DisposableStore, IDisposable, MutableDisposable, toDisposable } from '.
 import { autorun, observableSignalFromEvent, observableValue } from '../../../../../base/common/observable.js';
 import { isWeb } from '../../../../../base/common/platform.js';
 import { Orientation } from '../../../../../base/browser/ui/sash/sash.js';
-import { IView, Sizing, SplitView } from '../../../../../base/browser/ui/splitview/splitview.js';
+import { IView, LayoutPriority, Sizing, SplitView } from '../../../../../base/browser/ui/splitview/splitview.js';
 import { Color } from '../../../../../base/common/color.js';
 import { ContextKeyExpr, IContextKey, IContextKeyService, RawContextKey } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IsAuxiliaryWindowContext, IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
@@ -506,6 +506,8 @@ export class SessionsView extends ViewPane {
 			get minimumSize() { return section.collapsed ? section.collapsedHeight : section.minimumOpenHeight; },
 			get maximumSize() { return section.collapsed ? section.collapsedHeight : Number.POSITIVE_INFINITY; },
 			onDidChange: Event.map(section.onDidChangeHeight, () => undefined),
+			// Space the sidebar gains or loses goes to the Sessions list, so the pane keeps the height the user gave it.
+			priority: LayoutPriority.Low,
 			layout: height => section.layout(height),
 		};
 		splitView.addView(pane, section.collapsed ? section.collapsedHeight : section.openHeight, AGENTS_TREE_PANE_INDEX, true);
