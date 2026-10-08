@@ -3,18 +3,19 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: the Toggle Agents Tree, Open AI Costs and Subscription Usage buttons in the Sessions header of the Agents window.
+// CreaEditor: the Toggle Agents Tree, Open AI Costs, Subscription Usage and Stop All Chats buttons in the Sessions header of the Agents window.
 // The Agents tree itself is a section of the Sessions view, see `SessionsAgentsTreeSection`.
 
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { localize, localize2 } from '../../../../../nls.js';
-import { Action2, MenuId, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { Action2, MenuId, MenuRegistry, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
 import { ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
 import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.js';
 import { IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
 import { CHAT_CATEGORY } from '../../../../../workbench/contrib/chat/browser/actions/chatActions.js';
+import { ChatHasRunningChatsContext, STOP_ALL_CHATS_COMMAND_ID, stopAllChatsIcon } from '../../../../../workbench/contrib/chat/browser/actions/chatStopAllActions.js';
 import { SHOW_SUBSCRIPTION_USAGE_COMMAND_ID } from '../../../../../workbench/contrib/chat/browser/subscriptionAccounts/subscriptionAccountsLimit.js';
 import { ChatContextKeys } from '../../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { IViewsService } from '../../../../../workbench/services/views/common/viewsService.js';
@@ -102,3 +103,16 @@ class OpenSubscriptionUsageAction extends Action2 {
 	}
 }
 registerAction2(OpenSubscriptionUsageAction);
+
+// Stop All Chats (registered by the chat contribution, also in the command palette), last in the Sessions header.
+MenuRegistry.appendMenuItem(Menus.SidebarSessionsHeader, {
+	command: {
+		id: STOP_ALL_CHATS_COMMAND_ID,
+		title: localize2('sessions.stopAllChats', "Stop All Chats"),
+		icon: stopAllChatsIcon,
+		precondition: ChatHasRunningChatsContext,
+	},
+	group: 'navigation',
+	order: 60,
+	when: ChatContextKeys.enabled,
+});
