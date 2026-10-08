@@ -135,6 +135,7 @@ import { ChatTransferContribution } from './actions/chatTransfer.js';
 import { CONFIGURE_DICTATION_INSTRUCTIONS_ACTION_ID, registerConfigureSpeechInstructionsActions } from './actions/configureVoiceInstructionsAction.js';
 import './agentSessions/agentSessions.contribution.js';
 import './subscriptionAccounts/subscriptionAccounts.contribution.js'; // CreaEditor: pooled Claude and Codex subscription accounts.
+import './gatewayCost/chatGatewayCost.js'; // CreaEditor: the gateway cost counter in the chat header.
 import { AgentHostChatDebugContribution } from './chatDebug/agentHostChatDebugProvider.js';
 import { ChatDebugEditor } from './chatDebug/chatDebugEditor.js';
 import { ChatDebugEditorInput, ChatDebugEditorInputSerializer } from './chatDebug/chatDebugEditorInput.js';

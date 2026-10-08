@@ -1,0 +1,18 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* CreaEditor: the gateway cost counter in the chat header. */
+.monaco-action-bar .action-item.chat-gateway-cost-item .action-label.chat-gateway-cost-label {
+	width: auto;
+	padding: 0 6px;
+	font-size: var(--vscode-fontSize-label1, 12px);
+	font-variant-numeric: tabular-nums;
+	color: var(--vscode-descriptionForeground);
+	white-space: nowrap;
+}
+
+.monaco-action-bar .action-item.chat-gateway-cost-item .action-label.chat-gateway-cost-label:hover {
+	color: var(--vscode-foreground);
+}

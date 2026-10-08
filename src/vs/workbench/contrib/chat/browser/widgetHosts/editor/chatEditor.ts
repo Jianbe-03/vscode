@@ -4,10 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as dom from '../../../../../../base/browser/dom.js';
+import { IActionViewItem } from '../../../../../../base/browser/ui/actionbar/actionbar.js'; // CreaEditor
+import { IBaseActionViewItemOptions } from '../../../../../../base/browser/ui/actionbar/actionViewItems.js'; // CreaEditor
 import { renderIcon } from '../../../../../../base/browser/ui/iconLabel/iconLabels.js';
 import { raceCancellationError } from '../../../../../../base/common/async.js';
+import { IAction } from '../../../../../../base/common/actions.js'; // CreaEditor
 import { CancellationToken } from '../../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
+import { observableFromEvent } from '../../../../../../base/common/observable.js'; // CreaEditor
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
 import { URI } from '../../../../../../base/common/uri.js';
 import { isEqual } from '../../../../../../base/common/resources.js';
@@ -37,6 +41,7 @@ import { AgentHostSessionInputPills } from '../../agentSessions/agentHost/agentH
 import { ChatEditorInput } from './chatEditorInput.js';
 import { ChatWidget } from '../../widget/chatWidget.js';
 import { IChatWidgetViewState, setModelPreservingInputTypedWhileLoading } from '../../chat.js';
+import { ChatGatewayCostActionViewItem, SHOW_CHAT_GATEWAY_COST_ACTION_ID } from '../../gatewayCost/chatGatewayCost.js'; // CreaEditor: the gateway cost counter.
 
 export interface IChatEditorOptions extends IEditorOptions {
 	/**
@@ -154,6 +159,15 @@ export class ChatEditor extends AbstractEditorWithViewState<IChatEditorViewState
 		this.widget.render(parent);
 		this._register(scopedInstantiationService.createInstance(AgentHostSessionInputPills, this.widget, 'auto'));
 		this.widget.setVisible(true);
+	}
+
+	// CreaEditor: the gateway cost counter of this chat in the editor title.
+	override getActionViewItem(action: IAction, options: IBaseActionViewItemOptions): IActionViewItem | undefined {
+		if (action.id === SHOW_CHAT_GATEWAY_COST_ACTION_ID && this._widget) {
+			const sessionResource = observableFromEvent(this, this._widget.onDidChangeViewModel, () => this._widget.viewModel?.sessionResource);
+			return this.instantiationService.createInstance(ChatGatewayCostActionViewItem, action, options, sessionResource);
+		}
+		return super.getActionViewItem(action, options);
 	}
 
 	protected override setEditorVisible(visible: boolean): void {
