@@ -11,6 +11,12 @@ import { GitHubOutageStatus } from '../../github/common/githubService';
 import { APIErrorResponse, APIUsage, FilterReason } from '../../networking/common/openai';
 
 /**
+ * CreaEditor: the name of an error whose message is a complete message for the user (see `userFacing` on a failed
+ * {@link ChatResponse}), so it keeps that meaning when it crosses the language model API.
+ */
+export const USER_FACING_ERROR_NAME = 'CreaEditorUserFacingError';
+
+/**
  * The location of a chat request.
  */
 export enum ChatLocation {
@@ -186,7 +192,8 @@ export type ChatFetchError = WithCopilotServiceRequestId & (
 	 * We requested conversation, but didn't come up with any results because something
 	 * unexpected went wrong.
 	 */
-	| { type: ChatFetchResponseType.Failed; reason: string; reasonDetail?: string; requestId: string; serverRequestId: string | undefined; streamError?: APIErrorResponse }
+	// CreaEditor: `userFacing` means `reason` is a complete message for the user, such as a used-up budget, shown without the generic failure text.
+	| { type: ChatFetchResponseType.Failed; reason: string; reasonDetail?: string; requestId: string; serverRequestId: string | undefined; streamError?: APIErrorResponse; userFacing?: boolean }
 	/**
 	 * We requested conversation, but didn't come up with any results because of a network error
 	 */
@@ -458,7 +465,9 @@ function getErrorDetailsFromChatFetchErrorInner(fetchResult: ChatFetchError, cop
 		case ChatFetchResponseType.BadRequest:
 		case ChatFetchResponseType.Failed: {
 			const isVisionExpired = isVisionAttachmentInaccessibleError(fetchResult);
-			if (isVisionExpired) {
+			if (fetchResult.type === ChatFetchResponseType.Failed && fetchResult.userFacing) {
+				details = { message: fetchResult.reason };
+			} else if (isVisionExpired) {
 				details = fetchResult.serverRequestId
 					? { message: l10n.t(`An image attached earlier in this conversation is no longer accessible, so the request failed. Remove the image attachment or start a new conversation.\n\nClient Request Id: {0}\n\nGH Request Id: {1}\n\nReason: {2}`, fetchResult.requestId, fetchResult.serverRequestId, fetchResult.reason) }
 					: { message: l10n.t(`An image attached earlier in this conversation is no longer accessible, so the request failed. Remove the image attachment or start a new conversation.\n\nClient Request Id: {0}\n\nReason: {1}`, fetchResult.requestId, fetchResult.reason) };

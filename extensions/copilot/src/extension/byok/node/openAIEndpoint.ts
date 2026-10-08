@@ -629,7 +629,7 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		// CreaEditor: a used up budget with a hard stop refuses the request before it is sent (main chats and subagents).
 		const refusal = this._checkBudgetHardStop(options);
 		if (refusal) {
-			return { type: ChatFetchResponseType.Failed, reason: refusal, requestId: options.telemetryProperties?.requestId ?? '', serverRequestId: undefined };
+			return { type: ChatFetchResponseType.Failed, reason: refusal, requestId: options.telemetryProperties?.requestId ?? '', serverRequestId: undefined, userFacing: true };
 		}
 		// Use ignoreStatefulMarker: false as the initial request default; the parent retry flow can override it on InvalidStatefulMarker retries.
 		const modifiedOptions: IMakeChatRequestOptions = { ...options, ignoreStatefulMarker: options.ignoreStatefulMarker ?? false };

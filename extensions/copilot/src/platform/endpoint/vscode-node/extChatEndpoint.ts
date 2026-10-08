@@ -12,7 +12,7 @@ import { ITokenizer, TokenizerType } from '../../../util/common/tokenizer';
 import { AsyncIterableObject } from '../../../util/vs/base/common/async';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
-import { ChatFetchResponseType, ChatLocation, ChatResponse } from '../../chat/common/commonTypes';
+import { ChatFetchResponseType, ChatLocation, ChatResponse, USER_FACING_ERROR_NAME } from '../../chat/common/commonTypes';
 import { ILogService } from '../../log/common/logService';
 import { ContextManagementResponse } from '../../networking/common/anthropic';
 import { FinishedCallback, OpenAiFunctionTool, OptionalChatRequestParams } from '../../networking/common/fetch';
@@ -306,6 +306,10 @@ export class ExtensionContributedChatEndpoint implements IChatEndpoint {
 				};
 			}
 		} catch (e) {
+			// CreaEditor: a message meant for the user, such as a used-up budget, is shown as it is.
+			if (e instanceof Error && e.name === USER_FACING_ERROR_NAME) {
+				return { type: ChatFetchResponseType.Failed, reason: e.message, requestId: generateUuid(), serverRequestId: undefined, userFacing: true };
+			}
 			return {
 				type: ChatFetchResponseType.Failed,
 				reason: toErrorMessage(e, true),

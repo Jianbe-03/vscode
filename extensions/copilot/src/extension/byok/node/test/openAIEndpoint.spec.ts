@@ -820,10 +820,11 @@ describe('OpenAIEndpoint - Reasoning Properties', () => {
 	});
 });
 
-/** A ledger in which the Personal key spent $50 this month. */
+/** A ledger in which the keys Personal and Personal key each spent $50 this month. */
 class LedgerWithSpend extends NullGatewayTrackingService {
 	override readonly entries: readonly IGatewayCostEntry[] = [
 		{ id: 'e1', time: Date.now(), chatId: 'chat', rootChatId: 'chat', gateway: 'openrouter', gatewayHost: 'openrouter.ai', providerGroup: 'Personal', model: 'm', cost: 50 },
+		{ id: 'e2', time: Date.now(), chatId: 'chat', rootChatId: 'chat', gateway: 'openrouter', gatewayHost: 'openrouter.ai', providerGroup: 'Personal key', model: 'm', cost: 50 },
 	];
 }
 
@@ -851,12 +852,15 @@ describe('OpenAIEndpoint - budget hard stop (CreaEditor)', () => {
 		const refused = await request(budgets, 'Personal');
 		const otherKey = await request(budgets, 'Work');
 		const warnOnly = await request([{ ...budgets[0], hardStop: false }], 'Personal');
+		const namedKey = await request([{ ...budgets[0], value: 'Personal key' }], 'Personal key');
 		expect({
-			refused: [refused.type, refused.type === ChatFetchResponseType.Failed ? refused.reason : undefined],
+			refused: [refused.type, refused.type === ChatFetchResponseType.Failed ? refused.reason : undefined, refused.type === ChatFetchResponseType.Failed && refused.userFacing],
+			namedKey: namedKey.type === ChatFetchResponseType.Failed ? namedKey.reason : namedKey.type,
 			otherKey: otherKey.type,
 			warnOnly: warnOnly.type,
 		}).toEqual({
-			refused: [ChatFetchResponseType.Failed, 'The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page.'],
+			refused: [ChatFetchResponseType.Failed, 'The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page.', true],
+			namedKey: 'The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page.',
 			otherKey: ChatFetchResponseType.Success,
 			warnOnly: ChatFetchResponseType.Success,
 		});

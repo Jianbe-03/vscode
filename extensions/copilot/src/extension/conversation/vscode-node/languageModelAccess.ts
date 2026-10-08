@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 import { IAuthenticationService } from '../../../platform/authentication/common/authentication';
 import { CopilotToken } from '../../../platform/authentication/common/copilotToken';
 import { IBlockedExtensionService } from '../../../platform/chat/common/blockedExtensionService';
-import { ChatFetchResponseType, ChatLocation, getErrorDetailsFromChatFetchError } from '../../../platform/chat/common/commonTypes';
+import { ChatFetchResponseType, ChatLocation, getErrorDetailsFromChatFetchError, USER_FACING_ERROR_NAME } from '../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { getTextPart } from '../../../platform/chat/common/globalStringUtils';
 import { EmbeddingType, getWellKnownEmbeddingTypeInfo, IEmbeddingsComputer } from '../../../platform/embeddings/common/embeddingsComputer';
@@ -891,6 +891,11 @@ export class CopilotLanguageModelWrapper extends Disposable {
 			} else if (result.type === ChatFetchResponseType.RateLimited) {
 				const err = new Error(result.reason);
 				err.name = 'ChatRateLimited';
+				throw err;
+			} else if (result.type === ChatFetchResponseType.Failed && result.userFacing) {
+				// CreaEditor: keep a message meant for the user, such as a used-up budget, recognizable for the chat.
+				const err = new Error(result.reason);
+				err.name = USER_FACING_ERROR_NAME;
 				throw err;
 			}
 

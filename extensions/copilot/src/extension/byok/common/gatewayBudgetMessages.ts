@@ -21,10 +21,15 @@ export function formatBudgetPeriod(period: CostBudgetPeriod): string {
 	}
 }
 
+/** Whether a key's name already says it is a key, like "Work key", so it is not called "the Work key key". */
+function hasKeyInName(name: string): boolean {
+	return /\bkey$/i.test(name.trim());
+}
+
 /** What a budget is for, e.g. "the Personal key", "issue acme/web#42" or "repository acme/web". */
 export function formatBudgetScope(budget: Pick<ICostBudget, 'scope' | 'value'>): string {
 	switch (budget.scope) {
-		case 'key': return l10n.t('the {0} key', budget.value);
+		case 'key': return hasKeyInName(budget.value) ? l10n.t('the {0}', budget.value) : l10n.t('the {0} key', budget.value);
 		case 'issue': return l10n.t('issue {0}', budget.value);
 		case 'repo': return l10n.t('repository {0}', budget.value);
 	}
@@ -33,7 +38,7 @@ export function formatBudgetScope(budget: Pick<ICostBudget, 'scope' | 'value'>):
 /** Like {@link formatBudgetScope}, at the start of a sentence. */
 function formatBudgetScopeStart(budget: Pick<ICostBudget, 'scope' | 'value'>): string {
 	switch (budget.scope) {
-		case 'key': return l10n.t('The {0} key', budget.value);
+		case 'key': return hasKeyInName(budget.value) ? l10n.t('The {0}', budget.value) : l10n.t('The {0} key', budget.value);
 		case 'issue': return l10n.t('Issue {0}', budget.value);
 		case 'repo': return l10n.t('Repository {0}', budget.value);
 	}
