@@ -8672,7 +8672,7 @@ export class AgentService extends Disposable implements IAgentService {
 		this._stateManager.addChat(e.session.toString(), e.chat.toString(), {
 			...(e.title !== undefined ? { title: e.title } : {}),
 			...(e.parent ? {
-				origin: { kind: ChatOriginKind.Tool, chat: e.parent.chat.toString(), toolCallId: e.parent.toolCallId },
+				origin: { kind: ChatOriginKind.Tool, chat: e.parent.chat.toString(), toolCallId: e.parent.toolCallId, ...(e.parent.spawningChat ? { spawningChat: e.parent.spawningChat.toString() } : {}) },
 				// Subagent worker chats are observable but not directly steerable:
 				// the user watches them and steers the lead chat. Mark read-only so
 				// the UI hides the composer and shows a lock (the agent-team pattern).

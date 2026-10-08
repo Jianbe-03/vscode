@@ -707,6 +707,12 @@ export interface IAgentSpawnedChatParent {
 	readonly chat: URI;
 	/** The id of the tool call in the parent that spawned this chat. */
 	readonly toolCallId: string;
+	/**
+	 * The subagent chat that holds the spawning tool call, when another subagent
+	 * spawned this chat. {@link chat} stays the top-level chat, which owns the
+	 * provider session.
+	 */
+	readonly spawningChat?: URI;
 }
 
 /**
@@ -773,7 +779,11 @@ export namespace SubagentChatSignal {
 		return {
 			session: URI.parse(session),
 			chat: URI.parse(buildSubagentChatUri(session, signal.toolCallId)),
-			parent: { chat: signal.chat, toolCallId: signal.toolCallId },
+			parent: {
+				chat: signal.chat,
+				toolCallId: signal.toolCallId,
+				...(signal.parentToolCallId ? { spawningChat: URI.parse(buildSubagentChatUri(session, signal.parentToolCallId)) } : {}),
+			},
 			title: subagentChatTitle(signal.taskDescription, signal.agentDisplayName),
 		};
 	}

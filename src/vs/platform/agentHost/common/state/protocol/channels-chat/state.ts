@@ -222,7 +222,9 @@ export type ChatOrigin =
 	| { kind: ChatOriginKind.User }
 	| { kind: ChatOriginKind.Fork; chat: URI; turnId: string }
 	| { kind: ChatOriginKind.SideChat; chat: URI; turnId: string; selection?: SideChatSelection }
-	| { kind: ChatOriginKind.Tool; chat: URI; toolCallId: string };
+	// CreaEditor: `spawningChat` is the subagent chat that holds the spawning tool call when a subagent
+	// started this chat; `chat` stays the top-level chat that owns the provider session. Re-add it after a protocol sync.
+	| { kind: ChatOriginKind.Tool; chat: URI; toolCallId: string; spawningChat?: URI };
 
 /**
  * How a user can interact with a chat.

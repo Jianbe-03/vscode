@@ -19608,6 +19608,25 @@ suite('AgentService (node dispatcher)', () => {
 			assert.strictEqual(getStateManager(service).getChatState(subagentUri)?.title, 'Explore');
 		});
 
+		test('a nested subagent records the subagent chat that started it', async () => {
+			registerTestAgentProvider(service, copilotAgent);
+			const session = await service.createSession({ provider: 'copilot' });
+			const parentChat = buildDefaultChatUri(session.toString());
+			startParentTurn(session, 'turn-1');
+
+			copilotAgent.fireProgress({ kind: 'subagent_started', chat: URI.parse(parentChat), toolCallId: 'tc-outer', agentName: 'explore', agentDisplayName: 'Explore' });
+			copilotAgent.fireProgress({ kind: 'subagent_started', chat: URI.parse(parentChat), toolCallId: 'tc-inner', parentToolCallId: 'tc-outer', agentName: 'explore', agentDisplayName: 'Explore' });
+
+			const stateManager = getStateManager(service);
+			assert.deepStrictEqual({
+				outer: stateManager.getChatState(buildSubagentChatUri(session.toString(), 'tc-outer'))?.origin,
+				inner: stateManager.getChatState(buildSubagentChatUri(session.toString(), 'tc-inner'))?.origin,
+			}, {
+				outer: { kind: ChatOriginKind.Tool, chat: parentChat, toolCallId: 'tc-outer' },
+				inner: { kind: ChatOriginKind.Tool, chat: parentChat, toolCallId: 'tc-inner', spawningChat: buildSubagentChatUri(session.toString(), 'tc-outer') },
+			});
+		});
+
 		test('membership stays a single entry when the agent also mirrors the subagent onto onDidSpawnChat, regardless of order', async () => {
 			// Mirror the real copilot/claude agents, which ALSO bridge their
 			// subagent signals onto onDidSpawnChat. The orchestrator's
