@@ -7608,7 +7608,7 @@ suite('AgentHostChatContribution', () => {
 				markdown: collected.flat().filter(part => part.kind === 'markdownContent'),
 			}, {
 				errorDetails: {
-					message: 'This conversation is in use by another Codex app. Let any running task finish, then quit the app holding it open, such as ChatGPT, or exit the Codex CLI session. Then send your message again in VS Code. Your message has not been sent.',
+					message: 'This conversation is in use by another Codex app. Let any running task finish, then quit the app holding it open, such as ChatGPT, or exit the Codex CLI session. Then send your message again in CreaEditor. Your message has not been sent.',
 					isExpectedError: true,
 				},
 				markdown: [],
