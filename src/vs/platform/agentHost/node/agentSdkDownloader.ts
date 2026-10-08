@@ -260,6 +260,7 @@ export class AgentSdkDownloader extends Disposable implements IAgentSdkDownloade
 	 * cacheDirs differ.
 	 */
 	private readonly _pendingDownloads = new Map<string, Promise<string>>();
+	private readonly _bundledSdkRoots = new Map<string, string | undefined>();
 	/** Refcounted user-initiated progress interest, keyed by package id. */
 	private readonly _explicitProgressInterest = new Map<string, number>();
 
@@ -290,7 +291,7 @@ export class AgentSdkDownloader extends Disposable implements IAgentSdkDownloade
 	}
 
 	isAvailable(pkg: IAgentSdkPackage): boolean {
-		if (process.env[pkg.devOverrideEnvVar]) {
+		if (process.env[pkg.devOverrideEnvVar] || this._bundledSdkRoot(pkg)) {
 			return true;
 		}
 		return !!this._productService.agentSdks?.[pkg.id] && resolveSdkTarget(pkg) !== undefined;
@@ -325,7 +326,7 @@ export class AgentSdkDownloader extends Disposable implements IAgentSdkDownloade
 	}
 
 	async isSdkResolvableWithoutDownload(pkg: IAgentSdkPackage): Promise<boolean> {
-		if (process.env[pkg.devOverrideEnvVar]) {
+		if (process.env[pkg.devOverrideEnvVar] || this._bundledSdkRoot(pkg)) {
 			return true;
 		}
 		const config = this._productService.agentSdks?.[pkg.id];
@@ -346,6 +347,12 @@ export class AgentSdkDownloader extends Disposable implements IAgentSdkDownloade
 		if (override) {
 			this._logService.info(`[AgentSdkDownloader] ${pkg.id}: using dev override at ${override}`);
 			return override;
+		}
+
+		// CreaEditor: an SDK shipped inside the app needs no download.
+		const bundled = this._bundledSdkRoot(pkg);
+		if (bundled) {
+			return bundled;
 		}
 
 		// 2. Negative cache: a recent failure short-circuits without I/O. Not for a
@@ -431,6 +438,19 @@ export class AgentSdkDownloader extends Disposable implements IAgentSdkDownloade
 			this._pendingDownloads.set(cacheDir, pending);
 		}
 		return pending;
+	}
+
+	/**
+	 * CreaEditor: the SDK root shipped inside the app at `<appRoot>/agent-sdks/<id>`, laid out like a
+	 * downloaded one (`node_modules/...`). CreaEditor has no SDK download server, so its build bundles them.
+	 */
+	private _bundledSdkRoot(pkg: IAgentSdkPackage): string | undefined {
+		if (!this._bundledSdkRoots.has(pkg.id)) {
+			const appRoot = this._environmentService.appRoot;
+			const root = appRoot ? path.join(appRoot, 'agent-sdks', pkg.id) : undefined;
+			this._bundledSdkRoots.set(pkg.id, root && fs.existsSync(path.join(root, 'node_modules')) ? root : undefined);
+		}
+		return this._bundledSdkRoots.get(pkg.id);
 	}
 
 	private _cacheDir(packageId: string, sdkVersion: string, sdkTarget: string): string {
