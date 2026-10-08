@@ -80,6 +80,23 @@ if [ ! -d "$APP" ]; then
 	exit 1
 fi
 
+# The Claude and Codex agents load their SDK from a download server CreaEditor does not have, so ship
+# them inside the app (<app>/Contents/Resources/app/agent-sdks/<id>/node_modules, see agentSdkDownloader.ts).
+step "Bundling the Claude and Codex agent SDKs"
+SDKS="$APP/Contents/Resources/app/agent-sdks"
+rm -rf "$SDKS"
+for entry in "claude:@anthropic-ai/claude-agent-sdk @anthropic-ai/claude-agent-sdk-darwin-$NODE_ARCH" "codex:@openai/codex @openai/codex-darwin-$NODE_ARCH"; do
+	id="${entry%%:*}"
+	for pkg in ${entry#*:}; do
+		if [ ! -d "$ROOT/node_modules/$pkg" ]; then
+			echo "Missing $pkg in node_modules; the $id agent will not be available." >&2
+			continue
+		fi
+		mkdir -p "$SDKS/$id/node_modules/$(dirname "$pkg")"
+		cp -R "$ROOT/node_modules/$pkg" "$SDKS/$id/node_modules/$pkg"
+	done
+done
+
 SIGN_IDENTITY="${CREAEDITOR_SIGN_IDENTITY:-CreaEditor Local Signing}"
 if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
 	step "Signing with \"$SIGN_IDENTITY\""
