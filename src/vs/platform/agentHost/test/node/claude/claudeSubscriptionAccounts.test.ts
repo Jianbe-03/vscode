@@ -3,18 +3,24 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { AccountInfo, Query, SDKControlGetUsageResponse, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import assert from 'assert';
+import { Event } from '../../../../../base/common/event.js';
+import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import type { INativeEnvironmentService } from '../../../../environment/common/environment.js';
+import { NullLogService } from '../../../../log/common/log.js';
 import type { AgentSignal } from '../../../common/agent.js';
 import { ActionType } from '../../../common/state/sessionActions.js';
 import { createErrorResponsePart } from '../../../common/state/sessionState.js';
-import { claudeAccountEnv, ClaudeSubscriptionLimitTracker, claudeUsageWindows, getClaudeLimitSignal, selectClaudeAccount, type ClaudeLimitDecision, type IClaudeAccountState } from '../../../node/claude/claudeSubscriptionAccounts.js';
+import type { IClaudeAgentSdkService } from '../../../node/claude/claudeAgentSdkService.js';
+import { claudeAccountEnv, claudeProbePatch, ClaudeSubscriptionAccounts, ClaudeSubscriptionLimitTracker, claudeUsageWindows, getClaudeLimitSignal, readClaudeProbeOutcome, selectClaudeAccount, type ClaudeLimitDecision, type IClaudeAccountState } from '../../../node/claude/claudeSubscriptionAccounts.js';
+import type { ISubscriptionAccountsService, IStoredSubscriptionAccount } from '../../../node/shared/subscriptionAccountsService.js';
 
 suite('claudeSubscriptionAccounts', () => {
 
-	ensureNoDisposablesAreLeakedInTestSuite();
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
 
 	const chat = URI.parse('ahp-chat:/session/chat');
 
@@ -119,6 +125,169 @@ suite('claudeSubscriptionAccounts', () => {
 			other: 2,
 			retry: decision,
 			retryAgain: undefined,
+		});
+	});
+
+	/** What the CLI streams for a turn with an invalid setup-token (captured from the real CLI, trimmed). */
+	function rejectedTurn(): SDKMessage[] {
+		return [
+			{ type: 'system', subtype: 'api_retry', attempt: 1, max_retries: 10, retry_delay_ms: 519, error_status: 401, error: 'authentication_failed', uuid: '00000000-0000-0000-0000-000000000010', session_id: 's' },
+			assistantError('authentication_failed'),
+			{ type: 'result', subtype: 'success', is_error: true, api_error_status: 401, result: 'Failed to authenticate. API Error: 401 OAuth access token is invalid.', duration_ms: 1, duration_api_ms: 0, num_turns: 1, stop_reason: 'stop_sequence', total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], uuid: '00000000-0000-0000-0000-000000000011', session_id: 's' },
+		];
+	}
+
+	function assistantError(error: 'authentication_failed' | 'rate_limit'): SDKMessage {
+		return { type: 'assistant', message: {} as never, parent_tool_use_id: null, error, uuid: '00000000-0000-0000-0000-000000000012', session_id: 's' };
+	}
+
+	function okResult(): SDKMessage {
+		return { type: 'result', subtype: 'success', is_error: false, result: 'OK', duration_ms: 1, duration_api_ms: 1, num_turns: 1, stop_reason: 'end_turn', total_cost_usd: 0, usage: {} as never, modelUsage: {}, permission_denials: [], uuid: '00000000-0000-0000-0000-000000000013', session_id: 's' };
+	}
+
+	test('reads the outcome of a setup-token check turn', () => {
+		const account: IClaudeAccountState = { id: 'work', label: 'Work', kind: 'token', status: 'signedOut', unverified: true };
+		const rejected = readClaudeProbeOutcome(rejectedTurn(), new Error('Claude Code returned an error result'));
+		const limited = readClaudeProbeOutcome([rateLimitEvent('rejected', 1_800_000_000), assistantError('rate_limit')]);
+		const ok = readClaudeProbeOutcome([rateLimitEvent('allowed', 1_800_000_000), okResult()]);
+		assert.deepStrictEqual({
+			rejected: { kind: rejected.kind, patch: claudeProbePatch(account, rejected, 1_000) },
+			limited: { kind: limited.kind, patch: claudeProbePatch(account, limited, 1_000) },
+			ok: { kind: ok.kind, patch: claudeProbePatch(account, ok, 1_000) },
+			failed: readClaudeProbeOutcome([], new Error('spawn ENOENT')),
+		}, {
+			rejected: {
+				kind: 'rejected',
+				patch: { status: 'error', unverified: true, error: 'Anthropic refused this setup-token. Create a new one with `claude setup-token` and add the account again.', usage: undefined, usageUpdatedAt: undefined, limitedUntil: undefined },
+			},
+			limited: {
+				kind: 'limited',
+				patch: { status: 'signedIn', unverified: false, error: undefined, usage: [{ kind: 'five_hour', label: '5-hour', usedPercent: 100, resetsAt: 1_800_000_000_000 }], usageUpdatedAt: 1_000, limitedUntil: 1_800_000_000_000 },
+			},
+			ok: {
+				kind: 'ok',
+				patch: { status: 'signedIn', unverified: false, error: undefined, usage: [{ kind: 'five_hour', label: '5-hour', usedPercent: 50, resetsAt: 1_800_000_000_000 }], usageUpdatedAt: 1_000 },
+			},
+			failed: { kind: 'failed', error: 'spawn ENOENT' },
+		});
+	});
+
+	test('an unverified token account is only a last resort', () => {
+		const accounts: IClaudeAccountState[] = [
+			{ id: 'new', label: 'New', kind: 'token', status: 'signedIn', unverified: true },
+			{ id: 'work', label: 'Work', kind: 'token', status: 'signedIn' },
+		];
+		assert.deepStrictEqual({
+			skipsUnverified: selectClaudeAccount(accounts, 0)?.id,
+			leavesUnverifiedCurrent: selectClaudeAccount(accounts, 0, 'new')?.id,
+			none: selectClaudeAccount(accounts.slice(0, 1), 0)?.id,
+		}, {
+			skipsUnverified: 'work',
+			leavesUnverifiedCurrent: 'work',
+			none: undefined,
+		});
+	});
+
+	suite('ClaudeSubscriptionAccounts', () => {
+
+		/** A query that answers the account read, or streams `probe` for the check turn. */
+		function fakeQuery(prompt: string | AsyncIterable<SDKUserMessage>, probe: readonly SDKMessage[]): Query {
+			const usage: SDKControlGetUsageResponse = { subscription_type: null, rate_limits_available: false, rate_limits: null } as SDKControlGetUsageResponse;
+			const info: AccountInfo = { tokenSource: 'CLAUDE_CODE_OAUTH_TOKEN', apiProvider: 'firstParty' };
+			const messages = typeof prompt === 'string' ? probe : [];
+			const query: Partial<Query> = {
+				accountInfo: async () => info,
+				usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET: async () => usage,
+				close: () => { },
+				[Symbol.asyncIterator]: async function* () {
+					yield* messages;
+				},
+			};
+			return query as Query;
+		}
+
+		function createAccounts(stored: readonly IStoredSubscriptionAccount[], probe: (token: string) => readonly SDKMessage[]): { accounts: ClaudeSubscriptionAccounts; probes: string[] } {
+			const probes: string[] = [];
+			const sdk: Partial<IClaudeAgentSdkService> = {
+				canLoadWithoutDownload: async () => true,
+				query: async ({ prompt, options }) => {
+					const token = options?.env?.CLAUDE_CODE_OAUTH_TOKEN ?? '';
+					if (typeof prompt === 'string') {
+						probes.push(token);
+					}
+					return fakeQuery(prompt, probe(token));
+				},
+			};
+			const accountsService: Partial<ISubscriptionAccountsService> = {
+				onDidChangeStoredAccounts: Event.None,
+				registerProvider: () => Disposable.None,
+				getStoredAccounts: () => stored,
+				setStoredAccounts: () => { },
+				isAutoSwitchEnabled: () => false,
+			};
+			const environment: Partial<INativeEnvironmentService> = { userHome: URI.file('/home/u') };
+			const accounts = store.add(new ClaudeSubscriptionAccounts(
+				{ switchChat: async () => { }, refreshModels: () => { } },
+				accountsService as ISubscriptionAccountsService,
+				sdk as IClaudeAgentSdkService,
+				environment as INativeEnvironmentService,
+				new NullLogService(),
+			));
+			return { accounts, probes };
+		}
+
+		const stored: IStoredSubscriptionAccount[] = [{ id: 'bad', label: 'Bad', kind: 'token' }, { id: 'good', label: 'Good', kind: 'token' }];
+		const goodTurn = [rateLimitEvent('allowed', 1_800_000_000), okResult()];
+
+		function summary(accounts: ClaudeSubscriptionAccounts) {
+			return accounts.getAccounts().map(account => ({ id: account.id, status: account.status, usage: account.usage?.map(window => window.usedPercent), error: account.error !== undefined }));
+		}
+
+		test('a new token runs the check turn: a refused token is an error, an accepted one gets its usage; the periodic refresh does not check', async () => {
+			const { accounts, probes } = createAccounts(stored, token => token === 'bad-token' ? rejectedTurn() : goodTurn);
+			accounts.setToken('bad', 'bad-token');
+			accounts.setToken('good', 'good-token');
+			await accounts.refreshUsage({ explicit: true });
+			const afterCheck = summary(accounts);
+			const probeCount = probes.length;
+			await accounts.refreshUsage();
+			assert.deepStrictEqual({
+				afterCheck,
+				afterPeriodic: summary(accounts),
+				probes: probes.slice(0, probeCount).sort(),
+				periodicProbes: probes.length - probeCount,
+				chat: accounts.credentialForChat('chat')?.id,
+			}, {
+				afterCheck: [
+					{ id: 'bad', status: 'error', usage: undefined, error: true },
+					{ id: 'good', status: 'signedIn', usage: [50], error: false },
+				],
+				afterPeriodic: [
+					{ id: 'bad', status: 'error', usage: undefined, error: true },
+					{ id: 'good', status: 'signedIn', usage: [50], error: false },
+				],
+				probes: ['bad-token', 'good-token'],
+				periodicProbes: 0,
+				chat: 'good',
+			});
+		});
+
+		test('a refused sign-in during a chat marks the account error and offers the next account', async () => {
+			const { accounts } = createAccounts(stored, () => goodTurn);
+			accounts.setToken('bad', 'revoked-token');
+			accounts.setToken('good', 'good-token');
+			await accounts.refreshUsage({ explicit: true });
+			const decision = accounts.handleLimit('chat', 'bad', getClaudeLimitSignal(assistantError('authentication_failed'))!);
+			assert.deepStrictEqual({
+				decision,
+				accounts: summary(accounts),
+			}, {
+				decision: { kind: 'error', meta: { provider: 'claude', accountId: 'bad', accountLabel: 'Bad', nextAccountId: 'good', nextAccountLabel: 'Good', reason: 'authentication' } },
+				accounts: [
+					{ id: 'bad', status: 'error', usage: undefined, error: true },
+					{ id: 'good', status: 'signedIn', usage: [50], error: false },
+				],
+			});
 		});
 	});
 });

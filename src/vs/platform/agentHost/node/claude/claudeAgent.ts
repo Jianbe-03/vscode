@@ -2426,7 +2426,9 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			if (!switchTransport) {
 				break;
 			}
-			session.emitNote(turnId, localize('claudeAccountSwitched', "Claude account {0} hit its limit; continued on {1}.", retry.fromAccountLabel, retry.toAccountLabel));
+			session.emitNote(turnId, retry.reason === 'authentication'
+				? localize('claudeAccountRejectedSwitched', "Anthropic refused the sign-in of Claude account {0}; continued on {1}.", retry.fromAccountLabel, retry.toAccountLabel)
+				: localize('claudeAccountSwitched', "Claude account {0} hit its limit; continued on {1}.", retry.fromAccountLabel, retry.toAccountLabel));
 			await session.send(this._buildSdkPrompt(session.sessionId, CLAUDE_CONTINUE_PROMPT, undefined, generateUuid()), turnId, context.configurationResource, undefined, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
 			retry = session.takeLimitRetry(turnId);
 		}
@@ -2439,7 +2441,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 					type: ActionType.ChatError,
 					turnId,
 					duration: 0,
-					part: createErrorResponsePart({ errorType: 'subscriptionLimit', message: localize('claudeAccountLimitNoSwitch', "Claude account {0} hit its usage limit.", retry.fromAccountLabel) }, true),
+					part: createErrorResponsePart({ errorType: 'subscriptionLimit', message: retry.reason === 'authentication' ? localize('claudeAccountRejectedNoSwitch', "Anthropic refused the sign-in of Claude account {0}.", retry.fromAccountLabel) : localize('claudeAccountLimitNoSwitch', "Claude account {0} hit its usage limit.", retry.fromAccountLabel) }, true),
 				},
 			});
 		}

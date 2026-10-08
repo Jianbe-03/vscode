@@ -16,9 +16,17 @@
 //
 // A chat runs on the first signed-in account that is not used up and keeps it until that account hits
 // its limit; the limit hands the chat to the next account (auto switch) or ends the turn with an error
-// carrying `SUBSCRIPTION_LIMIT_ERROR_META_KEY`.
+// carrying `SUBSCRIPTION_LIMIT_ERROR_META_KEY`. A refused sign-in during a chat is handled the same way.
+//
+// A `token` account is `unverified` until Anthropic accepted its token: the CLI's `accountInfo` only says
+// a token is set, and the usage control request answers without readings (and without an error) for an
+// invalid token and for an inference-only setup-token alike. So when a token arrives, when the account is
+// added and when the user refreshes, an account without a usage reading runs a tiny real turn
+// ({@link CLAUDE_PROBE_PROMPT} on Haiku): a 401 marks it `error`, a rejected limit marks it used up and
+// its `rate_limit_event`s become its usage. The periodic refresh never runs that turn. Chats skip an
+// unverified account while any verified one is available.
 
-import type { AccountInfo, SDKControlGetUsageResponse, SDKMessage, SDKRateLimitInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { AccountInfo, Options, SDKControlGetUsageResponse, SDKMessage, SDKRateLimitInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import { Emitter } from '../../../../base/common/event.js';
@@ -42,6 +50,10 @@ export const CLAUDE_DEFAULT_ACCOUNT_ID = 'claude-default';
 
 /** How long an account counts as used up when Claude did not say when its limit resets. */
 const CLAUDE_DEFAULT_LIMIT_MS = 15 * 60 * 1000;
+/** How long the check turn of a setup-token may take. */
+const CLAUDE_PROBE_TIMEOUT_MS = 60 * 1000;
+/** The cheapest model, for the check turn of a setup-token. */
+const CLAUDE_PROBE_MODEL = 'haiku';
 /** How long a `claude auth login` may wait for the browser. */
 const CLAUDE_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 /** Entries of the default config folder a `login` account shares, so chats move between accounts. */
@@ -62,17 +74,21 @@ export interface IClaudeAccountState {
 	readonly limitedUntil?: number;
 	readonly error?: string;
 	readonly authUrl?: string;
+	/** Anthropic has not accepted this account's credential yet (or refused it): chats use it only as a last resort. */
+	readonly unverified?: boolean;
 }
 
 /** What a session reports when its account hit a subscription limit during a turn. */
 export interface IClaudeLimitSignal {
 	readonly resetsAt?: number;
 	readonly rateLimitType?: string;
+	/** Set when Anthropic refused the account's credential instead of a usage limit. */
+	readonly reason?: 'authentication';
 }
 
 /** What happens to a turn whose account hit its limit. */
 export type ClaudeLimitDecision =
-	| { readonly kind: 'retry'; readonly fromAccountLabel: string; readonly toAccountLabel: string }
+	| { readonly kind: 'retry'; readonly fromAccountLabel: string; readonly toAccountLabel: string; readonly reason?: 'authentication' }
 	| { readonly kind: 'error'; readonly meta: ISubscriptionLimitErrorMeta };
 
 // #region Pure helpers
@@ -96,9 +112,9 @@ export function toSubscriptionAccount(account: IClaudeAccountState, now: number)
 	};
 }
 
-/** Whether the account can take work at `now`: signed in and not used up. */
+/** Whether the account can take work at `now`: signed in, verified and not used up. */
 export function isClaudeAccountAvailable(account: IClaudeAccountState, now: number): boolean {
-	return account.status === 'signedIn' && (account.limitedUntil === undefined || account.limitedUntil <= now);
+	return account.status === 'signedIn' && !account.unverified && (account.limitedUntil === undefined || account.limitedUntil <= now);
 }
 
 /**
@@ -185,6 +201,8 @@ export function applyClaudeRateLimitInfo(usage: readonly ISubscriptionUsageWindo
 /**
  * Whether an SDK message says the account ran out of its subscription: a `rate_limit_event` that
  * rejected the request, or an assistant message the CLI ended with a rate limit or billing error.
+ * An assistant message the CLI ended with `authentication_failed` (after its own retries of the 401)
+ * is a signal with reason `authentication`.
  */
 export function getClaudeLimitSignal(message: SDKMessage): IClaudeLimitSignal | undefined {
 	if (message.type === 'rate_limit_event' && message.rate_limit_info.status === 'rejected') {
@@ -197,18 +215,116 @@ export function getClaudeLimitSignal(message: SDKMessage): IClaudeLimitSignal | 
 	if (message.type === 'assistant' && message.parent_tool_use_id === null && (message.error === 'rate_limit' || message.error === 'billing_error')) {
 		return {};
 	}
+	if (message.type === 'assistant' && message.parent_tool_use_id === null && message.error === 'authentication_failed') {
+		return { reason: 'authentication' };
+	}
 	return undefined;
 }
 
-/** The `_meta` of the error that ends a turn whose account hit its limit. */
-export function claudeLimitErrorMeta(account: IClaudeAccountState, next: IClaudeAccountState | undefined): ISubscriptionLimitErrorMeta {
+/** The `_meta` of the error that ends a turn whose account hit its limit (or whose sign-in was refused). */
+export function claudeLimitErrorMeta(account: IClaudeAccountState, next: IClaudeAccountState | undefined, reason?: 'authentication'): ISubscriptionLimitErrorMeta {
 	return {
 		provider: 'claude',
 		accountId: account.id,
 		accountLabel: account.label,
-		...(account.limitedUntil !== undefined ? { resetsAt: account.limitedUntil } : {}),
+		...(account.limitedUntil !== undefined && !reason ? { resetsAt: account.limitedUntil } : {}),
 		...(next ? { nextAccountId: next.id, nextAccountLabel: next.label } : {}),
+		...(reason ? { reason } : {}),
 	};
+}
+
+/** Prompt of the turn that checks a setup-token. Sent to the model, never shown. */
+export const CLAUDE_PROBE_PROMPT = 'Reply with OK';
+
+/** What the check turn of a setup-token found. */
+export interface IClaudeProbeOutcome {
+	/**
+	 * - `ok`: Anthropic accepted the token.
+	 * - `rejected`: Anthropic refused the token (401).
+	 * - `limited`: the token works but its subscription is used up.
+	 * - `failed`: no verdict (network error, timeout, CLI failure).
+	 */
+	readonly kind: 'ok' | 'rejected' | 'limited' | 'failed';
+	/** Usage windows from the turn's `rate_limit_event`s. */
+	readonly usage?: readonly ISubscriptionUsageWindow[];
+	readonly resetsAt?: number;
+	/** The CLI's own message for `rejected` and `failed`. */
+	readonly error?: string;
+}
+
+/**
+ * Reads the outcome of a check turn from its SDK messages and, when the stream threw, its error. The
+ * CLI answers an invalid token with `api_retry` messages, an assistant message with
+ * `error: 'authentication_failed'` and a `result` with `is_error` and `api_error_status: 401`.
+ */
+export function readClaudeProbeOutcome(messages: readonly SDKMessage[], error?: unknown): IClaudeProbeOutcome {
+	let usage: readonly ISubscriptionUsageWindow[] | undefined;
+	let limit: IClaudeLimitSignal | undefined;
+	let authenticated = false;
+	let rejected = false;
+	let resultText: string | undefined;
+	for (const message of messages) {
+		if (message.type === 'rate_limit_event') {
+			usage = applyClaudeRateLimitInfo(usage, message.rate_limit_info);
+			authenticated = true;
+		}
+		const signal = getClaudeLimitSignal(message);
+		if (signal?.reason === 'authentication') {
+			rejected = true;
+		} else if (signal && (!limit || signal.resetsAt !== undefined)) {
+			// The assistant's rate limit error follows the event that says when the limit resets.
+			limit = signal;
+		} else if (!signal && message.type === 'assistant' && !message.error) {
+			authenticated = true;
+		}
+		if (message.type === 'result') {
+			resultText = message.subtype === 'success' ? message.result : message.errors.join('\n');
+			if (message.is_error && message.subtype === 'success' && message.api_error_status === 401) {
+				rejected = true;
+			} else if (!message.is_error) {
+				authenticated = true;
+			}
+		}
+	}
+	const usagePart = usage?.length ? { usage } : {};
+	if (rejected) {
+		return { kind: 'rejected', ...usagePart, ...(resultText ? { error: resultText } : {}) };
+	}
+	if (limit) {
+		return { kind: 'limited', ...usagePart, ...(limit.resetsAt !== undefined ? { resetsAt: limit.resetsAt } : {}) };
+	}
+	if (authenticated) {
+		return { kind: 'ok', ...usagePart };
+	}
+	const errorText = error instanceof Error ? error.message : error !== undefined ? String(error) : resultText;
+	return { kind: 'failed', ...usagePart, ...(errorText ? { error: errorText } : {}) };
+}
+
+function claudeTokenRejectedMessage(kind: SubscriptionAccountKind): string {
+	return kind === 'token'
+		? localize('claudeAccountTokenRejected', "Anthropic refused this setup-token. Create a new one with `claude setup-token` and add the account again.")
+		: localize('claudeAccountLoginRejected', "Anthropic refused this account's sign-in. Sign in again.");
+}
+
+/**
+ * How the outcome of a check turn changes an account. A `failed` check leaves a verified account as
+ * it is and keeps an unverified one unverified, with a note.
+ */
+export function claudeProbePatch(account: IClaudeAccountState, outcome: IClaudeProbeOutcome, now: number): Partial<Omit<IClaudeAccountState, 'id' | 'kind'>> {
+	const usage = outcome.usage?.length ? { usage: outcome.usage, usageUpdatedAt: now } : {};
+	switch (outcome.kind) {
+		case 'rejected':
+			return { status: 'error', unverified: true, error: claudeTokenRejectedMessage(account.kind), usage: undefined, usageUpdatedAt: undefined, limitedUntil: undefined };
+		case 'limited':
+			return { status: 'signedIn', unverified: false, error: undefined, ...usage, limitedUntil: outcome.resetsAt ?? now + CLAUDE_DEFAULT_LIMIT_MS };
+		case 'ok':
+			return { status: 'signedIn', unverified: false, error: undefined, ...usage };
+		case 'failed':
+			return {
+				status: account.status === 'error' && account.unverified ? 'error' : 'signedIn',
+				...(account.unverified ? { error: localize('claudeAccountProbeFailed', "Could not check this account with Anthropic: {0} Refresh to try again.", outcome.error ?? '') } : {}),
+			};
+	}
 }
 
 // #endregion
@@ -287,9 +403,13 @@ export class ClaudeSubscriptionLimitTracker {
 	}
 
 	private _errorPart(meta: ISubscriptionLimitErrorMeta, sdkMessage: string | undefined): ErrorResponsePart {
-		const message = meta.nextAccountLabel
-			? localize('claudeAccountLimit.withNext', "Claude account {0} hit its usage limit. Continue on {1}?", meta.accountLabel, meta.nextAccountLabel)
-			: localize('claudeAccountLimit', "Claude account {0} hit its usage limit.", meta.accountLabel);
+		const message = meta.reason === 'authentication'
+			? meta.nextAccountLabel
+				? localize('claudeAccountRejected.withNext', "Anthropic refused the sign-in of Claude account {0}. Continue on {1}?", meta.accountLabel, meta.nextAccountLabel)
+				: localize('claudeAccountRejected', "Anthropic refused the sign-in of Claude account {0}.", meta.accountLabel)
+			: meta.nextAccountLabel
+				? localize('claudeAccountLimit.withNext', "Claude account {0} hit its usage limit. Continue on {1}?", meta.accountLabel, meta.nextAccountLabel)
+				: localize('claudeAccountLimit', "Claude account {0} hit its usage limit.", meta.accountLabel);
 		// Resumable: after a `switchChat` request the client resumes the turn on the other account.
 		return createErrorResponsePart({
 			errorType: 'subscriptionLimit',
@@ -323,7 +443,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	private readonly _accounts = new Map<string, IClaudeAccountState>();
 	private readonly _tokens = new Map<string, string>();
 	private readonly _chatAccounts = new Map<string, string>();
-	private readonly _usageReads = new Map<string, Promise<void>>();
+	private readonly _usageReads = new Map<string, { readonly validate: boolean; readonly read: Promise<void> }>();
 	private readonly _logins = new Map<string, ChildProcess>();
 
 	constructor(
@@ -335,7 +455,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	) {
 		super();
 		for (const stored of this._accountsService.getStoredAccounts('claude')) {
-			this._accounts.set(stored.id, { id: stored.id, label: stored.label, kind: stored.kind, status: 'signedOut' });
+			this._accounts.set(stored.id, { id: stored.id, label: stored.label, kind: stored.kind, status: 'signedOut', ...(stored.kind === 'token' ? { unverified: true } : {}) });
 		}
 		this._register(toDisposable(() => {
 			for (const login of this._logins.values()) {
@@ -386,15 +506,16 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 				await this._delegate.switchChat(request.chat, request.accountId);
 				return;
 			case 'refreshUsage':
-				await this.refreshUsage();
+				await this.refreshUsage({ explicit: true });
 				return;
 		}
 	}
 
-	async refreshUsage(): Promise<void> {
+	/** An `explicit` refresh also checks token accounts without a usage reading with a tiny real turn. */
+	async refreshUsage(options?: { readonly explicit?: boolean }): Promise<void> {
 		await Promise.all(this._orderedAccounts()
 			.filter(account => account.status === 'signedIn' || account.kind === 'login' || (account.kind === 'token' && this._tokens.has(account.id)))
-			.map(account => this._readAccount(account.id)));
+			.map(account => this._readAccount(account.id, options?.explicit === true)));
 	}
 
 	// #endregion
@@ -449,14 +570,17 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		}
 		if (!token) {
 			this._tokens.delete(accountId);
-			this._update(accountId, { status: 'signedOut', usage: undefined, email: undefined, planType: undefined });
+			this._update(accountId, { status: 'signedOut', usage: undefined, email: undefined, planType: undefined, unverified: true });
 			return true;
 		}
 		if (this._tokens.get(accountId) === token && account.status === 'signedIn') {
 			return true;
 		}
+		if (this._tokens.get(accountId) !== token) {
+			this._update(accountId, { unverified: true });
+		}
 		this._tokens.set(accountId, token);
-		void this._readAccount(accountId);
+		void this._readAccount(accountId, true);
 		return true;
 	}
 
@@ -490,7 +614,9 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	/**
 	 * `accountId` (the account a session of `chat` ran on) hit its limit: marks it used up and decides
 	 * whether the turn continues on the next account (auto switch) or ends with the limit error.
-	 * Undefined without added accounts: the turn ends as the CLI ended it.
+	 * Anthropic refusing an added account's credential is handled the same way, but marks the account
+	 * `error` until it is checked again. Undefined without added accounts, and for a refused machine
+	 * login: the turn ends as the CLI ended it.
 	 */
 	handleLimit(chat: string, accountId: string | undefined, limit: IClaudeLimitSignal): ClaudeLimitDecision | undefined {
 		if (!this.hasAddedAccounts) {
@@ -499,15 +625,26 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		}
 		const id = accountId ?? CLAUDE_DEFAULT_ACCOUNT_ID;
 		const now = Date.now();
-		this._update(id, { limitedUntil: limit.resetsAt ?? now + CLAUDE_DEFAULT_LIMIT_MS });
+		const reason = limit.reason;
+		if (reason === 'authentication') {
+			const refused = this._find(id);
+			if (!refused || refused.kind === 'default') {
+				return undefined;
+			}
+			this._update(id, { status: 'error', unverified: true, error: claudeTokenRejectedMessage(refused.kind), usage: undefined, usageUpdatedAt: undefined });
+		} else {
+			this._update(id, { limitedUntil: limit.resetsAt ?? now + CLAUDE_DEFAULT_LIMIT_MS });
+		}
 		const account = this._find(id) ?? { id, label: localize('claudeDefaultAccount', "This Computer"), kind: 'default' as const, status: 'signedIn' as const };
 		const next = selectClaudeAccount(this._orderedAccounts(), now, undefined, id);
-		void this._readAccount(id);
+		if (!reason) {
+			void this._readAccount(id);
+		}
 		if (next && this._accountsService.isAutoSwitchEnabled()) {
 			this._chatAccounts.set(chat, next.id);
-			return { kind: 'retry', fromAccountLabel: account.label, toAccountLabel: next.label };
+			return { kind: 'retry', fromAccountLabel: account.label, toAccountLabel: next.label, ...(reason ? { reason } : {}) };
 		}
-		return { kind: 'error', meta: claudeLimitErrorMeta(this._find(id) ?? account, next) };
+		return { kind: 'error', meta: claudeLimitErrorMeta(account, next, reason) };
 	}
 
 	/** Merges a `rate_limit_event` of a session running on `accountId` into that account's usage. */
@@ -558,13 +695,13 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		if (this._accounts.has(id) || id === CLAUDE_DEFAULT_ACCOUNT_ID) {
 			return;
 		}
-		this._accounts.set(id, { id, label, kind, status: 'signedOut' });
+		this._accounts.set(id, { id, label, kind, status: 'signedOut', ...(kind === 'token' ? { unverified: true } : {}) });
 		this._storeAccounts();
 		this._onDidChangeAccounts.fire();
 		if (kind === 'login') {
 			await this._signIn(id);
 		} else if (this._tokens.has(id)) {
-			await this._readAccount(id);
+			await this._readAccount(id, true);
 		}
 	}
 
@@ -606,18 +743,25 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		this._onDidChangeAccounts.fire();
 	}
 
-	/** Reads account info and usage of one account with a throwaway SDK query. */
-	private _readAccount(id: string): Promise<void> {
+	/**
+	 * Reads account info and usage of one account with a throwaway SDK query. With `validate`, an added
+	 * account without a usage reading also runs the check turn (see {@link _probe}).
+	 */
+	private _readAccount(id: string, validate = false): Promise<void> {
 		const pending = this._usageReads.get(id);
-		if (pending) {
-			return pending;
+		if (pending && (pending.validate || !validate)) {
+			return pending.read;
 		}
-		const read = this._doReadAccount(id).finally(() => this._usageReads.delete(id));
-		this._usageReads.set(id, read);
+		const read = (pending ? pending.read.then(() => this._doReadAccount(id, validate)) : this._doReadAccount(id, validate)).finally(() => {
+			if (this._usageReads.get(id)?.read === read) {
+				this._usageReads.delete(id);
+			}
+		});
+		this._usageReads.set(id, { validate, read });
 		return read;
 	}
 
-	private async _doReadAccount(id: string): Promise<void> {
+	private async _doReadAccount(id: string, validate: boolean): Promise<void> {
 		const account = this._find(id);
 		if (!account || !(await this._sdkService.canLoadWithoutDownload())) {
 			return;
@@ -630,38 +774,21 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			[Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<SDKUserMessage>>(() => { /* never resolves */ }) }),
 		};
 		const options = buildModelEnumerationOptions(credential?.env);
+		let info: AccountInfo;
+		let usage: SDKControlGetUsageResponse | undefined;
 		try {
 			const query = await this._sdkService.query({ prompt: neverYieldingPrompt, options });
 			try {
-				const info = await query.accountInfo();
+				info = await query.accountInfo();
 				if (!isClaudeAccountSetUp(info)) {
 					this._update(id, { status: 'signedOut', usage: undefined });
 					return;
 				}
 				// The usage control request is experimental: an account without a reading is still signed in.
-				let usage: SDKControlGetUsageResponse | undefined;
 				try {
 					usage = await query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true });
 				} catch (error) {
 					this._logService.warn(`[Claude] Failed to read the usage of subscription account ${id}`, error);
-				}
-				const windows = claudeUsageWindows(usage?.rate_limits ?? null);
-				const now = Date.now();
-				const full = windows.filter(window => window.usedPercent >= 100 && window.resetsAt !== undefined && window.resetsAt > now);
-				const current = this._find(id);
-				const wasSignedIn = current?.status === 'signedIn';
-				this._update(id, {
-					status: 'signedIn',
-					error: undefined,
-					authUrl: undefined,
-					...(info.email ? { email: info.email } : {}),
-					...(usage?.subscription_type ?? info.subscriptionType ? { planType: usage?.subscription_type ?? info.subscriptionType } : {}),
-					...(usage?.rate_limits_available ? { usage: windows, usageUpdatedAt: now } : {}),
-					limitedUntil: full.length ? Math.max(...full.map(window => window.resetsAt!)) : current?.limitedUntil !== undefined && current.limitedUntil > now ? current.limitedUntil : undefined,
-				});
-				if (!wasSignedIn && id !== CLAUDE_DEFAULT_ACCOUNT_ID) {
-					// A first signed-in account can stand in for a missing machine login.
-					this._delegate.refreshModels();
 				}
 			} finally {
 				query.close();
@@ -670,7 +797,88 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		} catch (error) {
 			this._logService.warn(`[Claude] Failed to read subscription account ${id}`, error);
 			this._update(id, { error: error instanceof Error ? error.message : String(error) });
+			return;
 		}
+		const hasReading = usage?.rate_limits_available === true;
+		const before = this._find(id);
+		if (!before) {
+			return;
+		}
+		// Without a reading, an added account's credential is only known to work after a real turn.
+		const probe = validate && !hasReading && before.kind !== 'default' && (before.kind === 'token' || before.unverified)
+			? await this._probe(id, credential?.env)
+			: undefined;
+		const current = this._find(id);
+		if (!current) {
+			return;
+		}
+		const windows = claudeUsageWindows(usage?.rate_limits ?? null);
+		const now = Date.now();
+		const full = windows.filter(window => window.usedPercent >= 100 && window.resetsAt !== undefined && window.resetsAt > now);
+		const wasSignedIn = current.status === 'signedIn';
+		this._update(id, {
+			status: current.status === 'error' && current.unverified && !hasReading ? 'error' : 'signedIn',
+			...(hasReading || !current.unverified ? { error: undefined } : {}),
+			authUrl: undefined,
+			...(info.email ? { email: info.email } : {}),
+			...(usage?.subscription_type ?? info.subscriptionType ? { planType: usage?.subscription_type ?? info.subscriptionType } : {}),
+			...(hasReading ? { usage: windows, usageUpdatedAt: now, unverified: false } : {}),
+			limitedUntil: full.length ? Math.max(...full.map(window => window.resetsAt!)) : current.limitedUntil !== undefined && current.limitedUntil > now ? current.limitedUntil : undefined,
+		});
+		if (probe) {
+			const updated = this._find(id);
+			if (updated) {
+				this._update(id, claudeProbePatch(updated, probe, now));
+			}
+		}
+		if (!wasSignedIn && this._find(id)?.status === 'signedIn' && id !== CLAUDE_DEFAULT_ACCOUNT_ID) {
+			// A first signed-in account can stand in for a missing machine login.
+			this._delegate.refreshModels();
+		}
+	}
+
+	/**
+	 * Runs the check turn of an added account: {@link CLAUDE_PROBE_PROMPT} on the cheapest model, one
+	 * turn, no tools, no transcript. Only the user's explicit actions run it (adding the account, a new
+	 * token, a refresh), never the periodic refresh, as it spends a little of the subscription.
+	 */
+	private async _probe(id: string, env: Record<string, string | undefined> | undefined): Promise<IClaudeProbeOutcome> {
+		const options: Options = {
+			...buildModelEnumerationOptions(env),
+			model: CLAUDE_PROBE_MODEL,
+			maxTurns: 1,
+			tools: [],
+			systemPrompt: CLAUDE_PROBE_PROMPT,
+			persistSession: false,
+			settingSources: [],
+		};
+		const messages: SDKMessage[] = [];
+		const timeout = setTimeout(() => options.abortController?.abort(), CLAUDE_PROBE_TIMEOUT_MS);
+		let error: unknown;
+		try {
+			const query = await this._sdkService.query({ prompt: CLAUDE_PROBE_PROMPT, options });
+			try {
+				for await (const message of query) {
+					messages.push(message);
+					if (message.type === 'result') {
+						break;
+					}
+				}
+			} catch (streamError) {
+				// The CLI also throws after an error result; the result already says what happened.
+				error = streamError;
+			} finally {
+				query.close();
+			}
+		} catch (startError) {
+			error = startError;
+		} finally {
+			clearTimeout(timeout);
+			options.abortController?.abort();
+		}
+		const outcome = readClaudeProbeOutcome(messages, error ?? (messages.length ? undefined : localize('claudeAccountProbeTimeout', "No answer.")));
+		this._logService.info(`[Claude] Checked subscription account ${id}: ${outcome.kind}${outcome.error ? ` (${outcome.error})` : ''}`);
+		return outcome;
 	}
 
 	// #region login accounts
@@ -770,7 +978,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		this._logins.delete(id);
 		if (exitCode === 0) {
 			this._update(id, { authUrl: undefined });
-			await this._readAccount(id);
+			await this._readAccount(id, true);
 			return;
 		}
 		this._update(id, { status: 'signedOut', authUrl: undefined, error: this._manualLoginError(dir) });
