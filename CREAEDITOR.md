@@ -116,6 +116,7 @@ Jira keys are stored in upper case and link to the issue on the AI Costs page wh
 **AI Costs page** (**CreaEditor: Show AI Costs per Issue and Chat**):
 - Shows the total per issue, and per chat within each issue.
 - Filter by period, gateway or text, and export everything as CSV.
+- The **Advanced** tab analyses the requests in depth: filter on date range, key, model, gateway, repository, branch, issue, chat, cost source, main chats or subagents, missing costs, cost per request and free text; see totals, median and P95 request cost, tokens, cache hit share, cost per active day and a projection for this month; cost over time stacked by key, model or another dimension, a breakdown, tokens over time, a pivot table and every request in a sortable, paged table. Click a bar or row to filter on it, and export the filtered requests as CSV or JSON. The tab and its filters are remembered.
 - The data stays on your Mac.
 - Because the metadata is sent along, the same breakdown is also available in the OpenRouter activity logs and in LiteLLM's spend tracking (tags), for the whole team.
 
