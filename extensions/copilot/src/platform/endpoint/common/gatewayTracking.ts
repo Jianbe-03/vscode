@@ -53,6 +53,15 @@ export interface IChatWorkContext {
 const OPENROUTER_HOST = /(^|\.)openrouter\.ai$/i;
 
 /**
+ * Whether models of this language model vendor run on a named API key of an LLM gateway (one provider
+ * group per key). A chat on such a model never runs a subagent on another key, so subagent model
+ * overrides are ignored for it: the extension cannot tell which key a model of the same vendor uses.
+ */
+export function isKeyScopedGatewayVendor(vendor: string | undefined): boolean {
+	return vendor === 'openrouter' || vendor === 'litellm';
+}
+
+/**
  * Returns the gateway kind for a well-known gateway URL. LiteLLM proxies run on arbitrary hosts and are
  * detected by probing them, see {@link LITELLM_PROBE_PATHS}.
  */

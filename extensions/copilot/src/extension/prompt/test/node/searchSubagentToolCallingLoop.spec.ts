@@ -551,11 +551,13 @@ describe('SearchSubagentToolCallingLoop.getEndpoint (non-proxy resolution)', () 
 		allEndpoints?: IChatEndpoint[];
 		familyEndpoint?: IChatEndpoint;
 		familyThrows?: boolean;
+		mainModelVendor?: string;
 	}): { loop: SearchSubagentToolCallingLoop; probe: IEndpointProviderProbe } {
+		const request = createMockChatRequest();
 		const loopOptions: ISearchSubagentToolCallingLoopOptions = {
 			conversation: createTestConversation(),
 			toolCallLimit: 10,
-			request: createMockChatRequest(),
+			request: options.mainModelVendor ? { ...request, model: { vendor: options.mainModelVendor, id: 'anthropic/claude-opus' } as ChatRequest['model'] } : request,
 			location: ChatLocation.Panel,
 			promptText: 'find things',
 		};
@@ -661,6 +663,19 @@ describe('SearchSubagentToolCallingLoop.getEndpoint (non-proxy resolution)', () 
 		expect(probe.getAllCalls).toBe(1);
 		expect(probe.familyCalls).toEqual(['does-not-exist']);
 		expect(probe.mainCalls).toBe(1);
+	});
+
+	it('keeps a chat on a named OpenRouter key on its own model, ignoring the configured subagent model', async () => {
+		await configurationService.setConfig(ConfigKey.Advanced.SearchSubagentUseAgenticProxy, false);
+		await configurationService.setConfig(ConfigKey.Advanced.SearchSubagentModel, 'mai-code-1-flash-picker');
+		const { loop, probe } = createLoop({
+			allEndpoints: [endpoint('mai-code-1-flash-picker', 'oswe-vscode-modelD', true)],
+			mainModelVendor: 'openrouter',
+		});
+
+		const resolved = await (loop as any).getEndpoint();
+
+		expect({ model: resolved.model, ...probe }).toEqual({ model: 'main-agent', getAllCalls: 0, familyCalls: [], mainCalls: 1 });
 	});
 
 	it('uses the main agent endpoint without any lookups when no model is configured', async () => {

@@ -12,6 +12,7 @@ import { ChatLocation, ChatResponse } from '../../../platform/chat/common/common
 import { ISessionTranscriptService } from '../../../platform/chat/common/sessionTranscriptService';
 import { ConfigKey, IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IEndpointProvider } from '../../../platform/endpoint/common/endpointProvider';
+import { isKeyScopedGatewayVendor } from '../../../platform/endpoint/common/gatewayTracking';
 import { ProxyAgenticEndpoint } from '../../../platform/endpoint/node/proxyAgenticEndpoint';
 import { IFileSystemService } from '../../../platform/filesystem/common/fileSystemService';
 import { IGitService } from '../../../platform/git/common/gitService';
@@ -126,6 +127,10 @@ export class ExecutionSubagentToolCallingLoop extends ToolCallingLoop<IExecution
 	}
 
 	private async resolveEndpoint(): Promise<IChatEndpoint> {
+		// CreaEditor: a chat on a named gateway key (OpenRouter, LiteLLM) keeps its subagents on that key.
+		if (isKeyScopedGatewayVendor(this.options.request.model?.vendor)) {
+			return await this.endpointProvider.getChatEndpoint(this.options.request);
+		}
 		const modelName = this._configurationService.getExperimentBasedConfig(ConfigKey.Advanced.ExecutionSubagentModel, this._experimentationService);
 		const useAgenticProxy = this._configurationService.getExperimentBasedConfig(ConfigKey.Advanced.ExecutionSubagentUseAgenticProxy, this._experimentationService);
 		const shellType = this.terminalService.terminalShellType;
