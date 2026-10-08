@@ -11,6 +11,7 @@ import { StopWatch } from '../../../../base/common/stopwatch.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentTurnProviderSessionState } from '../../common/agent.js';
+import type { IByokLmKeyLock } from '../../common/agentHostByokLm.js';
 import { copilotFusionEventTypes, isProvisionalFusionConversationEvent, type CopilotFusionEvent } from './copilotFusionProgress.js';
 
 export type CopilotModelCallFinishedOutcome = 'success' | 'error' | 'cancelled' | 'rejected';
@@ -29,6 +30,13 @@ export interface ICopilotModelCallFinishedEvent {
 		readonly containsBuiltInFileEditRequest?: boolean;
 		readonly editClassifierVersion: number;
 	};
+}
+
+/** CreaEditor: the API key a session is locked to, and the BYOK models of other keys it cannot use. */
+export interface ICopilotSessionKeyLock {
+	readonly lock: IByokLmKeyLock;
+	/** Ids (`id` and `vendor/id`) of the BYOK models of other keys that were left out of the session. */
+	readonly otherKeyModelIds: ReadonlySet<string>;
 }
 
 /**
@@ -56,6 +64,8 @@ export class CopilotSessionWrapper extends Disposable {
 	private readonly _instanceId = generateUuid();
 	private readonly _lifetime = new StopWatch();
 	private _beforeDisconnect: (() => Promise<void>) | undefined;
+	/** CreaEditor: set by the launcher when the session is locked to one API key. */
+	keyLock: ICopilotSessionKeyLock | undefined;
 
 	constructor(
 		readonly session: CopilotSession,

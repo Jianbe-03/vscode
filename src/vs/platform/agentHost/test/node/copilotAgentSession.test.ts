@@ -66,7 +66,7 @@ import { buildSandboxConfigForSdk, type SandboxConfig } from '../../node/copilot
 import { ActiveClientToolSet } from '../../node/activeClientState.js';
 import { type CopilotSessionLaunchPlan, type IActiveClientSnapshot, type ICopilotSessionLauncher, type ICopilotSessionRuntime } from '../../node/copilot/copilotSessionLauncher.js';
 import { type IShellInitScript } from '../../common/shellInitScript.js';
-import { CopilotSessionWrapper } from '../../node/copilot/copilotSessionWrapper.js';
+import { CopilotSessionWrapper, type ICopilotSessionKeyLock } from '../../node/copilot/copilotSessionWrapper.js';
 import { AgentHostStateManager, IAgentHostStateManager } from '../../node/agentHostStateManager.js';
 import { AgentHostClientConnectionService } from '../../node/agentHostClientConnectionService.js';
 import { AgentHostTelemetryReporter } from '../../node/agentHostTelemetryReporter.js';
@@ -958,6 +958,8 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 	resolveCustomizationEnablement?: (target: ICustomizationEnablementTarget) => CustomizationEnablementResolution;
 	initialSessionMeta?: Record<string, unknown>;
 	sessionUri?: URI;
+	/** CreaEditor: the API key the launched session is locked to. */
+	keyLock?: ICopilotSessionKeyLock;
 	/** Exact persistence/config scope for this chat (`IAgentChatContext.resource`); distinct from `sessionUri` for peer chats. */
 	resource?: URI;
 	chatChannelUri?: URI;
@@ -1074,7 +1076,9 @@ async function createAgentSession(disposables: DisposableStore, options?: {
 			if (options?.captureRuntime) {
 				options.captureRuntime.current = runtime;
 			}
-			return new CopilotSessionWrapper(mockSession as unknown as CopilotSession, logService);
+			const wrapper = new CopilotSessionWrapper(mockSession as unknown as CopilotSession, logService);
+			wrapper.keyLock = options?.keyLock;
+			return wrapper;
 		},
 	};
 
@@ -5411,26 +5415,37 @@ suite('CopilotAgentSession', () => {
 		assert.deepStrictEqual(signals.filter(signal => signal.kind === 'subagent_completed' || signal.kind === 'subagent_resumed'), []);
 	});
 
-	// CreaEditor: a subagent that fails before any child turn ends must not keep running.
-	for (const failure of ['task tool error', 'subagent.failed'] as const) {
-		test(`ends a subagent with an error when it fails before its first round (${failure})`, async () => {
-			const { session, mockSession, signals } = await createAgentSession(disposables, { subagentTaskCompletionDelay: 20 });
+	// CreaEditor: a subagent that fails before any child turn ends must not keep running, and its
+	// failure belongs to its own chat: an error there would mark the whole session as failed.
+	for (const failure of ['task tool error', 'subagent.failed', 'model of another key'] as const) {
+		test(`ends a failed subagent without failing the parent (${failure})`, async () => {
+			const { session, mockSession, signals } = await createAgentSession(disposables, {
+				subagentTaskCompletionDelay: 20,
+				keyLock: { lock: { vendor: 'openrouter', group: 'Work key' }, otherKeyModelIds: new Set(['Home key/mock-mini', 'openrouter/Home key/mock-mini']) },
+			});
 			session.resetTurnState('turn-parent');
 			mockSession.fire('assistant.turn_start', { turnId: 'sdk-parent' });
-			mockSession.fire('tool.execution_start', { toolCallId: 'tc-task', toolName: 'task', arguments: { description: 'Mock subtask', prompt: 'Do it', model: 'other-key/mock-mini' } });
+			const model = failure === 'model of another key' ? 'Home key/mock-mini' : 'Work key/mock-mini';
+			mockSession.fire('tool.execution_start', { toolCallId: 'tc-task', toolName: 'task', arguments: { description: 'Mock subtask', prompt: 'Do it', model } });
 			mockSession.fire('subagent.started', {
-				toolCallId: 'tc-task', agentName: 'general-purpose', agentDisplayName: 'Mock subtask', agentDescription: 'Mock subtask',
+				toolCallId: 'tc-task', agentName: 'general-purpose', agentDisplayName: 'Mock subtask', agentDescription: 'Mock subtask', model,
 			}, { agentId: 'agent-1' });
 			if (failure === 'subagent.failed') {
-				mockSession.fire('subagent.failed', { toolCallId: 'tc-task', agentName: 'general-purpose', agentDisplayName: 'Mock subtask', error: 'No GitHub OAuth token provided' }, { agentId: 'agent-1' });
+				mockSession.fire('subagent.failed', { toolCallId: 'tc-task', agentName: 'general-purpose', agentDisplayName: 'Mock subtask', error: 'Subagent crashed' }, { agentId: 'agent-1' });
 			}
-			mockSession.fire('tool.execution_complete', { toolCallId: 'tc-task', success: false, error: { message: 'No GitHub OAuth token provided' } });
+			mockSession.fire('tool.execution_complete', { toolCallId: 'tc-task', success: false, error: { message: 'InvalidArg, No GitHub OAuth token provided' } });
 			await timeout(0);
 
-			assert.deepStrictEqual(signals.flatMap((signal): { kind: string; toolCallId: string | undefined; message?: string }[] => signal.kind === 'subagent_completed' ? [{ kind: signal.kind, toolCallId: signal.toolCallId }]
-				: signal.kind === 'action' && signal.action.type === ActionType.ChatError && signal.action.part.kind === ResponsePartKind.Error
-					? [{ kind: signal.action.type, toolCallId: signal.parentToolCallId, message: signal.action.part.error.message }] : []), [
-				{ kind: ActionType.ChatError, toolCallId: 'tc-task', message: 'No GitHub OAuth token provided' },
+			assert.deepStrictEqual(signals.flatMap(signal => signal.kind === 'subagent_completed' ? [{ kind: signal.kind, toolCallId: signal.toolCallId }]
+				: signal.kind === 'action' && (signal.action.type === ActionType.ChatError || signal.action.type === ActionType.ChatResponsePart && signal.action.part.kind === ResponsePartKind.Markdown)
+					? [{ kind: signal.action.type, toolCallId: signal.parentToolCallId, content: signal.action.type === ActionType.ChatResponsePart && signal.action.part.kind === ResponsePartKind.Markdown ? signal.action.part.content : undefined }] : []), [
+				{
+					kind: ActionType.ChatResponsePart, toolCallId: 'tc-task', content: {
+						'task tool error': 'The subagent failed: InvalidArg, No GitHub OAuth token provided',
+						'subagent.failed': 'The subagent failed: Subagent crashed',
+						'model of another key': 'The model \'Home key/mock-mini\' is not available to this chat: subagents stay on the key \'Work key\' the chat uses.',
+					}[failure],
+				},
 				{ kind: 'subagent_completed', toolCallId: 'tc-task' },
 			]);
 		});

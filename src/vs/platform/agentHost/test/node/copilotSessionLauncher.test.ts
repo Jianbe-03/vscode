@@ -476,13 +476,18 @@ suite('resolveByokSessionConfig', () => {
 		const config = await resolveByokSessionConfig(sessionId, registry, proxy.startProxy, log, 'openrouter/Work key/anthropic/claude-opus');
 		registration.dispose();
 
-		assert.deepStrictEqual({ providers: config.providers?.map(p => p.name), models: config.models, locks: proxy.locks }, {
+		assert.deepStrictEqual({ providers: config.providers?.map(p => p.name), models: config.models, locks: proxy.locks, keyLock: config.keyLock && { lock: config.keyLock.lock, otherKeyModelIds: [...config.keyLock.otherKeyModelIds] } }, {
 			providers: ['openrouter'],
 			models: [
 				{ id: 'Work key/anthropic/claude-opus', provider: 'openrouter', name: 'Claude Opus (Work key)' },
 				{ id: 'Work key/openai/gpt-5', provider: 'openrouter', name: 'GPT-5 (Work key)' },
 			],
 			locks: [[sessionId, { vendor: 'openrouter', group: 'Work key' }]],
+			// CreaEditor: the models of other keys, so a subagent asking for one can be explained.
+			keyLock: {
+				lock: { vendor: 'openrouter', group: 'Work key' },
+				otherKeyModelIds: ['Personal key/anthropic/claude-opus', 'openrouter/Personal key/anthropic/claude-opus', 'claude', 'acme/claude'],
+			},
 		});
 	});
 

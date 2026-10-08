@@ -1752,8 +1752,10 @@ export class CopilotAgentSession extends Disposable {
 	}
 
 	/**
-	 * Ends an active subagent's turn with an error so its chat stops running.
-	 * A no-op when the subagent already ended.
+	 * Ends an active subagent's turn, noting why it failed in its own chat. The
+	 * turn completes rather than errors: an errored chat would mark the whole
+	 * session as failed, while the parent turn goes on and sees the failure as
+	 * the spawning tool call's result. A no-op when the subagent already ended.
 	 */
 	private _failSubagentTurn(parentToolCallId: string, message: string): void {
 		const agentId = this._activeSubagentAgentIdForToolCall(parentToolCallId);
@@ -1762,13 +1764,22 @@ export class CopilotAgentSession extends Disposable {
 		}
 		if (!this._dropLateRootTurnEvents) {
 			this._emitAction({
-				type: ActionType.ChatError,
+				type: ActionType.ChatResponsePart,
 				turnId: this._turnId,
-				duration: 0,
-				part: createErrorResponsePart(buildChatErrorInfoFromCopilotSdkFields({ errorType: 'subagent_failed', message })),
+				part: { kind: ResponsePartKind.Markdown, id: generateUuid(), content: this._describeSubagentFailure(parentToolCallId, message) },
 			}, parentToolCallId);
 		}
 		this._completeSubagentTurn(agentId, parentToolCallId);
+	}
+
+	/** Explains a subagent failure, naming a requested model that belongs to another API key. */
+	private _describeSubagentFailure(parentToolCallId: string, message: string): string {
+		const requested = this._activeToolCalls.get(parentToolCallId)?.parameters?.model ?? this._lastSubagentUsageByToolCallId.get(parentToolCallId)?.model;
+		const keyLock = this._wrapper.keyLock;
+		if (isString(requested) && keyLock?.otherKeyModelIds.has(requested)) {
+			return localize('copilot.subagentModelOfOtherKey', "The model '{0}' is not available to this chat: subagents stay on the key '{1}' the chat uses.", requested, keyLock.lock.group);
+		}
+		return message ? localize('copilot.subagentFailedWith', "The subagent failed: {0}", message) : localize('copilot.subagentFailed', "The subagent failed.");
 	}
 
 	/**
@@ -1782,7 +1793,7 @@ export class CopilotAgentSession extends Disposable {
 			return;
 		}
 		if (!success) {
-			this._failSubagentTurn(parentToolCallId, errorMessage || localize('copilot.subagentFailed', "The subagent failed."));
+			this._failSubagentTurn(parentToolCallId, errorMessage ?? '');
 		} else {
 			this._scheduleSubagentTurnCompletion(agentId, parentToolCallId);
 		}
