@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: the Toggle Agents Tree and Open AI Costs buttons in the Sessions header of the Agents window.
+// CreaEditor: the Toggle Agents Tree, Open AI Costs and Subscription Usage buttons in the Sessions header of the Agents window.
 // The Agents tree itself is a section of the Sessions view, see `SessionsAgentsTreeSection`.
 
 import { Codicon } from '../../../../../base/common/codicons.js';
@@ -15,6 +15,7 @@ import { ServicesAccessor } from '../../../../../platform/instantiation/common/i
 import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.js';
 import { IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
 import { CHAT_CATEGORY } from '../../../../../workbench/contrib/chat/browser/actions/chatActions.js';
+import { SHOW_SUBSCRIPTION_USAGE_COMMAND_ID } from '../../../../../workbench/contrib/chat/browser/subscriptionAccounts/subscriptionAccountsLimit.js';
 import { ChatContextKeys } from '../../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { IViewsService } from '../../../../../workbench/services/views/common/viewsService.js';
 import { Menus } from '../../../../browser/menus.js';
@@ -27,6 +28,7 @@ const SHOW_AI_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
 const MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID = 'workbench.action.agentSessions.maximizeMainEditorPart';
 
 const aiCostsIcon = registerIcon('sessions-ai-costs-icon', Codicon.creditCard, localize('sessionsAiCostsIcon', "Icon of the Open AI Costs action in the Agents window."));
+const subscriptionUsageIcon = registerIcon('sessions-subscription-usage-icon', Codicon.pulse, localize('sessionsSubscriptionUsageIcon', "Icon of the Subscription Usage action in the Agents window."));
 const agentsTreeIcon = registerIcon('sessions-agents-tree-view-icon', Codicon.typeHierarchySub, localize('sessionsAgentsTreeViewIcon', "Icon of the Toggle Agents Tree action in the Agents window."));
 
 class ToggleSessionsAgentsTreeAction extends Action2 {
@@ -78,3 +80,25 @@ class OpenAiCostsAction extends Action2 {
 	}
 }
 registerAction2(OpenAiCostsAction);
+
+class OpenSubscriptionUsageAction extends Action2 {
+	constructor() {
+		super({
+			id: 'sessions.action.openSubscriptionUsage',
+			title: localize2('sessions.openSubscriptionUsage', "Subscription Usage"),
+			category: CHAT_CATEGORY,
+			icon: subscriptionUsageIcon,
+			precondition: IsSessionsWindowContext,
+			menu: [
+				// After AI Costs (40) in the Sessions header.
+				{ id: Menus.SidebarSessionsHeader, group: 'navigation', order: 50 },
+			],
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		// Opens the page full screen over the chat, like AI Costs.
+		await accessor.get(ICommandService).executeCommand(SHOW_SUBSCRIPTION_USAGE_COMMAND_ID);
+	}
+}
+registerAction2(OpenSubscriptionUsageAction);
