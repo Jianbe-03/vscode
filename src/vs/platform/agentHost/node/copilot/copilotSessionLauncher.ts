@@ -13,7 +13,7 @@ import { generateUuid } from '../../../../base/common/uuid.js';
 import { IFileService } from '../../../files/common/files.js';
 import { ILogService, LogLevel } from '../../../log/common/log.js';
 import { AgentSession } from '../../common/agent.js';
-import { getByokLmSelectionModelId, resolveByokLmEnablement, type IByokLmModelInfo } from '../../common/agentHostByokLm.js';
+import { getByokLmAgentModelId, getByokLmKeyLock, getByokLmSelectionModelId, isByokLmModelAllowedByLock, resolveByokLmEnablement, type IByokLmModelInfo } from '../../common/agentHostByokLm.js';
 import { AgentHostByokModelsEnabledConfigKey, AgentHostMcpConnectorsEnabledConfigKey, AgentHostSessionSyncEnabledConfigKey, platformRootSchema, type AgentHostMcpServers } from '../../common/agentHostSchema.js';
 import { CopilotCliConfigKey, copilotCliConfigSchema, normalizeModelFamilyAlias, normalizeToolSearchDeferThreshold, resolveModelCapabilityOverrideField } from '../../common/copilotCliConfig.js';
 import { IAgentHostOTelService } from '../../common/otel/agentHostOTelService.js';
@@ -542,12 +542,18 @@ function toSdkCapiSessionOptions(autoTier: AutoModeTier | undefined): Pick<Sessi
  * Extracted from {@link CopilotSessionLauncher} so the synthesis and gating are
  * unit-testable without instantiating the launcher; the launcher passes a
  * `startProxy` thunk that memoizes the single shared proxy handle.
+ *
+ * CreaEditor: when `selectedModelId` is a model of a provider group (a named API
+ * key, e.g. an OpenRouter key), only that group's models are surfaced, so the
+ * runtime's `task` tool, `/subagents` and agent `model:` overrides cannot resolve
+ * a model of another key, and the proxy locks the session to that key.
  */
 export async function resolveByokSessionConfig(
 	sessionId: string,
 	bridgeRegistry: IByokLmBridgeRegistry,
 	startProxy: () => Promise<IByokLmProxyHandle>,
 	logService: ILogService,
+	selectedModelId?: string,
 ): Promise<{ providers?: NamedProviderConfig[]; models?: ProviderModelConfig[] }> {
 	// Surface the serving window's BYOK models. The registry does not union
 	// windows' model sets — all serving windows expose the same set, so it picks
@@ -576,6 +582,13 @@ export async function resolveByokSessionConfig(
 		seenSelectionIds.add(selectionId);
 		return true;
 	});
+	// CreaEditor: a session on a key-scoped model only ever sees that key's models.
+	const selectedModel = selectedModelId !== undefined ? byokModels.find(m => getByokLmAgentModelId(m) === selectedModelId) : undefined;
+	const keyLock = selectedModel && getByokLmKeyLock(selectedModel);
+	if (keyLock) {
+		byokModels = byokModels.filter(m => isByokLmModelAllowedByLock(m, keyLock));
+		logService.info(`[Copilot:${sessionId}] Locked to the ${keyLock.vendor} key '${keyLock.group}': ${byokModels.length} BYOK model(s) of that key are available`);
+	}
 	// `startProxy` binds a local loopback listener — unlikely to fail, but it
 	// must never break session materialization (which fires the cross-window
 	// `sessionAdded` broadcast). Degrade to no BYOK config on failure.
@@ -585,6 +598,9 @@ export async function resolveByokSessionConfig(
 	} catch (err) {
 		logService.warn(`[Copilot:${sessionId}] Failed to start BYOK loopback proxy`, err);
 		return {};
+	}
+	if (keyLock) {
+		handle.lockSession(sessionId, keyLock);
 	}
 	const providers: NamedProviderConfig[] = [...new Set(byokModels.map(m => m.vendor))].map(vendor => ({
 		name: vendor,
@@ -864,7 +880,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 	 * active bridge registry and a `startProxy` thunk that memoizes the single
 	 * shared proxy handle for this launcher (started lazily on first use).
 	 */
-	private _resolveByokSessionConfig(sessionId: string): Promise<{ providers?: NamedProviderConfig[]; models?: ProviderModelConfig[] }> {
+	private _resolveByokSessionConfig(sessionId: string, selectedModelId: string | undefined): Promise<{ providers?: NamedProviderConfig[]; models?: ProviderModelConfig[] }> {
 		const rootConfigValue = this._configurationService.getRootValue(platformRootSchema, AgentHostByokModelsEnabledConfigKey);
 		const { enabled, trace } = resolveByokLmEnablement(rootConfigValue);
 		this._logService.trace(`[Copilot:${sessionId}] BYOK session configuration ${trace}`);
@@ -876,7 +892,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 				this._byokProxyHandle = this._byokLmProxyService.start();
 			}
 			return this._byokProxyHandle;
-		}, this._logService);
+		}, this._logService, selectedModelId);
 	}
 
 	/**
@@ -908,7 +924,8 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		// Synthesize BYOK provider/model config (empty when BYOK is gated off or the
 		// renderer reports no BYOK models), merged into the returned config so both
 		// createSession and resumeSession advertise the models to the runtime.
-		const byok = await this._resolveByokSessionConfig(plan.sessionId);
+		// CreaEditor: the selected model locks the session to its API key (provider group).
+		const byok = await this._resolveByokSessionConfig(plan.sessionId, (plan.kind === 'create' ? plan.model : plan.fallback.model)?.id);
 		const hydraFusionEnabled = this._configurationService.getRootValue(copilotCliConfigSchema, CopilotCliConfigKey.HydraFusion) === true;
 		const copilotConnectorsEnabled = this._configurationService.getRootValue(platformRootSchema, AgentHostMcpConnectorsEnabledConfigKey) === true;
 		// The runtime defaults CONNECTORS on, so the VS Code rollout gate must explicitly disable it.

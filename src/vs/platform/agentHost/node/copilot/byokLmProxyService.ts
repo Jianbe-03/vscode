@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type * as http from 'http';
+import { localize } from '../../../../nls.js';
+import { getByokLmKeyLock, getByokLmSelectionModelId, IByokLmKeyLock } from '../../common/agentHostByokLm.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
@@ -49,6 +51,13 @@ export interface IByokLmProxyHandle extends ILoopbackProxyHandle {
 	 * runtime appends `/responses` to this URL.
 	 */
 	providerBaseUrl(vendor: string): string;
+	/**
+	 * CreaEditor: locks a session to one API key (provider group). The proxy then rejects every
+	 * request of that session (and of its subagents, which share its bearer) for a model of
+	 * another key. A session that is not locked explicitly is locked to the key of its first
+	 * request for a grouped model.
+	 */
+	lockSession(sessionId: string, lock: IByokLmKeyLock): void;
 }
 
 export const IByokLmProxyService = createDecorator<IByokLmProxyService>('byokLmProxyService');
@@ -73,11 +82,16 @@ const VENDOR_PATH_PREFIX = '/v/';
 const RESPONSES_SUFFIX = '/responses';
 
 /**
- * The BYOK proxy keeps no per-bind mutable state: the active renderer bridge is
- * resolved from {@link IByokLmBridgeRegistry} at request time, and the nonce
- * lives on the runtime owned by {@link LoopbackProxyServer}.
+ * The active renderer bridge is resolved from {@link IByokLmBridgeRegistry} at
+ * request time, and the nonce lives on the runtime owned by
+ * {@link LoopbackProxyServer}. CreaEditor: the only per-bind state is the API
+ * key each session is locked to; a rebind mints a fresh nonce, so every session
+ * relaunches and locks itself again.
  */
-type ByokLmProxyState = undefined;
+interface IByokLmProxyState {
+	readonly sessionKeyLocks: Map<string, IByokLmKeyLock>;
+}
+type ByokLmProxyState = IByokLmProxyState;
 
 /**
  * Local OpenAI-compatible HTTP proxy that lets the Copilot SDK runtime run
@@ -104,8 +118,8 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 	}
 
 	protected createState(): ByokLmProxyState {
-		// No per-bind state — the bridge is resolved from the registry per request.
-		return undefined;
+		// The bridge is resolved from the registry per request; only the session key locks live here.
+		return { sessionKeyLocks: new Map() };
 	}
 
 	async start(): Promise<IByokLmProxyHandle> {
@@ -116,6 +130,9 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 			baseUrl: runtime.baseUrl,
 			nonce: runtime.nonce,
 			providerBaseUrl: (vendor: string) => `${runtime.baseUrl}${VENDOR_PATH_PREFIX}${encodeURIComponent(vendor)}`,
+			lockSession: (sessionId: string, lock: IByokLmKeyLock) => {
+				runtime.state.sessionKeyLocks.set(sessionId, lock);
+			},
 			dispose: () => {
 				if (disposed) {
 					return;
@@ -152,7 +169,7 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 
 		const vendor = this._parseVendorFromResponsesPath(pathname);
 		if (method === 'POST' && vendor !== undefined) {
-			await this._handleResponses(req, res, runtime, vendor);
+			await this._handleResponses(req, res, runtime, vendor, auth.sessionId);
 			return;
 		}
 
@@ -185,7 +202,7 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 		return vendor;
 	}
 
-	private async _handleResponses(req: http.IncomingMessage, res: http.ServerResponse, runtime: ILoopbackProxyRuntime<ByokLmProxyState>, vendor: string): Promise<void> {
+	private async _handleResponses(req: http.IncomingMessage, res: http.ServerResponse, runtime: ILoopbackProxyRuntime<ByokLmProxyState>, vendor: string, sessionId: string): Promise<void> {
 		let body: IResponsesRequest;
 		try {
 			const raw = await readProxyRequestBody(req);
@@ -201,6 +218,14 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 		} catch (err) {
 			const message = err instanceof ResponsesTranslationError ? err.message : String(err);
 			this._writeJsonError(res, 400, message, 'invalid_request_error');
+			return;
+		}
+
+		// CreaEditor: a session never uses another API key than the one it is locked to.
+		const keyLockError = this._checkSessionKeyLock(runtime.state, sessionId, vendor, bridgeRequest.modelId);
+		if (keyLockError) {
+			this._logService.warn(`[${PROXY_USER_FACING_NAME}] ${keyLockError}`);
+			this._writeJsonError(res, 403, keyLockError, 'permission_error');
 			return;
 		}
 
@@ -259,6 +284,32 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 			res.removeListener('close', onClose);
 			runtime.inFlight.delete(entry);
 		}
+	}
+
+	/**
+	 * CreaEditor: checks a request against the API key its session is locked to, and locks a session
+	 * that is not locked yet to the key of its first request for a grouped model. Returns the error
+	 * message when the request targets another key.
+	 */
+	private _checkSessionKeyLock(state: ByokLmProxyState, sessionId: string, vendor: string, modelId: string): string | undefined {
+		const model = this._bridgeRegistry.getModels().find(candidate => candidate.vendor === vendor && getByokLmSelectionModelId(candidate) === modelId);
+		const lock = state.sessionKeyLocks.get(sessionId);
+		if (!lock) {
+			const modelLock = model && getByokLmKeyLock(model);
+			if (modelLock) {
+				state.sessionKeyLocks.set(sessionId, modelLock);
+			}
+			return undefined;
+		}
+		// A model the bridge does not report (yet) is judged by its `<group>/<id>` selection id; the
+		// renderer then resolves exactly that group's model or fails.
+		const allowed = model
+			? model.vendor === lock.vendor && getByokLmKeyLock(model)?.group === lock.group
+			: vendor === lock.vendor && modelId.startsWith(`${lock.group}/`);
+		if (allowed) {
+			return undefined;
+		}
+		return localize('byokLmProxy.otherKey', "This chat runs on the {0} key \"{1}\" and cannot use model \"{2}\" of another key. Chats and their subagents never switch keys; start a new chat to use another key.", lock.vendor, lock.group, model?.name ?? modelId);
 	}
 
 	private _writeJsonError(res: http.ServerResponse, status: number, message: string, type = 'api_error'): void {

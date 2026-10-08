@@ -444,6 +444,79 @@ suite('ByokLmProxyService', () => {
 		}
 	});
 
+	suite('key lock', () => {
+
+		const keyModels: IByokLmModelInfo[] = [
+			{ vendor: 'openrouter', id: 'anthropic/claude-opus', name: 'Claude Opus (Work key)', modelIdentifier: 'openrouter/Work key/anthropic/claude-opus' },
+			{ vendor: 'openrouter', id: 'anthropic/claude-opus', name: 'Claude Opus (Personal key)', modelIdentifier: 'openrouter/Personal key/anthropic/claude-opus' },
+		];
+
+		/** Posts one request per model for `session` and returns the status codes and the models the bridge served. */
+		async function postModels(lock: ((handle: IByokLmProxyHandle) => void) | undefined, session: string, models: string[]): Promise<{ statuses: number[]; served: string[]; errors: string[] }> {
+			const registry = new ByokLmBridgeRegistry();
+			const served: string[] = [];
+			const registration = registry.register('client-1', servingConnection(async request => {
+				served.push(request.modelId);
+				return { output: [{ type: 'message', content: [{ type: 'text', text: 'ok' }] }] };
+			}, keyModels));
+			const service = new ByokLmProxyService(new NullLogService(), registry);
+			const handle = await service.start();
+			const statuses: number[] = [];
+			const errors: string[] = [];
+			try {
+				lock?.(handle);
+				for (const model of models) {
+					const response = await fetch(responsesUrl(handle, 'openrouter'), {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${handle.nonce}.${session}` },
+						body: JSON.stringify({ model, input: [] }),
+					});
+					statuses.push(response.status);
+					if (!response.ok) {
+						errors.push(((await response.json()) as { error: { message: string } }).error.message);
+					} else {
+						await response.text();
+					}
+				}
+			} finally {
+				handle.dispose();
+				registration.dispose();
+				service.dispose();
+			}
+			return { statuses, served, errors };
+		}
+
+		test('rejects a model of another key for a locked session', async () => {
+			const result = await postModels(
+				handle => handle.lockSession(sessionId, { vendor: 'openrouter', group: 'Work key' }),
+				sessionId,
+				['Work key/anthropic/claude-opus', 'Personal key/anthropic/claude-opus'],
+			);
+			assert.deepStrictEqual({ statuses: result.statuses, served: result.served, namesKey: result.errors.map(error => error.includes('"Work key"') && error.includes('Claude Opus (Personal key)')) }, {
+				statuses: [200, 403],
+				served: ['Work key/anthropic/claude-opus'],
+				namesKey: [true],
+			});
+		});
+
+		test('locks a session to the key of its first request', async () => {
+			const result = await postModels(undefined, sessionId, ['Personal key/anthropic/claude-opus', 'Work key/anthropic/claude-opus', 'Personal key/anthropic/claude-opus']);
+			assert.deepStrictEqual({ statuses: result.statuses, served: result.served }, {
+				statuses: [200, 403, 200],
+				served: ['Personal key/anthropic/claude-opus', 'Personal key/anthropic/claude-opus'],
+			});
+		});
+
+		test('does not apply the lock of one session to another session', async () => {
+			const result = await postModels(
+				handle => handle.lockSession(sessionId, { vendor: 'openrouter', group: 'Work key' }),
+				'other-session',
+				['Personal key/anthropic/claude-opus'],
+			);
+			assert.deepStrictEqual(result.statuses, [200]);
+		});
+	});
+
 	test('rebinds with a fresh nonce after every handle is disposed', async () => {
 		const registry = new ByokLmBridgeRegistry();
 		const registration = registry.register('client-1', servingConnection(async () => ({ output: [{ type: 'message', content: [{ type: 'text', text: 'ok' }] }] })));

@@ -180,6 +180,40 @@ export function getByokLmAgentModelId(model: IByokLmModelInfo): string {
 	return `${model.vendor}/${getByokLmSelectionModelId(model)}`;
 }
 
+/**
+ * CreaEditor: the provider group (a named API key, e.g. an OpenRouter key) a BYOK model belongs to,
+ * read from its `<vendor>/<group>/<id>` identifier; `undefined` for a model without a group.
+ */
+export function getByokLmProviderGroup(model: IByokLmModelInfo): string | undefined {
+	const identifier = model.modelIdentifier;
+	const prefix = `${model.vendor}/`;
+	const suffix = `/${model.id}`;
+	if (!identifier || !identifier.startsWith(prefix) || !identifier.endsWith(suffix) || identifier.length <= prefix.length + suffix.length) {
+		return undefined;
+	}
+	return identifier.slice(prefix.length, identifier.length - suffix.length);
+}
+
+/**
+ * CreaEditor: the API key a session is locked to. A session that starts on a model of a provider
+ * group only ever uses models of that vendor and group, for itself and for all of its subagents.
+ */
+export interface IByokLmKeyLock {
+	readonly vendor: string;
+	readonly group: string;
+}
+
+/** CreaEditor: the key lock of a BYOK model, or `undefined` when the model has no provider group. */
+export function getByokLmKeyLock(model: IByokLmModelInfo): IByokLmKeyLock | undefined {
+	const group = getByokLmProviderGroup(model);
+	return group !== undefined ? { vendor: model.vendor, group } : undefined;
+}
+
+/** CreaEditor: whether a BYOK model may be used by a session with the given key lock. */
+export function isByokLmModelAllowedByLock(model: IByokLmModelInfo, lock: IByokLmKeyLock | undefined): boolean {
+	return !lock || (model.vendor === lock.vendor && getByokLmProviderGroup(model) === lock.group);
+}
+
 /** Resolves BYOK enablement and trace context from synchronized root configuration. */
 export function resolveByokLmEnablement(rootConfigValue: boolean | undefined): { readonly enabled: boolean; readonly trace: string } {
 	// CreaEditor: BYOK models are the only models available, so they are enabled unless explicitly turned off.

@@ -17,7 +17,7 @@ import { ServiceCollection } from '../../../instantiation/common/serviceCollecti
 import { ILogService, LogLevel, NullLogService } from '../../../log/common/log.js';
 import { McpServerType } from '../../../mcp/common/mcpPlatformTypes.js';
 import type { TerminalSandboxEngine } from '../../../sandbox/common/terminalSandboxEngine.js';
-import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmKeyLock, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
 import { AgentHostByokModelsEnabledConfigKey, AgentHostMcpConnectorsEnabledConfigKey, platformSessionSchema, type SchemaValues } from '../../common/agentHostSchema.js';
 import type { IAgentHostManagedSettingsPermissions } from '../../common/agentHostManagedSettings.js';
 import { toClientPluginMcpDefaultCwdsMeta } from '../../common/meta/clientPluginCustomizationMeta.js';
@@ -369,14 +369,17 @@ suite('resolveByokSessionConfig', () => {
 	/** A fake proxy handle plus a `startProxy` thunk that records its call count. */
 	function countingProxy() {
 		let starts = 0;
+		const locks: [string, IByokLmKeyLock][] = [];
 		const handle: IByokLmProxyHandle = {
 			baseUrl: 'http://127.0.0.1:1',
 			nonce: 'NONCE',
 			providerBaseUrl: vendor => `http://127.0.0.1:1/v/${vendor}`,
+			lockSession: (id, lock) => { locks.push([id, lock]); },
 			dispose: () => { },
 		};
 		return {
 			get starts() { return starts; },
+			locks,
 			startProxy: async () => { starts++; return handle; },
 		};
 	}
@@ -458,6 +461,46 @@ suite('resolveByokSessionConfig', () => {
 			{ id: 'Gemini Personal/gemini-2.5-pro', provider: 'google' },
 			{ id: 'Gemini Work/gemini-2.5-pro', provider: 'google' },
 		]);
+	});
+
+	test('only surfaces the key of a session that runs on a provider group model and locks the session to it', async () => {
+		const registry = new ByokLmBridgeRegistry();
+		const registration = registry.register('client-1', connectionOf([
+			{ vendor: 'openrouter', id: 'anthropic/claude-opus', name: 'Claude Opus (Work key)', modelIdentifier: 'openrouter/Work key/anthropic/claude-opus' },
+			{ vendor: 'openrouter', id: 'openai/gpt-5', name: 'GPT-5 (Work key)', modelIdentifier: 'openrouter/Work key/openai/gpt-5' },
+			{ vendor: 'openrouter', id: 'anthropic/claude-opus', name: 'Claude Opus (Personal key)', modelIdentifier: 'openrouter/Personal key/anthropic/claude-opus' },
+			{ vendor: 'acme', id: 'claude', name: 'Acme Claude' },
+		]));
+		const proxy = countingProxy();
+
+		const config = await resolveByokSessionConfig(sessionId, registry, proxy.startProxy, log, 'openrouter/Work key/anthropic/claude-opus');
+		registration.dispose();
+
+		assert.deepStrictEqual({ providers: config.providers?.map(p => p.name), models: config.models, locks: proxy.locks }, {
+			providers: ['openrouter'],
+			models: [
+				{ id: 'Work key/anthropic/claude-opus', provider: 'openrouter', name: 'Claude Opus (Work key)' },
+				{ id: 'Work key/openai/gpt-5', provider: 'openrouter', name: 'GPT-5 (Work key)' },
+			],
+			locks: [[sessionId, { vendor: 'openrouter', group: 'Work key' }]],
+		});
+	});
+
+	test('surfaces every key and does not lock a session on a model without a provider group', async () => {
+		const registry = new ByokLmBridgeRegistry();
+		const registration = registry.register('client-1', connectionOf([
+			{ vendor: 'openrouter', id: 'anthropic/claude-opus', modelIdentifier: 'openrouter/Work key/anthropic/claude-opus' },
+			{ vendor: 'acme', id: 'claude', modelIdentifier: 'acme/claude' },
+		]));
+		const proxy = countingProxy();
+
+		const config = await resolveByokSessionConfig(sessionId, registry, proxy.startProxy, log, 'acme/claude');
+		registration.dispose();
+
+		assert.deepStrictEqual({ models: config.models?.map(m => m.id), locks: proxy.locks }, {
+			models: ['Work key/anthropic/claude-opus', 'claude'],
+			locks: [],
+		});
 	});
 
 	test('synthesized provider config routes through a live proxy to the bridge', async () => {
@@ -551,6 +594,7 @@ suite('CopilotSessionLauncher BYOK proxy lifecycle', () => {
 					baseUrl: 'http://127.0.0.1:1',
 					nonce,
 					providerBaseUrl: vendor => `http://127.0.0.1:1/v/${vendor}`,
+					lockSession: () => { },
 					dispose: () => { disposes++; },
 				};
 			},
