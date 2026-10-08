@@ -232,7 +232,9 @@ const tokens = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3)
 const issueLabel = e => e.issueLabel || '';
 function filtered() {
 	const days = Number($('period').value);
-	const since = days ? Date.now() - days * 864e5 : 0;
+	// Whole local days, today included, the same as the Advanced tab.
+	const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - (days - 1));
+	const since = days ? start.getTime() : 0;
 	const gateway = $('gateway').value;
 	const q = $('search').value.trim().toLowerCase();
 	return entries.filter(e => e.time >= since && (!gateway || e.gateway === gateway) && (!q || [issueLabel(e), e.chatTitle, e.repo, e.branch, e.model].some(v => v && String(v).toLowerCase().includes(q))));
