@@ -241,7 +241,7 @@ Type `/creacoon-pet` (or use **Pet** in the same right-click menu) for the Creac
 
 ## Subscription accounts
 
-Claude and Codex can each run on **several subscription accounts** (for example a work and a personal Claude Max plan). The accounts of a provider form one pool: the model picker keeps a single Claude and a single Codex entry, new work goes to the first account that has room, and a chat whose account is used up can continue on the next one.
+Claude and Codex can each run on **several subscription accounts** (for example a work and a personal Claude Max plan, or five work accounts); there is no limit on how many. The accounts of a provider form one pool: the model picker keeps a single Claude and a single Codex entry, new work goes to the first account that has room, and a chat whose account is used up can continue on the next one.
 
 **Adding accounts** (Command Palette, category Chat):
 
