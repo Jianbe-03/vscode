@@ -5,6 +5,7 @@
 
 import type { AccountInfo, Query, SDKControlGetUsageResponse, SDKMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import assert from 'assert';
+import { timeout } from '../../../../../base/common/async.js';
 import { Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -269,6 +270,47 @@ suite('claudeSubscriptionAccounts', () => {
 				probes: ['bad-token', 'good-token'],
 				periodicProbes: 0,
 				chat: 'good',
+			});
+		});
+
+		test('five work accounts are all used, and at most two are read at the same time', async () => {
+			const work: IStoredSubscriptionAccount[] = [1, 2, 3, 4, 5].map(n => ({ id: `work-${n}`, label: `Work ${n}`, kind: 'token' }));
+			let running = 0;
+			let mostAtOnce = 0;
+			const sdk: Partial<IClaudeAgentSdkService> = {
+				canLoadWithoutDownload: async () => true,
+				query: async ({ prompt }) => {
+					running++;
+					mostAtOnce = Math.max(mostAtOnce, running);
+					const query = fakeQuery(prompt, goodTurn);
+					const accountInfo = query.accountInfo;
+					return { ...query, accountInfo: async () => { await timeout(5); return accountInfo(); }, close: () => { running--; } } as Query;
+				},
+			};
+			const accountsService: Partial<ISubscriptionAccountsService> = {
+				onDidChangeStoredAccounts: Event.None,
+				registerProvider: () => Disposable.None,
+				getStoredAccounts: () => work,
+				setStoredAccounts: () => { },
+				isAutoSwitchEnabled: () => false,
+			};
+			const accounts = store.add(new ClaudeSubscriptionAccounts(
+				{ switchChat: async () => { }, refreshModels: () => { } },
+				accountsService as ISubscriptionAccountsService,
+				sdk as IClaudeAgentSdkService,
+				{ userHome: URI.file('/home/u') } as INativeEnvironmentService,
+				new NullLogService(),
+			));
+			for (const account of work) {
+				accounts.setToken(account.id, `${account.id}-token`);
+			}
+			await accounts.refreshUsage({ explicit: true });
+			assert.deepStrictEqual({
+				accounts: accounts.getAccounts().map(account => ({ id: account.id, status: account.status })),
+				mostAtOnce,
+			}, {
+				accounts: work.map(account => ({ id: account.id, status: 'signedIn' })),
+				mostAtOnce: 2,
 			});
 		});
 

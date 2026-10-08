@@ -29,6 +29,7 @@
 import type { AccountInfo, Options, SDKControlGetUsageResponse, SDKMessage, SDKRateLimitInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
+import { Limiter } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../../base/common/lifecycle.js';
 import { join } from '../../../../base/common/path.js';
@@ -433,6 +434,9 @@ export interface IClaudeSubscriptionAccountsDelegate {
  * The Claude accounts of the agent host: keeps their state and tokens, reads their usage through the
  * SDK, signs `login` accounts in and decides which account a chat runs on.
  */
+/** How many accounts are read at the same time; every read runs its own Claude CLI process. */
+const MAX_PARALLEL_ACCOUNT_READS = 2;
+
 export class ClaudeSubscriptionAccounts extends Disposable implements ISubscriptionAccountsProvider {
 	readonly provider = 'claude' as const;
 
@@ -444,6 +448,8 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	private readonly _tokens = new Map<string, string>();
 	private readonly _chatAccounts = new Map<string, string>();
 	private readonly _usageReads = new Map<string, { readonly validate: boolean; readonly read: Promise<void> }>();
+	/** Each read starts a Claude CLI process, so with many accounts only a few run at once. */
+	private readonly _readLimiter = this._register(new Limiter<void>(MAX_PARALLEL_ACCOUNT_READS));
 	private readonly _logins = new Map<string, ChildProcess>();
 
 	constructor(
@@ -752,7 +758,8 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		if (pending && (pending.validate || !validate)) {
 			return pending.read;
 		}
-		const read = (pending ? pending.read.then(() => this._doReadAccount(id, validate)) : this._doReadAccount(id, validate)).finally(() => {
+		const queued = () => this._store.isDisposed ? Promise.resolve() : this._readLimiter.queue(() => this._doReadAccount(id, validate));
+		const read = (pending ? pending.read.then(queued) : queued()).finally(() => {
 			if (this._usageReads.get(id)?.read === read) {
 				this._usageReads.delete(id);
 			}
