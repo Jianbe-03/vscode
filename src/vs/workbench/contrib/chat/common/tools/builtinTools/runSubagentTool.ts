@@ -23,7 +23,7 @@ import { ChatRequestVariableSet } from '../../attachments/chatVariableEntries.js
 import { isByokModel } from '../../chatSelectedModel.js';
 import { IChatProgress, IChatService } from '../../chatService/chatService.js';
 import { ChatAgentLocation, ChatConfiguration, ChatModeKind } from '../../constants.js';
-import { AUTO_RAW_MODEL_ID, COPILOT_VENDOR_ID, ILanguageModelChatMetadata, ILanguageModelsService } from '../../languageModels.js';
+import { AUTO_RAW_MODEL_ID, COPILOT_VENDOR_ID, ILanguageModelChatMetadata, ILanguageModelChatMetadataAndIdentifier, ILanguageModelsService } from '../../languageModels.js';
 import type { ChatModel, IChatRequestModeInstructions } from '../../model/chatModel.js';
 import { getChatSessionType } from '../../model/chatUri.js';
 import { IChatAgentRequest, IChatAgentResult, IChatAgentService, UserSelectedTools } from '../../participants/chatAgents.js';
@@ -514,9 +514,13 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 	 * Includes which models are unavailable due to multiplier restrictions.
 	 */
 	private getAvailableModelsInfo(mainModelId: string | undefined): string {
+		const mainModelMetadata = mainModelId ? this.languageModelsService.lookupLanguageModel(mainModelId) : undefined;
+		const keyScope = mainModelMetadata?.providerGroupName !== undefined ? mainModelMetadata : undefined;
 		const models = this.languageModelsService.getLanguageModelIds()
 			.map(id => ({ id, metadata: this.languageModelsService.lookupLanguageModel(id) }))
-			.filter((m): m is { id: string; metadata: ILanguageModelChatMetadata } => !!m.metadata && this.isSelectableForAgentMode(m.metadata));
+			.filter((m): m is { id: string; metadata: ILanguageModelChatMetadata } => !!m.metadata && this.isSelectableForAgentMode(m.metadata))
+			// CreaEditor: a chat on a provider group (API key) only offers the models of that key.
+			.filter(m => !keyScope || ILanguageModelChatMetadata.isSameProviderGroup(m.metadata, keyScope));
 
 		if (models.length === 0) {
 			return 'No models available.';
@@ -568,13 +572,19 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 		let selectionSource: SubagentModelSelectionSource = 'mainModel';
 		const mainModelMetadata = mainModelId ? this.languageModelsService.lookupLanguageModel(mainModelId) : undefined;
 
+		// CreaEditor: a chat on a model of a provider group (a named API key, e.g. an OpenRouter key)
+		// keeps every subagent on that key: models are only looked up within the main model's group.
+		const keyScope = mainModelMetadata?.providerGroupName !== undefined ? mainModelMetadata : undefined;
+
 		// Explicit model parameter takes highest priority
 		if (explicitModelQualifiedName) {
-			const lm = this.languageModelsService.lookupLanguageModelByQualifiedName(explicitModelQualifiedName);
+			const lm = this.lookupSubagentModelByQualifiedName(explicitModelQualifiedName, keyScope);
 			if (lm?.identifier) {
 				modeModelId = lm.identifier;
 				explicitModelResolved = true;
 				selectionSource = 'explicitModel';
+			} else if (keyScope && this.languageModelsService.lookupLanguageModelByQualifiedName(explicitModelQualifiedName)) {
+				throw new Error(`Requested model '${explicitModelQualifiedName}' is not available with the key '${keyScope.providerGroupName}' this chat uses; subagents never switch keys. ${this.getAvailableModelsInfo(mainModelId)}`);
 			} else {
 				// Model not found - throw error with available models
 				throw new Error(`Requested model '${explicitModelQualifiedName}' not found. ${this.getAvailableModelsInfo(mainModelId)}`);
@@ -591,7 +601,7 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 				const skipCopilotFallbacks = mainModelIsByok && isBuiltinAgent(subagent.source, subagent.uri, this.productService);
 				// Find the actual model identifier from the qualified name(s)
 				for (const qualifiedName of modeModelQualifiedNames) {
-					const lmByQualifiedName = this.languageModelsService.lookupLanguageModelByQualifiedName(qualifiedName);
+					const lmByQualifiedName = this.lookupSubagentModelByQualifiedName(qualifiedName, keyScope);
 					if (lmByQualifiedName?.identifier) {
 						if (skipCopilotFallbacks && lmByQualifiedName.metadata.vendor === COPILOT_VENDOR_ID) {
 							continue;
@@ -630,6 +640,24 @@ export class RunSubagentTool extends Disposable implements IToolImpl {
 
 		const resolvedModelMetadata = modeModelId ? this.languageModelsService.lookupLanguageModel(modeModelId) : undefined;
 		return { modeModelId, resolvedModelName: resolvedModelMetadata?.name, selectionSource };
+	}
+
+	/**
+	 * CreaEditor: looks up a model by its qualified name. When the main model belongs to a provider
+	 * group (API key), only models of that same group are considered, so a subagent can never run on
+	 * another key; an agent's model that the key does not offer then falls back to the main model.
+	 */
+	private lookupSubagentModelByQualifiedName(qualifiedName: string, keyScope: ILanguageModelChatMetadata | undefined): ILanguageModelChatMetadataAndIdentifier | undefined {
+		if (!keyScope) {
+			return this.languageModelsService.lookupLanguageModelByQualifiedName(qualifiedName);
+		}
+		for (const identifier of this.languageModelsService.getLanguageModelIds()) {
+			const metadata = this.languageModelsService.lookupLanguageModel(identifier);
+			if (metadata && ILanguageModelChatMetadata.isSameProviderGroup(metadata, keyScope) && ILanguageModelChatMetadata.matchesQualifiedName(qualifiedName, metadata)) {
+				return { metadata, identifier };
+			}
+		}
+		return undefined;
 	}
 
 	private async inheritedAgentHasModel(subagent: ICustomAgent | undefined, currentModeInstructions: IChatRequestModeInstructions | undefined): Promise<boolean> {

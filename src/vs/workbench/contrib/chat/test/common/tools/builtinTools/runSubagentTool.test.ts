@@ -1295,6 +1295,69 @@ suite('RunSubagentTool', () => {
 		});
 	});
 
+	suite('provider group (API key) isolation', () => {
+		function keyModel(name: string, group: string): ILanguageModelChatMetadata {
+			return { ...createMetadata(`${name} (${group})`, undefined, 'openrouter'), id: name.toLowerCase().replace(/\s+/g, '-'), providerGroupName: group };
+		}
+
+		const models = new Map([
+			['openrouter/Work key/claude-opus', keyModel('Claude Opus', 'Work key')],
+			['openrouter/Work key/gpt-5', keyModel('GPT-5', 'Work key')],
+			['openrouter/Personal key/claude-opus', keyModel('Claude Opus', 'Personal key')],
+			['openrouter/Personal key/gemini-pro', keyModel('Gemini Pro', 'Personal key')],
+		]);
+		// The service-wide lookup is not scoped to a key: it returns the first match of any key.
+		const qualifiedNameMap = new Map([
+			['Claude Opus', { metadata: models.get('openrouter/Personal key/claude-opus')!, identifier: 'openrouter/Personal key/claude-opus' }],
+			['Gemini Pro', { metadata: models.get('openrouter/Personal key/gemini-pro')!, identifier: 'openrouter/Personal key/gemini-pro' }],
+		]);
+
+		function createTool(customAgents?: ICustomAgent[]) {
+			const promptsService = new MockPromptsService();
+			if (customAgents) {
+				promptsService.setCustomModes(customAgents);
+			}
+			return testDisposables.add(new RunSubagentTool(
+				{} as IChatAgentService,
+				{} as IChatService,
+				testDisposables.add(new MockLanguageModelToolsService()),
+				createLanguageModelsServiceMock(models, { qualifiedNameMap }),
+				new NullLogService(),
+				new TestConfigurationService(),
+				promptsService,
+				{} as IInstantiationService,
+				{} as IProductService,
+				NullTelemetryService,
+			));
+		}
+
+		async function resolveModelId(tool: RunSubagentTool, parameters: { agentName?: string; model?: string }): Promise<string | undefined> {
+			const result = await tool.prepareToolInvocation({
+				parameters: { prompt: 'test', description: 'test task', ...parameters },
+				toolCallId: `key-call-${++callIdCounter}`,
+				modelId: 'openrouter/Work key/gpt-5',
+				chatSessionResource: URI.parse('test://session'),
+			}, CancellationToken.None);
+			return result?.toolSpecificData?.kind === 'subagent' ? result.toolSpecificData.modelId : undefined;
+		}
+
+		test('resolves an explicit model by its bare name within the key of the main model', async () => {
+			assert.strictEqual(await resolveModelId(createTool(), { model: 'Claude Opus' }), 'openrouter/Work key/claude-opus');
+		});
+
+		test('rejects an explicit model that only another key offers', async () => {
+			await assert.rejects(
+				() => resolveModelId(createTool(), { model: 'Gemini Pro' }),
+				(err: Error) => err.message.includes('is not available with the key \'Work key\'') && !err.message.includes('Personal key'),
+			);
+		});
+
+		test('keeps the main model when the agent\'s model is only offered by another key', async () => {
+			const tool = createTool([createAgent('Researcher', ['Gemini Pro'])]);
+			assert.strictEqual(await resolveModelId(tool, { agentName: 'Researcher' }), 'openrouter/Work key/gpt-5');
+		});
+	});
+
 	suite('subagent allowlist', () => {
 		let callIdCounter = 0;
 
