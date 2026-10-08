@@ -98,7 +98,7 @@ export function getAdvancedStrings() {
 		bucketWeek: l10n.t('Week'),
 		bucketMonth: l10n.t('Month'),
 		weekOf: l10n.t('Week of {0}'),
-		chartHint: l10n.t('Click a bar, legend entry or row to filter on it.'),
+		chartHint: l10n.t('Click a bar, legend entry or row to add a filter on it. Values of the same kind match any of them; different kinds all apply.'),
 		timelineAria: l10n.t('Stacked bars of the cost over time. The pivot table and requests table show the same data.'),
 		breakdownTitle: l10n.t('Breakdown'),
 		breakdownBy: l10n.t('By'),
@@ -138,6 +138,24 @@ export function getAdvancedStrings() {
 		fGatewayHost: l10n.t('Gateway host'),
 		fCostFull: l10n.t('Cost (USD)'),
 		noMatch: l10n.t('No requests match these filters.'),
+		compareLabel: l10n.t('Compare'),
+		compareOff: l10n.t('No comparison'),
+		comparePrevious: l10n.t('With the previous period'),
+		compareMonth: l10n.t('This month vs last month'),
+		compareTitle: l10n.t('Compared with the previous period'),
+		compareMonthTitle: l10n.t('This month vs last month'),
+		comparePeriods: l10n.t('{0} vs {1}'),
+		compareNoRange: l10n.t('Pick a date range with a start to compare it with the period before it.'),
+		compareBy: l10n.t('By'),
+		compareThis: l10n.t('This period'),
+		comparePrev: l10n.t('Previous'),
+		compareChange: l10n.t('Change'),
+		vsPrevious: l10n.t('{0} vs previous period'),
+		previousValue: l10n.t('Previous period: {0}'),
+		changeUp: l10n.t('up'),
+		changeDown: l10n.t('down'),
+		changeNew: l10n.t('new'),
+		changeSame: l10n.t('no change'),
 	};
 }
 
@@ -159,6 +177,7 @@ export function getAdvancedMarkup(s: ReturnType<typeof getAdvancedStrings>): str
 			<input id="a-min" class="cost-input" type="number" min="0" step="any" placeholder="${e(s.minShort)}" aria-label="${e(s.minCost)}">
 			<input id="a-max" class="cost-input" type="number" min="0" step="any" placeholder="${e(s.maxShort)}" aria-label="${e(s.maxCost)}">
 			<input id="a-text" class="text-input" type="search" placeholder="${e(s.advancedSearch)}" aria-label="${e(s.advancedSearch)}">
+			<select id="a-compare" aria-label="${e(s.compareLabel)}"><option value="off">${e(s.compareOff)}</option><option value="previous">${e(s.comparePrevious)}</option><option value="month">${e(s.compareMonth)}</option></select>
 		</div>
 		<div class="filter-row" id="a-multis"></div>
 		<div class="filter-row">
@@ -173,6 +192,16 @@ export function getAdvancedMarkup(s: ReturnType<typeof getAdvancedStrings>): str
 	<div id="a-empty" class="empty" hidden></div>
 	<div id="a-content">
 		<div class="cards" id="a-kpis"></div>
+		<section class="panel" id="a-compare-panel" hidden>
+			<div class="panel-head">
+				<h2 id="a-compare-title">${e(s.compareTitle)}</h2>
+				<span class="controls">
+					<span id="a-compare-periods" class="muted"></span>
+					<label>${e(s.compareBy)} <select id="a-compare-by"><option value="key">${e(s.dim_key)}</option><option value="model">${e(s.dim_model)}</option></select></label>
+				</span>
+			</div>
+			<div id="a-compare-table" class="table-wrap"></div>
+		</section>
 		<section class="panel">
 			<div class="panel-head">
 				<h2>${e(s.timelineTitle)}</h2>
@@ -361,6 +390,18 @@ export const ADVANCED_STYLES = `
 	.menu summary::-webkit-details-marker { display: none; }
 	.menu summary:hover { background: var(--vscode-toolbar-hoverBackground); }
 	.menu-body { position: absolute; right: 0; z-index: 5; display: flex; flex-direction: column; gap: 4px; min-width: 200px; padding: 8px; background: var(--vscode-editorWidget-background); border: var(--vscode-strokeThickness, 1px) solid var(--vscode-editorWidget-border, var(--vscode-widget-border, transparent)); border-radius: var(--vscode-cornerRadius-large, 8px); box-shadow: 0 4px 16px var(--vscode-widget-shadow, transparent); }
+	.card .delta { font-size: var(--vscode-fontSize-body2, 11px); margin-top: 2px; color: var(--vscode-descriptionForeground); font-variant-numeric: tabular-nums; }
+	.delta .arrow { font-weight: var(--vscode-fontWeight-semiBold, 600); }
+	.delta.up .arrow { color: var(--vscode-charts-orange); }
+	.delta.down .arrow { color: var(--vscode-charts-blue); }
+	.compare th.group { text-align: center; border-left: var(--vscode-strokeThickness, 1px) solid var(--vscode-widget-border, var(--vscode-panel-border)); }
+	.compare td.first, .compare th.first { border-left: var(--vscode-strokeThickness, 1px) solid var(--vscode-widget-border, var(--vscode-panel-border)); }
+	.compare tbody tr:not(.other) { cursor: pointer; }
+	.compare tbody tr:not(.other):hover { background: var(--vscode-list-hoverBackground); }
+	.compare tbody th { font-weight: normal; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-foreground); font-size: inherit; }
+	.compare tbody tr.other th, .compare tbody tr.other td { color: var(--vscode-descriptionForeground); }
+	.compare-empty { padding: 24px 0; text-align: center; color: var(--vscode-descriptionForeground); }
+	.compare tfoot td, .compare tfoot th { font-weight: 600; }
 	.pager { display: flex; gap: 12px; align-items: center; justify-content: flex-end; margin-top: 12px; }
 	.pager button:disabled { opacity: 0.5; cursor: default; }
 `;
@@ -386,7 +427,7 @@ function defaultFilters() {
 	return { range: '30', from: '', to: '', values: {}, kind: 'both', withoutCost: false, minCost: '', maxCost: '', text: '' };
 }
 function defaultView() {
-	return { bucket: 'auto', stackBy: 'key', breakdownBy: 'model', pivotRows: 'issue', pivotColumns: 'key', pivotMetric: 'cost', pivotSort: 'total', pivotDescending: true, sortColumn: 'time', sortDescending: true, page: 0, hidden: ['cachedTokens', 'costSource', 'requestId'] };
+	return { bucket: 'auto', stackBy: 'key', breakdownBy: 'model', pivotRows: 'issue', pivotColumns: 'key', pivotMetric: 'cost', pivotSort: 'total', pivotDescending: true, sortColumn: 'time', sortDescending: true, page: 0, hidden: ['cachedTokens', 'costSource', 'requestId'], compare: 'previous', compareBy: 'key' };
 }
 
 const savedState = vscode.getState() || {};
@@ -449,7 +490,7 @@ function queryFilters() {
 	};
 }
 function queryOptions() {
-	return { bucket: view.bucket, stackBy: view.stackBy, breakdownBy: view.breakdownBy, pivotRows: view.pivotRows, pivotColumns: view.pivotColumns, sortColumn: view.sortColumn, sortDescending: view.sortDescending, page: view.page, pageSize: PAGE_SIZE };
+	return { bucket: view.bucket, stackBy: view.stackBy, breakdownBy: view.breakdownBy, pivotRows: view.pivotRows, pivotColumns: view.pivotColumns, sortColumn: view.sortColumn, sortDescending: view.sortDescending, page: view.page, pageSize: PAGE_SIZE, compare: view.compare !== 'off' };
 }
 function scheduleQuery(delay) {
 	saveState();
@@ -464,13 +505,20 @@ function filtersChanged() {
 	syncControls();
 	scheduleQuery();
 }
+/**
+ * Adds a drill-down filter. A value of a dimension that already has a filter is added to it (any of
+ * the values matches); filters of different dimensions all apply. Returns whether anything changed.
+ */
 function applyDimension(dimension, value) {
 	if (value === OTHER) { return false; }
 	if (dimension === 'kind') {
+		if (filters.kind === value) { return false; }
 		filters.kind = value;
-	} else {
-		filters.values = Object.assign({}, filters.values, { [dimension]: [value] });
+		return true;
 	}
+	const current = filters.values[dimension] || [];
+	if (current.includes(value)) { return false; }
+	filters.values = Object.assign({}, filters.values, { [dimension]: current.concat([value]) });
 	return true;
 }
 
@@ -515,6 +563,9 @@ function syncControls() {
 	$('a-pivot-rows').value = view.pivotRows;
 	$('a-pivot-columns').value = view.pivotColumns;
 	$('a-pivot-metric').value = view.pivotMetric;
+	if (view.compare === 'month' && filters.range !== 'thisMonth') { view.compare = 'previous'; }
+	$('a-compare').value = view.compare;
+	$('a-compare-by').value = view.compareBy;
 	renderMultiButtons();
 	renderChips();
 }
@@ -748,6 +799,7 @@ function drillTimeline(i, s) {
 	filters.from = isoDay(b.start);
 	filters.to = isoDay(b.end - 1);
 	if (s !== undefined) { applyDimension(view.stackBy, result.timeline.series[s].value); }
+	if (view.compare === 'month') { view.compare = 'previous'; }
 	filtersChanged();
 }
 
@@ -802,24 +854,84 @@ function tokensPointer(event) {
 
 // ---- KPI cards ----
 
+/** The change from the previous period as an arrow and a percentage, e.g. "▲ 12%". */
+function changeParts(current, previous) {
+	if (current === undefined || previous === undefined) { return undefined; }
+	const absolute = current - previous;
+	if (Math.abs(absolute) < 1e-9) { return { cls: '', arrow: '=', text: S.changeSame, aria: S.changeSame }; }
+	const up = absolute > 0;
+	const percent = previous ? Math.abs(absolute / previous) : undefined;
+	const text = percent === undefined ? S.changeNew : (percent * 100).toFixed(percent < 0.1 ? 1 : 0) + '%';
+	return { cls: up ? 'up' : 'down', arrow: up ? '▲' : '▼', text, aria: (up ? S.changeUp : S.changeDown) + ' ' + text };
+}
+function changeHtml(current, previous) {
+	const parts = changeParts(current, previous);
+	return parts ? '<span class="delta ' + parts.cls + '" aria-label="' + esc(parts.aria) + '"><span class="arrow" aria-hidden="true">' + esc(parts.arrow) + '</span> <span aria-hidden="true">' + esc(parts.text) + '</span></span>' : '<span class="muted">–</span>';
+}
 function renderKpis() {
 	const k = result.kpis;
+	const p = result.comparison ? result.comparison.previousKpis : undefined;
 	const cards = [
-		{ label: S.kTotal, value: money(k.cost), sub: k.withoutCost ? fmt(S.kWithoutCost, num(k.withoutCost)) : '', cls: 'total' },
-		{ label: S.requests, value: num(k.requests) },
-		{ label: S.kAvg, value: money(k.averageCost) },
-		{ label: S.kMedian, value: money(k.medianCost) },
-		{ label: S.kP95, value: money(k.p95Cost), title: S.kP95Title },
-		{ label: S.kPrompt, value: tokens(k.promptTokens) },
-		{ label: S.kCompletion, value: tokens(k.completionTokens) },
-		{ label: S.kCached, value: tokens(k.cachedTokens) },
-		{ label: S.kCacheShare, value: pct(k.cacheShare), title: S.kCacheShareTitle },
-		{ label: S.kPerMillion, value: money(k.costPerMillionTokens), title: S.kPerMillionTitle },
-		{ label: S.kPerDay, value: money(k.averagePerActiveDay), sub: fmt(k.activeDays === 1 ? S.kOneDay : S.kDays, num(k.activeDays)) },
+		{ label: S.kTotal, value: money(k.cost), sub: k.withoutCost ? fmt(S.kWithoutCost, num(k.withoutCost)) : '', cls: 'total', field: 'cost', format: money },
+		{ label: S.requests, value: num(k.requests), field: 'requests', format: num },
+		{ label: S.kAvg, value: money(k.averageCost), field: 'averageCost', format: money },
+		{ label: S.kMedian, value: money(k.medianCost), field: 'medianCost', format: money },
+		{ label: S.kP95, value: money(k.p95Cost), title: S.kP95Title, field: 'p95Cost', format: money },
+		{ label: S.kPrompt, value: tokens(k.promptTokens), field: 'promptTokens', format: tokens },
+		{ label: S.kCompletion, value: tokens(k.completionTokens), field: 'completionTokens', format: tokens },
+		{ label: S.kCached, value: tokens(k.cachedTokens), field: 'cachedTokens', format: tokens },
+		{ label: S.kCacheShare, value: pct(k.cacheShare), title: S.kCacheShareTitle, field: 'cacheShare', format: pct },
+		{ label: S.kPerMillion, value: money(k.costPerMillionTokens), title: S.kPerMillionTitle, field: 'costPerMillionTokens', format: money },
+		{ label: S.kPerDay, value: money(k.averagePerActiveDay), sub: fmt(k.activeDays === 1 ? S.kOneDay : S.kDays, num(k.activeDays)), field: 'averagePerActiveDay', format: money },
 		k.projection ? { label: S.kProjected, value: money(k.projection.projected), sub: fmt(S.kSoFar, money(k.projection.monthCost)), title: fmt(S.kProjectedTitle, money(k.projection.monthCost), k.projection.daysElapsed, k.projection.daysInMonth) } : undefined,
 		{ label: S.kSubagentShare, value: pct(k.subagentShare) },
 	].filter(Boolean);
-	$('a-kpis').innerHTML = cards.map(c => '<div class="card ' + (c.cls || '') + '"' + (c.title ? ' title="' + esc(c.title) + '"' : '') + '><div class="label">' + esc(c.label) + '</div><div class="value">' + esc(c.value) + '</div>' + (c.sub ? '<div class="sub">' + esc(c.sub) + '</div>' : '') + '</div>').join('');
+	$('a-kpis').innerHTML = cards.map(c => {
+		const parts = p && c.field ? changeParts(k[c.field], p[c.field]) : undefined;
+		const delta = parts ? '<div class="delta ' + parts.cls + '" title="' + esc(fmt(S.previousValue, c.format(p[c.field]))) + '"><span class="arrow" aria-hidden="true">' + esc(parts.arrow) + '</span> ' + esc(fmt(S.vsPrevious, parts.text)) + '</div>' : '';
+		return '<div class="card ' + (c.cls || '') + '"' + (c.title ? ' title="' + esc(c.title) + '"' : '') + '><div class="label">' + esc(c.label) + '</div><div class="value">' + esc(c.value) + '</div>' + (c.sub ? '<div class="sub">' + esc(c.sub) + '</div>' : '') + delta + '</div>';
+	}).join('');
+}
+
+// ---- Comparison with the previous period ----
+
+function periodLabel(period) {
+	const from = new Date(period.from);
+	const last = new Date(period.to - 1);
+	const options = { month: 'short', day: 'numeric', year: from.getFullYear() !== last.getFullYear() || from.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined };
+	const start = from.toLocaleDateString(undefined, options);
+	const end = last.toLocaleDateString(undefined, options);
+	return start === end ? start : start + ' – ' + end;
+}
+function renderComparison() {
+	const panel = $('a-compare-panel');
+	panel.hidden = view.compare === 'off';
+	if (panel.hidden) { return; }
+	const c = result.comparison;
+	$('a-compare-title').textContent = view.compare === 'month' ? S.compareMonthTitle : S.compareTitle;
+	if (!c) {
+		$('a-compare-periods').textContent = '';
+		$('a-compare-table').innerHTML = '<div class="compare-empty">' + esc(S.compareNoRange) + '</div>';
+		return;
+	}
+	$('a-compare-periods').textContent = fmt(S.comparePeriods, periodLabel(c.current), periodLabel(c.previous));
+	const dim = view.compareBy;
+	const rows = dim === 'model' ? c.byModel : c.byKey;
+	const metrics = [[S.metricCost, a => a.cost, money], [S.metricRequests, a => a.requests, num], [S.metricTokens, a => a.promptTokens + a.completionTokens, tokens]];
+	const cells = (current, previous) => metrics.map(([, value, format]) => {
+		const x = value(current); const y = value(previous);
+		const absolute = x - y;
+		const sign = absolute > 0 ? '+' : absolute < 0 ? '−' : '';
+		return '<td class="num first">' + esc(format(x)) + '</td><td class="num muted">' + esc(format(y)) + '</td><td class="num">' + esc(sign + format(Math.abs(absolute))) + '</td><td class="num">' + changeHtml(x, y) + '</td>';
+	}).join('');
+	let html = '<table class="compare"><thead><tr><th rowspan="2">' + esc(S['dim_' + dim]) + '</th>' + metrics.map(([label]) => '<th class="group" colspan="4">' + esc(label) + '</th>').join('') + '</tr><tr>'
+		+ metrics.map(() => '<th class="num first">' + esc(S.compareThis) + '</th><th class="num">' + esc(S.comparePrev) + '</th><th class="num">' + esc(S.compareChange) + '</th><th class="num">%</th>').join('') + '</tr></thead><tbody>';
+	rows.forEach((row, i) => {
+		const label = labelOf(dim, row);
+		html += '<tr data-i="' + i + '"' + (row.value === OTHER ? ' class="other"' : ' tabindex="0"') + '><th scope="row" title="' + esc(label) + '">' + esc(label) + '</th>' + cells(row.current, row.previous) + '</tr>';
+	});
+	html += '</tbody><tfoot><tr><th scope="row">' + esc(S.totalCol) + '</th>' + cells(c.total.current, c.total.previous) + '</tr></tfoot></table>';
+	$('a-compare-table').innerHTML = html;
 }
 
 // ---- Breakdown ----
@@ -956,6 +1068,7 @@ function renderAdvanced() {
 	$('a-content').hidden = empty;
 	if (empty) { return; }
 	renderKpis();
+	renderComparison();
 	renderTimeline();
 	renderBreakdown();
 	renderTokens();
@@ -1035,6 +1148,23 @@ function initAdvanced() {
 		});
 	}
 	$('a-pivot-metric').addEventListener('change', event => { view.pivotMetric = event.target.value; saveState(); renderPivot(); });
+	$('a-compare').addEventListener('change', event => {
+		view.compare = event.target.value;
+		if (view.compare === 'month' && filters.range !== 'thisMonth') {
+			filters.range = 'thisMonth';
+			filtersChanged();
+			return;
+		}
+		scheduleQuery(0);
+	});
+	$('a-compare-by').addEventListener('change', event => { view.compareBy = event.target.value; saveState(); if (result) { renderComparison(); } });
+	const drillComparison = event => {
+		const tr = event.target.closest('tbody tr');
+		const rows = result && result.comparison ? (view.compareBy === 'model' ? result.comparison.byModel : result.comparison.byKey) : [];
+		if (tr && !tr.classList.contains('other') && rows[Number(tr.dataset.i)] && applyDimension(view.compareBy, rows[Number(tr.dataset.i)].value)) { filtersChanged(); }
+	};
+	$('a-compare-table').addEventListener('click', drillComparison);
+	$('a-compare-table').addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); drillComparison(event); } });
 
 	const timeline = $('a-timeline');
 	timeline.addEventListener('pointermove', event => {
@@ -1092,7 +1222,7 @@ function initAdvanced() {
 		const p = result.pivot;
 		let changed = applyDimension(view.pivotRows, p.rows[Number(tr.dataset.r)].value);
 		const cell = event.target.closest('td.cell');
-		if (cell && view.pivotColumns !== 'none') { changed = applyDimension(view.pivotColumns, p.columns[Number(cell.dataset.c)].value) && changed; }
+		if (cell && view.pivotColumns !== 'none') { changed = applyDimension(view.pivotColumns, p.columns[Number(cell.dataset.c)].value) || changed; }
 		if (changed) { filtersChanged(); }
 	});
 
