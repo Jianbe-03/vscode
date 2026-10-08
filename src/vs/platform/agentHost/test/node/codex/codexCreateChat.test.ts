@@ -54,6 +54,8 @@ import { ICodexProxyService } from '../../../node/codex/codexProxyService.js';
 import type { HookMetadata } from '../../../node/codex/protocol/generated/v2/HookMetadata.js';
 import type { JsonValue } from '../../../node/codex/protocol/generated/serde_json/JsonValue.js';
 import { ICopilotApiService } from '../../../node/shared/copilotApiService.js';
+import { ISubscriptionAccountsService, type ISubscriptionAccountsProvider } from '../../../node/shared/subscriptionAccountsService.js';
+import { SUBSCRIPTION_LIMIT_ERROR_META_KEY, type ISubscriptionAccount } from '../../../common/meta/subscriptionAccounts.js';
 import { createSessionDataService, TestSessionDatabase } from '../../common/sessionTestHelpers.js';
 import { createTestGitHubEndpointService } from '../testGitHubEndpointService.js';
 import { createNoopCustomizationEnablementService } from '../testCustomizationEnablementService.js';
@@ -167,6 +169,8 @@ interface ICreateAgentOptions {
 	 */
 	readonly otelService?: Pick<IAgentHostOTelService, 'getSessionTraceContext' | 'releaseSessionTraceContext'>;
 	readonly logService?: ILogService;
+	/** CreaEditor: the pooled subscription accounts the agent registers its Codex accounts with. */
+	readonly subscriptionAccountsService?: ISubscriptionAccountsService;
 }
 
 /**
@@ -254,6 +258,9 @@ async function createAgent(disposables: Pick<DisposableStore, 'add'>, options: I
 	instantiationService.stub(IFileService, fileService);
 	instantiationService.stub(ILogService, logService);
 	instantiationService.stub(ITelemetryService, NullTelemetryService);
+	if (options.subscriptionAccountsService) {
+		instantiationService.stub(ISubscriptionAccountsService, options.subscriptionAccountsService);
+	}
 	const agent = disposables.add(instantiationService.createInstance(CodexAgent));
 	agent['_probeAccountAtStartup'] = async () => { };
 	agent['_activated'] = true;
@@ -4577,5 +4584,99 @@ suite('CodexAgent chat backing durability', () => {
 		} finally {
 			peer.dispose();
 		}
+	});
+});
+
+suite('CodexAgent subscription account limits', () => {
+
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	/** A turn on the default account that Codex refuses because the subscription is used up. */
+	async function runLimitedTurn(autoSwitch: boolean) {
+		const providers: ISubscriptionAccountsProvider[] = [];
+		const agent = await createAgent(disposables, {
+			sdkResolvableWithoutDownload: true,
+			subscriptionAccountsService: {
+				_serviceBrand: undefined,
+				onDidChangeStoredAccounts: Event.None,
+				registerProvider: provider => {
+					providers.push(provider);
+					return toDisposable(() => { });
+				},
+				getStoredAccounts: () => [{ id: 'work', label: 'Work', kind: 'login' }],
+				setStoredAccounts: () => { },
+				isAutoSwitchEnabled: () => autoSwitch,
+				publish: () => { },
+			},
+		});
+		agent.setServerToolHost(createRecordingServerToolHost([]));
+		const peer = disposables.add(createTestPeer());
+		connectPeer(agent, peer);
+		const connection = agent['_connection'];
+		assert.ok(connection.kind === 'ready');
+		agent['_connection'] = { ...connection, accountId: 'codex-default' };
+		peer.disposables.add(connection.client.onNotification('turn/started', params => agent['_dispatchByThread'](params.threadId, session => agent['_handleTurnStartedNotification'](session, params))));
+		peer.disposables.add(connection.client.onNotification('turn/completed', params => agent['_dispatchTurnCompleted'](params)));
+		agent['_accountPool'].update('codex-default', { status: 'signedIn' });
+		agent['_accountPool'].update('work', { status: 'signedIn' });
+		const continued: { accountId: string; prompt: string; turnId: string }[] = [];
+		agent['_continueOnCodexAccount'] = async (_session, accountId, prompt, turnId) => { continued.push({ accountId, prompt, turnId }); };
+
+		const sessionUri = AgentSession.uri('codex', 'session-limit');
+		const chat = URI.parse(buildDefaultChatUri(sessionUri));
+		const folder = URI.file('/repo/limit');
+		await createSessionBackedChat(agent, chat, { configurationResource: sessionUri, resource: chat }, { workingDirectories: [folder], model: { id: COPILOT_TEST_MODEL } });
+		const entry = agent['_sessions'].get('session-limit')!;
+		const start = await readNextRequest(peer.outbound);
+		peer.push({ id: start.id, result: { thread: { id: 'limit-thread', cwd: folder.fsPath } } });
+		await entry.materializePromise;
+		const sending = agent.chats.sendMessage(chat, 'hello', [folder], undefined, 'turn-1', undefined, undefined, { configurationResource: sessionUri, resource: chat });
+		const turn = await readNextRequest(peer.outbound);
+		peer.push({ id: turn.id, result: {} });
+		await sending;
+		// Only the OpenAI provider bills the ChatGPT subscription.
+		entry.materializedModelProvider = 'openai';
+
+		const actions: { type: string; part?: unknown }[] = [];
+		disposables.add(agent.onDidChatProgress(event => {
+			if (event.kind === 'action') {
+				actions.push(event.action as { type: string; part?: unknown });
+			}
+		}));
+		const appTurn = { id: 'app-turn-1', items: [], itemsView: 'full', startedAt: 1, completedAt: 2, durationMs: 1000 };
+		peer.push({ method: 'turn/started', params: { threadId: 'limit-thread', turn: { ...appTurn, status: 'inProgress', error: null } } });
+		peer.push({ method: 'turn/completed', params: { threadId: 'limit-thread', turn: { ...appTurn, status: 'failed', error: { message: 'You have hit your usage limit.', codexErrorInfo: 'usageLimitExceeded', additionalDetails: null, misalignment: null } } } });
+		await new Promise(resolve => setImmediate(resolve));
+		peer.dispose();
+		const accounts: readonly ISubscriptionAccount[] = providers[0].getAccounts();
+		return { actions, continued, accounts };
+	}
+
+	test('asks before moving the chat when auto-switch is off', async () => {
+		const { actions, continued, accounts } = await runLimitedTurn(false);
+		const error = actions.find(action => action.type === ActionType.ChatError)?.part as { error: { _meta?: Record<string, unknown> } } | undefined;
+		const meta = error?.error._meta?.[SUBSCRIPTION_LIMIT_ERROR_META_KEY] as Record<string, unknown> | undefined;
+		assert.deepStrictEqual({
+			actions: actions.map(action => action.type),
+			meta: meta ? { ...meta, resetsAt: typeof meta.resetsAt } : undefined,
+			continued,
+			statuses: accounts.map(account => [account.id, account.status]),
+		}, {
+			actions: [ActionType.ChatError, ActionType.ChatTurnComplete],
+			meta: { provider: 'codex', accountId: 'codex-default', accountLabel: 'Codex Default', resetsAt: 'number', nextAccountId: 'work', nextAccountLabel: 'Work' },
+			continued: [],
+			statuses: [['codex-default', 'limited'], ['work', 'signedIn']],
+		});
+	});
+
+	test('continues the turn on the next account when auto-switch is on', async () => {
+		const { actions, continued } = await runLimitedTurn(true);
+		assert.deepStrictEqual({
+			actions: actions.map(action => action.type === ActionType.ChatResponsePart ? (action.part as { kind: string }).kind : action.type),
+			continued,
+		}, {
+			actions: [ResponsePartKind.SystemNotification],
+			continued: [{ accountId: 'work', prompt: 'hello', turnId: 'turn-1' }],
+		});
 	});
 });

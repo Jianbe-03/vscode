@@ -44,7 +44,7 @@ import { ActionType, isChatAction, type SessionAction, type ChatAction } from '.
 import { parseLeadingSlashCommand } from '../../common/agentHostSlashCommand.js';
 import type { ConfigSchema, ModelSelection, ProtectedResourceMetadata, ToolDefinition, AgentSelection } from '../../common/state/protocol/state.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
-import { buildDefaultChatUri, chatStorageUri, createErrorResponsePart, isDefaultChatUri, parseRequiredSessionUriFromChatUri, withSessionWorkspaceless, CustomizationType, type ClientPluginCustomization, type DirectoryCustomization, type ISessionFolderPickerDecision, type McpServerCustomization, type MessageAttachment, type PendingMessage, type ChatInputAnswer, ChatInputResponseKind, type PluginCustomization, type PolicyState, type ToolCallResult, ToolResultContentType, type Turn, ResponsePartKind } from '../../common/state/sessionState.js';
+import { buildDefaultChatUri, chatStorageUri, createErrorResponsePart, isDefaultChatUri, parseRequiredSessionUriFromChatUri, withSessionWorkspaceless, CustomizationType, type ClientPluginCustomization, type DirectoryCustomization, type ISessionFolderPickerDecision, type McpServerCustomization, type MessageAttachment, type PendingMessage, type ChatInputAnswer, ChatInputResponseKind, type PluginCustomization, type PolicyState, type ToolCallResult, ToolResultContentType, type Turn, ResponsePartKind, MessageKind } from '../../common/state/sessionState.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { ActiveClientToolSet } from '../activeClientState.js';
 import { CodexChatDiscovery } from './codexChatDiscovery.js';
@@ -104,6 +104,12 @@ import { THREAD_LIST_MAX_PAGES, collectThreadListPages } from './codexThreadList
 import { ICodexRolloutMetadata, ICodexRolloutModel, readCodexRolloutMetadata } from './codexRolloutMetadata.js';
 import { codexAccountRateLimitsFromResponse, codexAccountStateFromResponse, type ICodexAccountState } from './codexAccountState.js';
 import { getCodexAccountTelemetryContext } from './codexAccountTelemetry.js';
+// CreaEditor: several Codex (ChatGPT subscription) accounts pooled behind one model picker entry.
+import { SUBSCRIPTION_LIMIT_ERROR_META_KEY, type ISubscriptionAccountsRequest } from '../../common/meta/subscriptionAccounts.js';
+import { ISubscriptionAccountsService, type IStoredSubscriptionAccount } from '../shared/subscriptionAccountsService.js';
+import { CODEX_DEFAULT_ACCOUNT_ID, CodexAccountPool } from './codexAccountPool.js';
+import { getCodexAccountHome, prepareCodexAccountHome, removeCodexAccountSignIn, resolveDefaultCodexHome } from './codexAccountHomes.js';
+import { codexContinuationPrompt, codexLimitErrorMeta, codexUsageWindows, isCodexUsageLimitError } from './codexSubscriptionAccounts.js';
 import type { IAgentProviderTurnTelemetryContext } from '../../common/agentHostTelemetry.js';
 import { CodexProfileImageStore, fetchCodexProfileImage } from './codexProfileImage.js';
 import { CodexSessionConfigKey, CODEX_DEFAULT_PERMISSIONS_PRESET, CODEX_PERMISSIONS_PRESETS, collaborationModeKind, getCodexAutonomousSessionConfig, migrateCodexPermissionValues, narrowAdditionalDirectories, narrowBoolean, narrowPersonality, narrowReasoningEffort, narrowReasoningSummary, narrowWebSearchMode, resolveCodexPermissions, type CodexApprovalPolicy, type CodexPermissionsPreset, type ICodexResolvedPermissions } from './codexSessionConfigKeys.js';
@@ -262,6 +268,8 @@ const CODEX_RESPONSES_ENDPOINT = '/responses';
 const CODEX_COPILOT_MODEL_PROVIDER = 'vscode-proxy';
 const CODEX_COPILOT_MODEL_GROUP = 'copilot';
 const CODEX_OPENAI_MODEL_PROVIDER = 'openai';
+/** CreaEditor: how long an added Codex account waits for its browser sign-in. */
+const CODEX_ACCOUNT_SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
 const CODEX_MODEL_SELECTION_PREFIX = '@provider=';
 const CODEX_MODEL_CATALOG_TIMEOUT_MS = 15_000;
 const CODEX_MODEL_CATALOG_MAX_BUFFER = 8 * 1024 * 1024;
@@ -904,6 +912,8 @@ type ConnectionState =
 
 interface IConnectionReady {
 	readonly client: ICodexAppServerClient;
+	/** CreaEditor: the pooled account whose CODEX_HOME this app-server runs in. */
+	readonly accountId: string;
 	/** Resolved by app-server, so discovery follows its effective configured home. */
 	readonly codexHome?: URI;
 	readonly proxyHandle: ICodexProxyHandle;
@@ -1304,6 +1314,14 @@ export class CodexAgent extends Disposable implements IAgent {
 	private _codexModels: readonly IAgentModelInfo[] = [];
 	private readonly _metadataStore: CodexSessionMetadataStore;
 	private _lastSignInRequest: string | undefined;
+	/** CreaEditor: the pooled Codex accounts and the one the app-server runs on. */
+	private readonly _accountPool = this._register(new CodexAccountPool());
+	/** CreaEditor: serializes short-lived app-servers started to sign in or read the usage of an idle account. */
+	private readonly _accountConnectionSequencer = new Sequencer();
+	/** CreaEditor: stops the short-lived account app-servers when the agent shuts down. */
+	private readonly _accountConnectionCancellation = this._register(new CancellationTokenSource());
+	/** CreaEditor: chats whose turn ended at an account limit, keyed by chat URI, for a `switchChat` request. */
+	private readonly _limitedChats = new Map<string, { readonly sessionId: string; readonly prompt: string }>();
 	private _lastSignOutRequest: string | undefined;
 	private readonly _worktree: IAgentHostWorktreePendingState;
 
@@ -1337,12 +1355,15 @@ export class CodexAgent extends Disposable implements IAgent {
 		@ISessionDataService private readonly _sessionDataService: ISessionDataService,
 		@ITelemetryService private readonly _telemetryService: ITelemetryService,
 		@IAgentHostStartupPerformance private readonly _startupPerformance: IAgentHostStartupPerformance,
+		// CreaEditor: may be missing where the host (or a test) does not offer pooled subscription accounts.
+		@ISubscriptionAccountsService private readonly _subscriptionAccountsService: ISubscriptionAccountsService,
 	) {
 		super();
 		this._worktree = worktree;
 		this._metadataStore = this._instantiationService.createInstance(CodexSessionMetadataStore);
 		this._githubMcpServerEnabled = this._isGitHubMcpServerEnabled();
 		this._publishAccountInfo({ status: 'unknown' });
+		this._registerSubscriptionAccounts();
 		if (isAgentHostTelemetryService(this._telemetryService)) {
 			this._register(this._telemetryService.registerCopilotSkuProvider(this.id, () => this.getTelemetryContext().copilotSku));
 		}
@@ -1453,6 +1474,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		if (_publish) {
 			this._publishAccountInfo(this._toAccountInfo(state));
 		}
+		this._mirrorDefaultCodexAccount();
 	}
 
 	captureTurnTelemetryContext(): IAgentProviderTurnTelemetryContext {
@@ -1462,6 +1484,398 @@ export class CodexAgent extends Disposable implements IAgent {
 	private _publishAccountInfo(account: ICodexAccountInfo): void {
 		this._configurationService.publishRootTransientValues?.({ [CODEX_ACCOUNT_META_KEY]: account });
 	}
+
+	// #region CreaEditor: pooled subscription accounts
+
+	/**
+	 * Offers the Codex accounts to the shared subscription accounts service. The app-server runs in one
+	 * account's CODEX_HOME at a time; moving to another account restarts it there and every chat resumes
+	 * its thread on the new process, as after any app-server restart.
+	 */
+	private _registerSubscriptionAccounts(): void {
+		const service = this._subscriptionAccountsService;
+		if (!service) {
+			return;
+		}
+		const readStored = () => {
+			this._accountPool.setStoredAccounts(service.getStoredAccounts('codex'));
+			void this._readStoredCodexSignIns();
+		};
+		readStored();
+		this._register(service.onDidChangeStoredAccounts(provider => {
+			if (provider === 'codex') {
+				readStored();
+			}
+		}));
+		this._register(service.registerProvider({
+			provider: 'codex',
+			onDidChangeAccounts: this._accountPool.onDidChange,
+			getAccounts: () => this._accountPool.getAccounts(Date.now()),
+			handleRequest: request => this._handleSubscriptionAccountsRequest(request),
+			refreshUsage: () => this._refreshCodexAccountsUsage(),
+		}));
+	}
+
+	/** Whether `connection` runs in the CODEX_HOME of an account the user added rather than the default one. */
+	private _isAddedAccountConnection(connection: IConnectionReady): boolean {
+		return this._accountPool.getStoredAccounts().some(account => account.id === connection.accountId);
+	}
+
+	private _defaultCodexHome(): string {
+		return resolveDefaultCodexHome(process.env[AgentHostCodexAgentCodexHomeEnvVar], this._environmentService.userHome.fsPath);
+	}
+
+	private _codexAccountHome(accountId: string): string {
+		return getCodexAccountHome(this._environmentService.userHome.fsPath, accountId);
+	}
+
+	private async _prepareCodexAccountHome(accountId: string): Promise<string> {
+		const home = this._codexAccountHome(accountId);
+		await prepareCodexAccountHome(this._defaultCodexHome(), home);
+		return home;
+	}
+
+	/** Whether added accounts are signed in, from their `auth.json` alone: no app-server, no network. */
+	private async _readStoredCodexSignIns(): Promise<void> {
+		for (const account of this._accountPool.getStoredAccounts()) {
+			if (this._accountPool.getRuntime(account.id).status) {
+				continue;
+			}
+			const signedIn = await fs.promises.access(join(this._codexAccountHome(account.id), 'auth.json')).then(() => true, () => false);
+			if (!this._accountPool.getRuntime(account.id).status) {
+				this._accountPool.update(account.id, { status: signedIn ? 'signedIn' : 'signedOut' });
+			}
+		}
+	}
+
+	/** Mirrors the default account, which the ChatGPT account menu already tracks, into the pool. */
+	private _mirrorDefaultCodexAccount(): void {
+		const state = this._openAIAccountState;
+		if (state.status === 'signedIn' && state.authType === 'chatgpt') {
+			this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { email: state.email, planType: state.planType });
+			if (this._openAIAccountRateLimits) {
+				this._accountPool.applyUsage(CODEX_DEFAULT_ACCOUNT_ID, codexUsageWindows(this._openAIAccountRateLimits), Date.now(), this._openAIAccountRateLimitUpdatedAt);
+			} else if (this._accountPool.getRuntime(CODEX_DEFAULT_ACCOUNT_ID).status !== 'limited') {
+				this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'signedIn', error: undefined, authUrl: undefined });
+			}
+		} else if (state.status === 'signedOut') {
+			if (this._accountPool.getRuntime(CODEX_DEFAULT_ACCOUNT_ID).status !== 'signingIn') {
+				this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'signedOut', email: undefined, planType: undefined, usage: undefined, usageUpdatedAt: undefined, limitedUntil: undefined });
+			}
+		} else if (state.status === 'error') {
+			this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'error', error: state.error, authUrl: undefined });
+		} else {
+			// No ChatGPT login in the default home (unknown yet, an API key, another provider): not listed.
+			this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: undefined });
+		}
+	}
+
+	/** Reads who `client` is signed in as and its usage, for the account whose CODEX_HOME it runs in. */
+	private async _readCodexAccount(accountId: string, client: ICodexAppServerClient): Promise<void> {
+		let response: GetAccountResponse;
+		try {
+			response = await client.request<'account/read', GetAccountResponse>('account/read', { refreshToken: false });
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._logService.warn(`[Codex] account/read of account ${accountId} failed: ${message}`);
+			this._accountPool.update(accountId, { status: 'error', error: message });
+			return;
+		}
+		const state = codexAccountStateFromResponse(response);
+		if (state.status !== 'signedIn' || state.authType !== 'chatgpt') {
+			if (this._accountPool.getRuntime(accountId).status !== 'signingIn') {
+				this._accountPool.update(accountId, state.status === 'signedOut'
+					? { status: 'signedOut', usage: undefined, limitedUntil: undefined }
+					: { status: 'error', error: localize('codexAccounts.notChatGPT', "This Codex account is not signed in with ChatGPT.") });
+			}
+			return;
+		}
+		this._accountPool.update(accountId, { email: state.email, planType: state.planType });
+		try {
+			const rateLimits = await client.request<'account/rateLimits/read', GetAccountRateLimitsResponse>('account/rateLimits/read', undefined);
+			this._accountPool.applyUsage(accountId, codexUsageWindows(codexAccountRateLimitsFromResponse(rateLimits)), Date.now());
+		} catch (error) {
+			this._logService.warn(`[Codex] account/rateLimits/read of account ${accountId} failed: ${error instanceof Error ? error.message : String(error)}`);
+			if (this._accountPool.getRuntime(accountId).status !== 'limited') {
+				this._accountPool.update(accountId, { status: 'signedIn', error: undefined, authUrl: undefined });
+			}
+		}
+	}
+
+	/**
+	 * Runs `operation` against an app-server in the CODEX_HOME of `accountId`: the retained one when it
+	 * already runs there, otherwise a short-lived one that is stopped afterwards.
+	 */
+	private async _withCodexAccountConnection<T>(accountId: string, operation: (client: ICodexAppServerClient, token: CancellationToken) => Promise<T>): Promise<T> {
+		const retained = this._connection;
+		if (retained.kind === 'ready' && retained.accountId === accountId) {
+			return operation(retained.client, this._accountConnectionCancellation.token);
+		}
+		this._throwIfShuttingDown();
+		await this._startupAccountProbe.p;
+		this._throwIfShuttingDown();
+		const token = this._accountConnectionCancellation.token;
+		let connection: IConnectionReady | undefined;
+		try {
+			connection = await this._startRawConnection(this._startupAccountProbeTimeoutMs, token, accountId);
+			return await operation(connection.client, token);
+		} finally {
+			if (connection) {
+				this._disposeConnectionResources(connection);
+			}
+		}
+	}
+
+	/** Reads the usage of every signed-in account; idle accounts through a short-lived app-server each. */
+	private async _refreshCodexAccountsUsage(): Promise<void> {
+		if (!(await this._isSdkResolvableWithoutDownload())) {
+			return;
+		}
+		const accounts = this._accountPool.getAccounts(Date.now()).filter(account => account.status === 'signedIn' || account.status === 'limited' || account.status === 'error');
+		for (const account of accounts) {
+			await this._accountConnectionSequencer.queue(async () => {
+				try {
+					await this._withCodexAccountConnection(account.id, client => this._readCodexAccount(account.id, client));
+				} catch (error) {
+					if (!(error instanceof CancellationError)) {
+						this._logService.warn(`[Codex] Reading the usage of account ${account.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}
+			});
+		}
+	}
+
+	private async _handleSubscriptionAccountsRequest(request: ISubscriptionAccountsRequest): Promise<void> {
+		const stored = this._accountPool.getStoredAccounts();
+		switch (request.type) {
+			case 'add': {
+				if (request.kind !== 'login' || request.accountId === CODEX_DEFAULT_ACCOUNT_ID || stored.some(account => account.id === request.accountId)) {
+					this._logService.warn(`[Codex] Ignoring request to add ${request.kind} account ${request.accountId}`);
+					return;
+				}
+				this._setStoredCodexAccounts([...stored, { id: request.accountId, label: request.label, kind: 'login' }]);
+				await this._signInCodexAccount(request.accountId, request.id);
+				return;
+			}
+			case 'remove': {
+				if (!stored.some(account => account.id === request.accountId)) {
+					return;
+				}
+				this._setStoredCodexAccounts(stored.filter(account => account.id !== request.accountId));
+				await removeCodexAccountSignIn(this._codexAccountHome(request.accountId));
+				if (this._accountPool.activeAccountId === request.accountId) {
+					this._moveToCodexAccount(this._accountPool.pickAccountForNewWork(Date.now()));
+				}
+				return;
+			}
+			case 'rename':
+				this._setStoredCodexAccounts(stored.map(account => account.id === request.accountId ? { ...account, label: request.label } : account));
+				return;
+			case 'move': {
+				// The default account stays first, so only the added accounts are reordered.
+				const moved = stored.find(account => account.id === request.accountId);
+				if (!moved) {
+					return;
+				}
+				const offset = this._accountPool.getAccounts(Date.now()).some(account => account.id === CODEX_DEFAULT_ACCOUNT_ID) ? 1 : 0;
+				const others = stored.filter(account => account !== moved);
+				const index = Math.max(0, Math.min(others.length, request.index - offset));
+				this._setStoredCodexAccounts([...others.slice(0, index), moved, ...others.slice(index)]);
+				return;
+			}
+			case 'signIn':
+				await this._signInCodexAccount(request.accountId, request.id);
+				return;
+			case 'switchChat':
+				await this._switchChatToCodexAccount(request.chat, request.accountId);
+				return;
+			case 'refreshUsage':
+				await this._refreshCodexAccountsUsage();
+				return;
+		}
+	}
+
+	private _setStoredCodexAccounts(accounts: readonly IStoredSubscriptionAccount[]): void {
+		this._accountPool.setStoredAccounts(accounts);
+		this._subscriptionAccountsService?.setStoredAccounts('codex', accounts);
+	}
+
+	/**
+	 * Signs an account in with ChatGPT. The default account uses the ChatGPT account menu's flow; an added
+	 * account runs `account/login/start` in its own CODEX_HOME and shows the browser URL until Codex
+	 * reports the login completed.
+	 */
+	private async _signInCodexAccount(accountId: string, request: string): Promise<void> {
+		if (accountId === CODEX_DEFAULT_ACCOUNT_ID) {
+			await this._signInToChatGPT(request);
+			return;
+		}
+		if (!this._accountPool.getStoredAccounts().some(account => account.id === accountId)) {
+			return;
+		}
+		try {
+			await this._withCodexAccountConnection(accountId, async (client, token) => {
+				const loginCompleted = new DeferredPromise<{ readonly loginId: string | null; readonly success: boolean; readonly error: string | null }>();
+				const completions: { readonly loginId: string | null; readonly success: boolean; readonly error: string | null }[] = [];
+				const listener = client.onNotification('account/login/completed', params => {
+					completions.push(params);
+					void loginCompleted.complete(params);
+				});
+				try {
+					const response = await client.request<'account/login/start', LoginAccountResponse>('account/login/start', { type: 'chatgpt' });
+					if (response.type !== 'chatgpt') {
+						return;
+					}
+					this._accountPool.update(accountId, { status: 'signingIn', authUrl: response.authUrl, error: undefined });
+					const result = completions.find(completion => completion.loginId === response.loginId) ?? await raceCancellationError(raceTimeout(Promise.race([
+						loginCompleted.p,
+						Event.toPromise(client.onExit).then(event => { throw new Error(`Codex app-server exited during ChatGPT sign-in (code=${event.code}, signal=${event.signal})`); }),
+					]), CODEX_ACCOUNT_SIGN_IN_TIMEOUT_MS), token);
+					if (!result) {
+						throw new Error(localize('codexAccounts.signInTimedOut', "The ChatGPT sign-in was not completed in time."));
+					}
+					if (!result.success) {
+						throw new Error(result.error ?? localize('codexAccounts.signInFailed', "ChatGPT sign-in failed."));
+					}
+					this._accountPool.update(accountId, { authUrl: undefined, status: 'signedIn' });
+					await this._readCodexAccount(accountId, client);
+				} finally {
+					listener.dispose();
+				}
+			});
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._logService.warn(`[Codex] Signing in account ${accountId} failed: ${message}`);
+			this._accountPool.update(accountId, { status: 'error', error: message, authUrl: undefined });
+		}
+	}
+
+	/**
+	 * Restarts the app-server in the CODEX_HOME of `accountId`. Every chat resumes its thread on the new
+	 * process before its next turn; a turn still running on the old account ends as disconnected.
+	 */
+	private _moveToCodexAccount(accountId: string): void {
+		if (this._accountPool.activeAccountId === accountId) {
+			return;
+		}
+		this._logService.info(`[Codex] Moving to account ${accountId}`);
+		this._accountPool.setActiveAccount(accountId);
+		const connection = this._connection;
+		if (connection.kind === 'ready') {
+			this._handleConnectionLost(connection, this._connectionGeneration);
+		} else if (connection.kind === 'starting') {
+			this._disposeConnection();
+		}
+		this._queueModelRefresh();
+	}
+
+	/**
+	 * A turn Codex refused because the ChatGPT account is used up. Marks the account limited, then either
+	 * moves to the next account and continues the turn there, or ends the turn with an error that lets the
+	 * client offer the switch. Returns false when the failure is not about a pooled account.
+	 */
+	private _handleCodexUsageLimit(params: TurnCompletedNotification): boolean {
+		const sessionId = this._sessionIdByThreadId.get(params.threadId);
+		const session = sessionId ? this._sessions.get(sessionId) : undefined;
+		const connection = this._connection;
+		// Only the OpenAI provider bills the ChatGPT subscription; a Copilot quota is not an account limit.
+		if (!session?.chatChannel || connection.kind !== 'ready' || session.materializedModelProvider !== CODEX_OPENAI_MODEL_PROVIDER) {
+			return false;
+		}
+		const now = Date.now();
+		const accountId = connection.accountId;
+		if (!this._accountPool.getAccounts(now).some(account => account.id === accountId)) {
+			return false;
+		}
+		this._accountPool.markLimited(accountId, now);
+		const decision = this._accountPool.decideOnLimit(accountId, this._subscriptionAccountsService?.isAutoSwitchEnabled() === true, now);
+		if (!decision) {
+			return false;
+		}
+		this._logService.info(`[Codex:${session.sessionId}] account ${accountId} reached its usage limit; ${decision.kind === 'switch' ? `continuing on ${decision.next.id}` : 'asking to switch'}`);
+		const hostTurnId = this._hostTurnId(session, params.turn.id);
+		const isCurrentTurn = session.currentTurnId === hostTurnId;
+		const prompt = session.lastPromptText;
+		const actions = this._handleTurnCompletedNotification(session, params);
+		if (decision.kind === 'switch' && isCurrentTurn) {
+			for (const action of actions) {
+				if (action.type !== ActionType.ChatError && action.type !== ActionType.ChatTurnComplete) {
+					this._fire(session.sessionUri, action);
+				}
+			}
+			this._fire(session.sessionUri, {
+				type: ActionType.ChatResponsePart,
+				turnId: hostTurnId,
+				part: {
+					kind: ResponsePartKind.SystemNotification,
+					content: localize('codexAccounts.autoSwitched', "{0} reached its usage limit. Continuing on {1}.", decision.account.label, decision.next.label),
+				},
+			});
+			void this._continueOnCodexAccount(session, decision.next.id, prompt, hostTurnId);
+			return true;
+		}
+		for (const action of actions) {
+			if (action.type === ActionType.ChatError) {
+				const meta = decision.kind === 'ask' ? decision.meta : codexLimitErrorMeta(decision.account, decision.next);
+				this._fire(session.sessionUri, { ...action, part: { ...action.part, error: { ...action.part.error, _meta: { ...action.part.error._meta, [SUBSCRIPTION_LIMIT_ERROR_META_KEY]: meta } } } });
+			} else {
+				this._fire(session.sessionUri, action);
+			}
+		}
+		this._limitedChats.set(session.chatChannel.toString(), { sessionId: session.sessionId, prompt });
+		return true;
+	}
+
+	/** Moves to `accountId` and continues the chat's refused turn there as `turnId`. */
+	private async _continueOnCodexAccount(session: ICodexSession, accountId: string, prompt: string, turnId: string): Promise<void> {
+		this._moveToCodexAccount(accountId);
+		try {
+			if (!session.chatChannel) {
+				throw new Error(`Codex session ${session.sessionId} has no bound chat channel`);
+			}
+			await this._sendMessage(session.chatChannel, codexContinuationPrompt(prompt), undefined, turnId, undefined, session.configurationResource);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this._logService.error(`[Codex:${session.sessionId}] continuing on account ${accountId} failed: ${message}`);
+			if (session.chatChannel) {
+				const duration = this._clearTurnStopWatch(session);
+				this._fire(session.sessionUri, { type: ActionType.ChatError, turnId, duration, part: createErrorResponsePart({ errorType: 'CodexTurnError', message }) });
+				this._fire(session.sessionUri, { type: ActionType.ChatTurnComplete, turnId, duration });
+			}
+		}
+	}
+
+	/** The user agreed to continue a chat whose account hit its limit on `accountId`. */
+	private async _switchChatToCodexAccount(chat: string, accountId: string): Promise<void> {
+		const limited = this._limitedChats.get(chat);
+		const sessionId = limited?.sessionId ?? this._sessionIdByChatUri.get(chat);
+		const session = sessionId ? this._sessions.get(sessionId) : undefined;
+		const account = this._accountPool.getAccounts(Date.now()).find(candidate => candidate.id === accountId);
+		if (!session?.chatChannel || !account) {
+			this._logService.warn(`[Codex] Cannot move chat ${chat} to account ${accountId}`);
+			return;
+		}
+		this._limitedChats.delete(chat);
+		if (session.currentTurnId !== undefined) {
+			// The chat is busy again: only move it; its next turn runs on the account.
+			this._moveToCodexAccount(accountId);
+			return;
+		}
+		const turnId = generateUuid();
+		this._fire(session.sessionUri, {
+			type: ActionType.ChatTurnStarted,
+			turnId,
+			startedAt: new Date().toISOString(),
+			message: {
+				text: localize('codexAccounts.continueOn', "Continue on {0}", account.label),
+				origin: { kind: MessageKind.SystemNotification },
+			},
+		});
+		this._startTurnStopWatch(session);
+		await this._continueOnCodexAccount(session, accountId, limited?.prompt ?? session.lastPromptText, turnId);
+	}
+
+	// #endregion
 
 	private async _signInToChatGPT(request: string): Promise<void> {
 		const progressInterest = this._agentSdkDownloader.acquireDownloadProgressInterest(CodexSdkPackage);
@@ -1510,6 +1924,7 @@ export class CodexAgent extends Disposable implements IAgent {
 						return;
 					}
 					this._publishAccountInfo({ ...this._toAccountInfo(this._openAIAccountState), authUrl: response.authUrl, authUrlNonce: request });
+					this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'signingIn', authUrl: response.authUrl });
 					if (transient) {
 						const result = await Promise.race([
 							loginCompleted.p,
@@ -1523,7 +1938,7 @@ export class CodexAgent extends Disposable implements IAgent {
 				} finally {
 					completionListener?.dispose();
 				}
-			});
+			}, true);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this._setOpenAIAccountState({ usageSource: 'openai', status: 'error', error: message });
@@ -1540,7 +1955,7 @@ export class CodexAgent extends Disposable implements IAgent {
 				if (!transient) {
 					this._queueModelRefresh();
 				}
-			});
+			}, true);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this._setOpenAIAccountState({ usageSource: 'openai', status: 'error', error: message });
@@ -2369,14 +2784,17 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * Passive catalogue actions and account controls must not cross the
 	 * persistent activation boundary by themselves.
 	 */
-	private async _withOnDemandConnection<T>(operation: (client: ICodexAppServerClient, transient: boolean) => Promise<T>): Promise<T> {
+	private async _withOnDemandConnection<T>(operation: (client: ICodexAppServerClient, transient: boolean) => Promise<T>, defaultAccountOnly = false): Promise<T> {
 		return this._onDemandConnectionSequencer.queue(async () => {
 			this._throwIfShuttingDown();
 			await this._startupAccountProbe.p;
 			this._throwIfShuttingDown();
 			// Recheck after waiting for earlier one-off work: selecting Codex while
 			// this action was queued moves it onto the retained connection.
-			if (this._activated || this._connection.kind !== 'idle') {
+			// CreaEditor: signing the default account in or out needs its own CODEX_HOME, which the
+			// retained connection does not run in while it serves an added account.
+			const retainedIsDefault = this._connection.kind === 'ready' ? !this._isAddedAccountConnection(this._connection) : this._accountPool.activeAccountId === CODEX_DEFAULT_ACCOUNT_ID;
+			if ((this._activated || this._connection.kind !== 'idle') && (!defaultAccountOnly || retainedIsDefault)) {
 				return operation((await this._ensureConnection()).client, false);
 			}
 			const settled = new DeferredPromise<void>();
@@ -2483,7 +2901,10 @@ export class CodexAgent extends Disposable implements IAgent {
 				await transientOperation;
 			}
 			this._throwIfShuttingDown();
-			return this._startConnection(generation, cancellation.token);
+			// CreaEditor: start on the active account while it can take work, else on the next one.
+			const accountId = this._accountPool.pickAccountForNewWork(Date.now());
+			this._accountPool.setActiveAccount(accountId);
+			return this._startConnection(generation, cancellation.token, accountId);
 		})();
 		const promise = startPromise.then(ready => {
 			if (generation !== this._connectionGeneration) {
@@ -2493,7 +2914,11 @@ export class CodexAgent extends Disposable implements IAgent {
 			// Authentication can complete while the connection is starting; apply the latest token before publishing ready.
 			ready.proxyHandle.setToken(this._githubToken ?? '');
 			this._connection = { kind: 'ready', ...ready };
-			void this._refreshAccount(ready.client);
+			if (ready.accountId === CODEX_DEFAULT_ACCOUNT_ID) {
+				void this._refreshAccount(ready.client);
+			} else {
+				void this._readCodexAccount(ready.accountId, ready.client);
+			}
 			void this._refreshMcpInventory(ready.client, null);
 			return ready;
 		}).catch(err => {
@@ -2546,7 +2971,7 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	/** Spawn and initialize an app-server without retaining it as the agent's connection. */
-	private async _startRawConnection(initializationTimeoutMs?: number, token: CancellationToken = CancellationToken.None): Promise<IConnectionReady> {
+	private async _startRawConnection(initializationTimeoutMs?: number, token: CancellationToken = CancellationToken.None, accountId = CODEX_DEFAULT_ACCOUNT_ID): Promise<IConnectionReady> {
 		// Resolve the Codex SDK root: dev override / product download via the
 		// downloader, or this repo's `node_modules` in a source checkout (see
 		// `_resolveSdkRoot`). We spawn the native codex binary inside the
@@ -2602,6 +3027,11 @@ export class CodexAgent extends Disposable implements IAgent {
 			if (userCodexHome) {
 				env.CODEX_HOME = userCodexHome;
 			}
+			// CreaEditor: an added account runs in its own CODEX_HOME that links everything but its
+			// sign-in to the default one.
+			if (accountId !== CODEX_DEFAULT_ACCOUNT_ID) {
+				env.CODEX_HOME = await this._prepareCodexAccountHome(accountId);
+			}
 
 			const args = [...launchConfig.args];
 			// Launch overrides can contain user-supplied arguments and telemetry
@@ -2641,7 +3071,9 @@ export class CodexAgent extends Disposable implements IAgent {
 			client.notify<'initialized'>('initialized', undefined as never);
 			return {
 				client,
-				codexHome: URI.file(initialized.codexHome),
+				accountId,
+				// CreaEditor: discover chats in the shared home rather than through an account's links.
+				codexHome: URI.file(accountId === CODEX_DEFAULT_ACCOUNT_ID ? initialized.codexHome : this._defaultCodexHome()),
 				proxyHandle,
 				child,
 				readModelContextWindows: () => readCodexModelContextWindows(binaryPath, args, env),
@@ -2658,8 +3090,8 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	/** Start and retain the fully-wired connection used by Codex sessions. */
-	private async _startConnection(generation: number, token: CancellationToken): Promise<IConnectionReady> {
-		const raw = await this._startRawConnection(undefined, token);
+	private async _startConnection(generation: number, token: CancellationToken, accountId = CODEX_DEFAULT_ACCOUNT_ID): Promise<IConnectionReady> {
+		const raw = await this._startRawConnection(undefined, token, accountId);
 		const subscriptions = new DisposableStore();
 		const ready: IConnectionReady = { ...raw, subscriptions };
 		const { client } = ready;
@@ -2687,20 +3119,35 @@ export class CodexAgent extends Disposable implements IAgent {
 		// Wire global notification → SessionAction dispatch.
 		this._registerIgnoredNotifications(client, subscriptions);
 		this._registerWorkingDirectoryNotifications(client, subscriptions);
-		subscriptions.add(client.onNotification('account/login/completed', () => {
-			void this._refreshAccount(client).then(() => this._queueModelRefresh());
-		}));
-		subscriptions.add(client.onNotification('account/updated', () => {
-			if (this._connection.kind === 'ready' && this._connection.client === client) {
-				void this._refreshAccount(client);
+		if (accountId === CODEX_DEFAULT_ACCOUNT_ID) {
+			subscriptions.add(client.onNotification('account/login/completed', () => {
+				void this._refreshAccount(client).then(() => this._queueModelRefresh());
+			}));
+			subscriptions.add(client.onNotification('account/updated', () => {
+				if (this._connection.kind === 'ready' && this._connection.client === client) {
+					void this._refreshAccount(client);
+					this._queueModelRefresh();
+				}
+			}));
+			subscriptions.add(client.onNotification('account/rateLimits/updated', () => {
+				if (this._connection.kind === 'ready' && this._connection.client === client && this._openAIAccountState.status === 'signedIn' && this._openAIAccountState.authType === 'chatgpt') {
+					void this._refreshAccountRateLimits(client);
+				}
+			}));
+		} else {
+			// CreaEditor: an added account reports to the pool only; the ChatGPT account menu
+			// (`vscode.codexAccount`) keeps showing the default account.
+			subscriptions.add(client.onNotification('account/login/completed', () => {
+				void this._readCodexAccount(accountId, client).then(() => this._queueModelRefresh());
+			}));
+			subscriptions.add(client.onNotification('account/updated', () => {
+				void this._readCodexAccount(accountId, client);
 				this._queueModelRefresh();
-			}
-		}));
-		subscriptions.add(client.onNotification('account/rateLimits/updated', () => {
-			if (this._connection.kind === 'ready' && this._connection.client === client && this._openAIAccountState.status === 'signedIn' && this._openAIAccountState.authType === 'chatgpt') {
-				void this._refreshAccountRateLimits(client);
-			}
-		}));
+			}));
+			subscriptions.add(client.onNotification('account/rateLimits/updated', () => {
+				void this._readCodexAccount(accountId, client);
+			}));
+		}
 		subscriptions.add(client.onNotification('skills/changed', () => this._queueSkillHookCustomizationRefresh(client)));
 		subscriptions.add(client.onNotification('turn/started', params => this._dispatchByThread(params.threadId, s => this._handleTurnStartedNotification(s, params))));
 		subscriptions.add(client.onNotification('item/started', params => this._dispatchByThread(params.threadId, s => this._handleItemStarted(s, params))));
@@ -3429,6 +3876,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			this._openAIAccountRateLimit = this._openAIAccountRateLimits[0];
 			this._openAIAccountRateLimitUpdatedAt = this._openAIAccountRateLimit ? Date.now() : undefined;
 			this._publishAccountInfo(this._toAccountInfo(this._openAIAccountState));
+			this._mirrorDefaultCodexAccount();
 		} catch (error) {
 			this._logService.warn(`[Codex] account/rateLimits/read failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
@@ -3448,7 +3896,8 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	private _isActiveAccountClient(client: ICodexAppServerClient): boolean {
-		return (this._connection.kind === 'ready' && this._connection.client === client)
+		// CreaEditor: the ChatGPT account menu follows the default account, not an added one.
+		return (this._connection.kind === 'ready' && this._connection.client === client && !this._isAddedAccountConnection(this._connection))
 			|| this._transientAccountConnection?.client === client;
 	}
 
@@ -3677,6 +4126,10 @@ export class CodexAgent extends Disposable implements IAgent {
 				chat: subagent.session.chatChannel!,
 				toolCallId: subagent.toolCallId,
 			});
+			return;
+		}
+		// CreaEditor: a used-up ChatGPT account moves the chat on or asks to.
+		if (params.turn.status === 'failed' && isCodexUsageLimitError(params.turn.error) && this._handleCodexUsageLimit(params)) {
 			return;
 		}
 		this._dispatchByThread(params.threadId, s => this._handleTurnCompletedNotification(s, params));
@@ -8483,6 +8936,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		this._discoveredCodexChats.clear();
 		this._codexChatMetadata.clear();
 		this._startupAccountProbeCancellation.dispose(true);
+		this._accountConnectionCancellation.dispose(true);
 		this._disposeTransientAccountConnection();
 		this._disposeConnection();
 		this._clearRuntimeState();
