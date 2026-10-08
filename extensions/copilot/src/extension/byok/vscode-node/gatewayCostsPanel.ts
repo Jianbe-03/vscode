@@ -226,7 +226,8 @@ const S = ${JSON.stringify(strings)};
 let entries = [];
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const money = v => v === undefined ? '–' : '$' + (v < 10 && v > 0 ? v.toFixed(4) : v.toFixed(2));
+// Cents are enough from a dollar up; below that, small request costs need four decimals.
+const money = v => v === undefined ? '–' : '$' + (v < 1 && v > 0 ? v.toFixed(4) : v.toFixed(2));
 const tokens = v => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : String(v);
 const issueLabel = e => e.issueLabel || '';
 function filtered() {
