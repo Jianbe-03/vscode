@@ -55,7 +55,13 @@ Run **Chat: Add OpenRouter or LiteLLM Models...**, or click **Add OpenRouter / L
 - Every model your virtual key may use appears automatically, with context size, tool calling and vision taken from the proxy's `/model/info`.
 - Hide models with `"hiddenModels": ["..."]`, or rename them under `"models"`.
 
-Agents and prompt files can use the model by name:
+**Several keys:** run the command again and choose **Connect OpenRouter or a LiteLLM Proxy...** to add another key, for example one for work and one for a personal project. Each key has its own name, presets, guardrails and models.
+- Every model shows the name of its key, in the model picker and on the model button: "Claude Opus (Work key)", "Claude Opus (Personal key)".
+- A chat stays on the key it started on. Its subagents, their subagents, and sessions or chats it starts with `create_session`, `create_session_group` or `create_chat` all use that same key, in the editor chat and in the Agents window. A model that only another key offers is refused with an error; an agent whose `model:` is not offered by the key runs on the chat's own model. Switching an Agents window chat to a model of another key is refused too; start a new chat for that.
+- When a key hits its limit, the request fails with the error of that key. CreaEditor never falls back to another key.
+- The **AI Costs** page records which key each request used.
+
+Agents and prompt files can use the model by name, without the key name; the model of the chat's own key is used:
 
 ```yaml
 ---
