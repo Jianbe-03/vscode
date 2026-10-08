@@ -6,8 +6,10 @@
 #   scripts/creaeditor-build-macos.sh --skip-install # reuse node_modules
 #
 # Output: dist/CreaEditor-darwin-<arch>.dmg (and the .app in ../VSCode-darwin-<arch>/).
-# The app is ad-hoc signed (no Apple Developer ID). On the Mac that built it, it opens
-# normally. On other Macs, right-click > Open the first time, or run:
+# The app is signed with the self-signed "CreaEditor Local Signing" certificate when the login
+# keychain has it (set CREAEDITOR_SIGN_IDENTITY to use another), else ad-hoc. A fixed identity keeps
+# keychain "Always Allow" answers across rebuilds. There is no Apple Developer ID: on the Mac that
+# built it, it opens normally. On other Macs, right-click > Open the first time, or run:
 #   xattr -dr com.apple.quarantine /Applications/CreaEditor.app
 #---------------------------------------------------------------------------------------------
 set -euo pipefail
@@ -78,8 +80,14 @@ if [ ! -d "$APP" ]; then
 	exit 1
 fi
 
-step "Ad-hoc signing"
-codesign --force --deep --sign - "$APP"
+SIGN_IDENTITY="${CREAEDITOR_SIGN_IDENTITY:-CreaEditor Local Signing}"
+if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
+	step "Signing with \"$SIGN_IDENTITY\""
+	codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
+else
+	step "Ad-hoc signing (no \"$SIGN_IDENTITY\" certificate in the keychain)"
+	codesign --force --deep --sign - "$APP"
+fi
 codesign --verify --deep --strict "$APP"
 
 step "Creating DMG"
