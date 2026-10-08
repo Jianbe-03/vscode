@@ -17420,7 +17420,9 @@ suite('AgentService (node dispatcher)', () => {
 			assert.ok(mdParts.length > 0, 'Should have markdown content');
 		});
 
-		test('registers subagent summaries without loading child transcripts until subscription', async () => {
+		// CreaEditor: restore reads each subagent transcript once to find the subagents it started, but
+		// still builds the subagent chat only on subscription.
+		test('registers subagent summaries without restoring child chats until subscription', async () => {
 			class LazySubagentMockAgent extends MockAgent {
 				readonly messageReads: string[] = [];
 				childTranscriptAvailable = false;
@@ -17469,7 +17471,7 @@ suite('AgentService (node dispatcher)', () => {
 					interactivity: ChatInteractivity.ReadOnly,
 				},
 				childStateBeforeSubscribe: undefined,
-				childReadsBeforeSubscribe: 0,
+				childReadsBeforeSubscribe: 1,
 			});
 
 			await assert.rejects(service.subscribe(URI.parse(childChatUri), 'child-reader-first'), /Subagent transcript is not available yet/);
@@ -17498,7 +17500,7 @@ suite('AgentService (node dispatcher)', () => {
 				parentActiveTurn: 'turn-after-missing-subagent',
 				sentPrompt: 'Start it for me',
 				childTurnCount: 1,
-				childMessageReads: 3,
+				childMessageReads: 4,
 				legacyChildSession: undefined,
 			});
 		});
@@ -17584,6 +17586,53 @@ suite('AgentService (node dispatcher)', () => {
 				turnCount: 1,
 				origin: { kind: ChatOriginKind.Tool, chat: buildDefaultChatUri(parent), toolCallId: 'tc-sub' },
 				legacySessionExists: false,
+			});
+		});
+
+		test('restore registers subagents started by subagents under the subagent chat that started them', async () => {
+			// The outer subagent's transcript holds the task tool call that started the nested subagent.
+			class NestedSubagentMockAgent extends MockAgent {
+				override async getSessionMessages(session: URI): Promise<readonly Turn[]> {
+					if (parseChatUri(session)?.chatId === 'subagent/tc-sub') {
+						return [{
+							id: 'sub-turn', state: TurnState.Complete, usage: undefined,
+							message: { text: 'Review the tests', origin: { kind: MessageKind.User } },
+							responseParts: [{
+								kind: ResponsePartKind.ToolCall,
+								toolCall: {
+									toolCallId: 'tc-nested', toolName: 'task', displayName: 'Task',
+									status: ToolCallStatus.Completed, confirmed: ToolCallConfirmationReason.NotNeeded,
+									invocationMessage: 'Delegating...', success: true, pastTenseMessage: 'Delegated',
+									content: [{ type: ToolResultContentType.Subagent, resource: buildSubagentChatUri(parseChatUri(session)!.session, 'tc-nested'), title: 'Trace validateEmail' }],
+								},
+							}],
+						}];
+					}
+					return super.getSessionMessages(session);
+				}
+			}
+			const agent = new NestedSubagentMockAgent('copilot');
+			disposables.add(toDisposable(() => agent.dispose()));
+			registerTestAgentProvider(service, agent);
+			const { session } = await createAgentSession(agent);
+			const sessionResource = (await agent.listSessions())[0].session;
+			const parent = sessionResource.toString();
+			agent.sessionMessages = [
+				{ type: 'message', session, role: 'user', messageId: 'msg-1', content: 'Review this code', toolRequests: [] },
+				{ type: 'message', session, role: 'assistant', messageId: 'msg-2', content: '', toolRequests: [{ toolCallId: 'tc-sub', name: 'task' }] },
+				{ type: 'tool_start', session, toolCallId: 'tc-sub', toolName: 'task', displayName: 'Task', invocationMessage: 'Delegating...', toolKind: 'subagent' as const, subagentDescription: 'Review the tests', subagentAgentName: 'explore' },
+				{ type: 'subagent_started', session, toolCallId: 'tc-sub', agentName: 'explore', agentDisplayName: 'Explore', agentDescription: 'Explores the codebase' },
+				{ type: 'tool_complete', session, toolCallId: 'tc-sub', result: { success: true, pastTenseMessage: 'Delegated task', content: [{ type: ToolResultContentType.Text, text: 'Reviewed' }] } },
+			];
+
+			await service.restoreSession(sessionResource);
+
+			const origins = Object.fromEntries((getStateManager(service).getSessionState(parent)?.chats ?? [])
+				.filter(chat => chat.origin?.kind === ChatOriginKind.Tool)
+				.map(chat => [chat.resource, chat.origin]));
+			assert.deepStrictEqual(origins, {
+				[buildSubagentChatUri(parent, 'tc-sub')]: { kind: ChatOriginKind.Tool, chat: buildDefaultChatUri(parent), toolCallId: 'tc-sub' },
+				[buildSubagentChatUri(parent, 'tc-nested')]: { kind: ChatOriginKind.Tool, chat: buildDefaultChatUri(parent), toolCallId: 'tc-nested', spawningChat: buildSubagentChatUri(parent, 'tc-sub') },
 			});
 		});
 

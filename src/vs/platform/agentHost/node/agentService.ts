@@ -9781,7 +9781,12 @@ export class AgentService extends Disposable implements IAgentService {
 		this._logService.info(`[AgentService] Restored subagent session: ${subagentUri} with ${childTurns.length} turn(s)`);
 	}
 
-	private async _registerRestoredSubagentSummaries(agent: IAgent, parentSession: URI, turns: readonly Turn[]): Promise<void> {
+	/**
+	 * Registers the subagent chats started by tool calls in `turns`. CreaEditor: also registers the
+	 * subagents those subagents started, read from their transcripts, with the subagent chat that
+	 * started them as `spawningChat`, so restored sessions keep their nesting.
+	 */
+	private async _registerRestoredSubagentSummaries(agent: IAgent, parentSession: URI, turns: readonly Turn[], spawningChat?: string, ancestors: ReadonlySet<string> = new Set()): Promise<void> {
 		const parentSessionStr = parentSession.toString();
 		const parentChat = buildDefaultChatUri(parentSession);
 		const discovered = new Map<string, { title: string; toolCallId: string }>();
@@ -9804,11 +9809,18 @@ export class AgentService extends Disposable implements IAgentService {
 		}
 		for (const child of discovered.values()) {
 			const chatUri = buildSubagentChatUri(parentSessionStr, child.toolCallId);
-			if (this._stateManager.getChatState(chatUri)) {
+			// A subagent transcript can repeat the tool call that started it; never nest a chat under itself.
+			if (this._stateManager.getChatState(chatUri) || chatUri === spawningChat || ancestors.has(chatUri)) {
 				continue;
 			}
-			const origin = { kind: ChatOriginKind.Tool, chat: parentChat, toolCallId: child.toolCallId } as const;
+			const origin: { readonly kind: ChatOriginKind.Tool; readonly chat: string; readonly toolCallId: string; readonly spawningChat?: string } = {
+				kind: ChatOriginKind.Tool,
+				chat: parentChat,
+				toolCallId: child.toolCallId,
+				...(spawningChat ? { spawningChat } : {}),
+			};
 			const existing = this._stateManager.getSessionState(parentSessionStr)?.chats.find(chat => chat.resource === chatUri);
+			const childAncestors = new Set([...ancestors, chatUri]);
 			const { title: persistedTitle } = await this._chatContributions.hydrateChat({
 				session: parentSessionStr,
 				chat: chatUri,
@@ -9818,12 +9830,24 @@ export class AgentService extends Disposable implements IAgentService {
 				title,
 				origin,
 				interactivity: ChatInteractivity.ReadOnly,
-				resolver: async () => ({
-					turns: [...await this._resolveRestoredSubagentTurns(agent, parentSession, chatUri, origin)],
-				}),
+				resolver: async () => {
+					const childTurns = await this._resolveRestoredSubagentTurns(agent, parentSession, chatUri, origin);
+					// The transcript may not have been available when the session was restored.
+					await this._registerRestoredSubagentSummaries(agent, parentSession, childTurns, chatUri, childAncestors);
+					return { turns: [...childTurns] };
+				},
 			});
 			if (existing && (!existing.title || existing.title === subagentChatTitle(undefined, undefined))) {
 				this._stateManager.updateChatTitle(parentSessionStr, chatUri, title);
+			}
+			if (childAncestors.size <= MAX_RESTORED_SUBAGENT_NESTING) {
+				let childTurns: readonly Turn[] = [];
+				try {
+					childTurns = await this._getChatMessages(agent, URI.parse(chatUri), parentSession, origin);
+				} catch (err) {
+					this._logService.trace(`[AgentService] Cannot read subagent transcript of ${chatUri} for nested subagents`, err);
+				}
+				await this._registerRestoredSubagentSummaries(agent, parentSession, childTurns, chatUri, childAncestors);
 			}
 		}
 	}
@@ -9843,6 +9867,9 @@ export class AgentService extends Disposable implements IAgentService {
 		super.dispose();
 	}
 }
+
+/** CreaEditor: how deep restore follows subagents started by other subagents. */
+const MAX_RESTORED_SUBAGENT_NESTING = 5;
 
 function isErrorWithCode(error: unknown, code: string): boolean {
 	return error instanceof Error && hasErrorCode(error, code);
