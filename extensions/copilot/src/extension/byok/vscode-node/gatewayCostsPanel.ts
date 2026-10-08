@@ -9,19 +9,29 @@ import { formatIssue, getIssueUrl } from '../../../platform/endpoint/common/gate
 import { IGatewayCostEntry, IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
 import { Disposable, DisposableStore } from '../../../util/vs/base/common/lifecycle';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
+import { filterCostRows, ICostDataset, ICostFilters, ICostQueryOptions, ICostRow, prepareCostDataset, runCostQuery } from '../common/gatewayCostsAnalysis';
+import { ADVANCED_STYLES, escapeHtml, getAdvancedMarkup, getAdvancedScript, getAdvancedStrings } from './gatewayCostsAdvancedView';
 
 export const SHOW_GATEWAY_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
 
-type PanelMessage = { readonly type: 'ready' } | { readonly type: 'exportCsv' } | { readonly type: 'clear' };
+type PanelMessage =
+	| { readonly type: 'ready' }
+	| { readonly type: 'exportCsv' }
+	| { readonly type: 'clear' }
+	| { readonly type: 'query'; readonly seq: number; readonly filters: ICostFilters; readonly options: ICostQueryOptions }
+	| { readonly type: 'exportFiltered'; readonly format: 'csv' | 'json'; readonly filters: ICostFilters };
 
 /**
  * CreaEditor: the "AI Costs" page. Shows the cost OpenRouter and LiteLLM reported for every request,
- * grouped per issue and per chat, from the local cost ledger.
+ * grouped per issue and per chat, from the local cost ledger. Its Advanced tab sends `query` messages
+ * that are answered here with the analysis of `gatewayCostsAnalysis.ts`.
  */
 export class GatewayCostsPanel extends Disposable {
 
 	private _panel: WebviewPanel | undefined;
 	private readonly _panelDisposables = this._register(new DisposableStore());
+	/** The ledger prepared for queries; reset whenever the ledger changes. */
+	private _dataset: ICostDataset | undefined;
 
 	constructor(
 		@IGatewayTrackingService private readonly _trackingService: IGatewayTrackingService,
@@ -39,9 +49,13 @@ export class GatewayCostsPanel extends Disposable {
 		this._panel = panel;
 		panel.webview.html = this._getHtml();
 		this._panelDisposables.add(panel.webview.onDidReceiveMessage((message: PanelMessage) => this._onMessage(message)));
-		this._panelDisposables.add(this._trackingService.onDidChangeEntries(() => this._postEntries()));
+		this._panelDisposables.add(this._trackingService.onDidChangeEntries(() => {
+			this._dataset = undefined;
+			this._postEntries();
+		}));
 		this._panelDisposables.add(panel.onDidDispose(() => {
 			this._panel = undefined;
+			this._dataset = undefined;
 			this._panelDisposables.clear();
 		}));
 	}
@@ -53,6 +67,14 @@ export class GatewayCostsPanel extends Disposable {
 				break;
 			case 'exportCsv':
 				await this._exportCsv();
+				break;
+			case 'query': {
+				const result = runCostQuery(this._getDataset(), message.filters, message.options, Date.now());
+				void this._panel?.webview.postMessage({ type: 'result', seq: message.seq, result });
+				break;
+			}
+			case 'exportFiltered':
+				await this._exportFiltered(message.format, filterCostRows(this._getDataset(), message.filters, Date.now()));
 				break;
 			case 'clear': {
 				const clear = l10n.t('Clear');
@@ -69,6 +91,24 @@ export class GatewayCostsPanel extends Disposable {
 		// The issue label (`owner/repo#123`, `#123` or `PROJ-123`) groups the entries; the URL links Jira issues.
 		const entries = this._trackingService.entries.map(entry => ({ ...entry, issueLabel: formatIssue(entry.issue, entry.repo), issueUrl: getIssueUrl(entry.issue) }));
 		void this._panel?.webview.postMessage({ type: 'entries', entries });
+	}
+
+	private _getDataset(): ICostDataset {
+		this._dataset ??= prepareCostDataset(this._trackingService.entries);
+		return this._dataset;
+	}
+
+	private async _exportFiltered(format: 'csv' | 'json', rows: readonly ICostRow[]): Promise<void> {
+		const target = await window.showSaveDialog({
+			defaultUri: Uri.file(`creaeditor-ai-costs-filtered-${new Date().toISOString().slice(0, 10)}.${format}`),
+			filters: format === 'csv' ? { CSV: ['csv'] } : { JSON: ['json'] },
+		});
+		if (!target) {
+			return;
+		}
+		const content = format === 'csv' ? toCsv(rows) : JSON.stringify(rows, undefined, '\t') + '\n';
+		await workspace.fs.writeFile(target, new TextEncoder().encode(content));
+		window.showInformationMessage(l10n.t('Exported {0} requests.', rows.length));
 	}
 
 	private async _exportCsv(): Promise<void> {
@@ -118,6 +158,7 @@ export class GatewayCostsPanel extends Disposable {
 			viaBranch: l10n.t('from branch'),
 			viaPrompt: l10n.t('from prompt'),
 			viaAgent: l10n.t('set by agent'),
+			...getAdvancedStrings(),
 		};
 		return `<!DOCTYPE html>
 <html lang="en">
@@ -131,7 +172,7 @@ export class GatewayCostsPanel extends Disposable {
 	.subtitle { color: var(--vscode-descriptionForeground); margin-bottom: 20px; }
 	.toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
 	select, input { background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 4px; padding: 4px 8px; font: inherit; }
-	input { flex: 1; min-width: 220px; }
+	.toolbar input { flex: 1; min-width: 220px; }
 	button { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); border: none; border-radius: 4px; padding: 5px 12px; font: inherit; cursor: pointer; }
 	button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 	.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 24px; }
@@ -155,11 +196,17 @@ export class GatewayCostsPanel extends Disposable {
 	.chat-title { font-weight: 500; }
 	.models { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 	.empty { color: var(--vscode-descriptionForeground); padding: 40px 0; text-align: center; }
+${ADVANCED_STYLES}
 </style>
 </head>
 <body>
 <h1>${escapeHtml(strings.title)}</h1>
 <div class="subtitle">${escapeHtml(strings.subtitle)}</div>
+<div class="tabs" role="tablist" aria-label="${escapeHtml(strings.tabsLabel)}">
+	<button type="button" class="tab" role="tab" id="tab-overview" data-tab="overview" aria-controls="overview" aria-selected="true">${escapeHtml(strings.tabOverview)}</button>
+	<button type="button" class="tab" role="tab" id="tab-advanced" data-tab="advanced" aria-controls="advanced" aria-selected="false" tabindex="-1">${escapeHtml(strings.tabAdvanced)}</button>
+</div>
+<section id="overview" role="tabpanel" aria-labelledby="tab-overview">
 <div class="toolbar">
 	<select id="period"><option value="7">${escapeHtml(strings.period7)}</option><option value="30" selected>${escapeHtml(strings.period30)}</option><option value="90">${escapeHtml(strings.period90)}</option><option value="0">${escapeHtml(strings.periodAll)}</option></select>
 	<select id="gateway"><option value="">${escapeHtml(strings.allGateways)}</option><option value="openrouter">OpenRouter</option><option value="litellm">LiteLLM</option></select>
@@ -169,6 +216,10 @@ export class GatewayCostsPanel extends Disposable {
 </div>
 <div class="cards" id="cards"></div>
 <div id="groups"></div>
+</section>
+<section id="advanced" role="tabpanel" aria-labelledby="tab-advanced" hidden>
+${getAdvancedMarkup(strings)}
+</section>
 <script nonce="${nonce}">
 const vscode = acquireVsCodeApi();
 const S = ${JSON.stringify(strings)};
@@ -237,13 +288,12 @@ $('clear').addEventListener('click', () => vscode.postMessage({ type: 'clear' })
 window.addEventListener('message', event => { if (event.data?.type === 'entries') { entries = event.data.entries; render(); } });
 vscode.postMessage({ type: 'ready' });
 </script>
+<script nonce="${nonce}">
+${getAdvancedScript()}
+</script>
 </body>
 </html>`;
 	}
-}
-
-function escapeHtml(value: string): string {
-	return value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c] ?? c);
 }
 
 function csvCell(value: string | number | undefined): string {
