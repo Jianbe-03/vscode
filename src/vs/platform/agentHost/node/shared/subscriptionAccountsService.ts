@@ -15,7 +15,7 @@
 //   3. Requests a client writes to the root config key `SUBSCRIPTION_ACCOUNTS_REQUEST_KEY` are cleared
 //      and handed to `handleRequest` of the owning provider: `add` by its `provider`, `refreshUsage`
 //      to `refreshUsage` of one or every provider, everything else by its `accountId`.
-//   4. Keep the user-added accounts (id, label, kind, order) through `getStoredAccounts` /
+//   4. Keep the user-added accounts (id, label, kind, order, verified token fingerprint) through `getStoredAccounts` /
 //      `setStoredAccounts`; the service writes them to `agent-subscription-accounts.json` next to the
 //      agent host config. Never store credentials there.
 //   5. Read `isAutoSwitchEnabled()` when an account hits its limit.
@@ -45,6 +45,11 @@ export interface IStoredSubscriptionAccount {
 	readonly id: string;
 	readonly label: string;
 	readonly kind: Exclude<SubscriptionAccountKind, 'default'>;
+	/**
+	 * A `token` account: the fingerprint (a truncated SHA-256, never the token) of the setup-token
+	 * Anthropic last accepted, so a restart does not check the same token again.
+	 */
+	readonly verifiedToken?: string;
 }
 
 /** The part of an agent that owns the accounts of one {@link SubscriptionProvider}. */
@@ -133,7 +138,7 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	}
 
 	setStoredAccounts(provider: SubscriptionProvider, accounts: readonly IStoredSubscriptionAccount[]): void {
-		this._stored = { ...this._stored, [provider]: accounts.map(account => ({ id: account.id, label: account.label, kind: account.kind })) };
+		this._stored = { ...this._stored, [provider]: accounts.map(toStoredAccount) };
 		this._persist();
 		this._onDidChangeStoredAccounts.fire(provider);
 	}
@@ -228,12 +233,23 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	}
 }
 
+/** Only the known fields, so nothing else (such as a credential) ever reaches the file. */
+function toStoredAccount(account: IStoredSubscriptionAccount): IStoredSubscriptionAccount {
+	return {
+		id: account.id,
+		label: account.label,
+		kind: account.kind,
+		...(account.kind === 'token' && typeof account.verifiedToken === 'string' ? { verifiedToken: account.verifiedToken } : {}),
+	};
+}
+
 function readStoredAccounts(value: unknown): readonly IStoredSubscriptionAccount[] | undefined {
 	if (!Array.isArray(value)) {
 		return undefined;
 	}
 	return value.filter((entry): entry is IStoredSubscriptionAccount => !!entry && typeof entry === 'object'
-		&& typeof entry.id === 'string' && typeof entry.label === 'string' && (entry.kind === 'token' || entry.kind === 'login'));
+		&& typeof entry.id === 'string' && typeof entry.label === 'string' && (entry.kind === 'token' || entry.kind === 'login'))
+		.map(toStoredAccount);
 }
 
 function isRequest(value: unknown): value is ISubscriptionAccountsRequest {

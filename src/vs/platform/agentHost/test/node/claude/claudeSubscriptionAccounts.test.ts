@@ -16,7 +16,7 @@ import type { AgentSignal } from '../../../common/agent.js';
 import { ActionType } from '../../../common/state/sessionActions.js';
 import { createErrorResponsePart } from '../../../common/state/sessionState.js';
 import type { IClaudeAgentSdkService } from '../../../node/claude/claudeAgentSdkService.js';
-import { claudeAccountEnv, claudeProbePatch, ClaudeSubscriptionAccounts, ClaudeSubscriptionLimitTracker, claudeUsageWindows, getClaudeLimitSignal, readClaudeProbeOutcome, selectClaudeAccount, type ClaudeLimitDecision, type IClaudeAccountState } from '../../../node/claude/claudeSubscriptionAccounts.js';
+import { claudeAccountEnv, claudeProbePatch, claudeTokenFingerprint, ClaudeSubscriptionAccounts, ClaudeSubscriptionLimitTracker, claudeUsageWindows, getClaudeLimitSignal, readClaudeProbeOutcome, selectClaudeAccount, type ClaudeLimitDecision, type IClaudeAccountState } from '../../../node/claude/claudeSubscriptionAccounts.js';
 import type { ISubscriptionAccountsService, IStoredSubscriptionAccount } from '../../../node/shared/subscriptionAccountsService.js';
 
 suite('claudeSubscriptionAccounts', () => {
@@ -207,8 +207,9 @@ suite('claudeSubscriptionAccounts', () => {
 			return query as Query;
 		}
 
-		function createAccounts(stored: readonly IStoredSubscriptionAccount[], probe: (token: string) => readonly SDKMessage[]): { accounts: ClaudeSubscriptionAccounts; probes: string[] } {
+		function createAccounts(stored: readonly IStoredSubscriptionAccount[], probe: (token: string) => readonly SDKMessage[]): { accounts: ClaudeSubscriptionAccounts; probes: string[]; persisted: (readonly IStoredSubscriptionAccount[])[] } {
 			const probes: string[] = [];
+			const persisted: (readonly IStoredSubscriptionAccount[])[] = [];
 			const sdk: Partial<IClaudeAgentSdkService> = {
 				canLoadWithoutDownload: async () => true,
 				query: async ({ prompt, options }) => {
@@ -223,7 +224,7 @@ suite('claudeSubscriptionAccounts', () => {
 				onDidChangeStoredAccounts: Event.None,
 				registerProvider: () => Disposable.None,
 				getStoredAccounts: () => stored,
-				setStoredAccounts: () => { },
+				setStoredAccounts: (_provider, accounts) => { persisted.push(accounts); },
 				isAutoSwitchEnabled: () => false,
 			};
 			const environment: Partial<INativeEnvironmentService> = { userHome: URI.file('/home/u') };
@@ -234,7 +235,7 @@ suite('claudeSubscriptionAccounts', () => {
 				environment as INativeEnvironmentService,
 				new NullLogService(),
 			));
-			return { accounts, probes };
+			return { accounts, probes, persisted };
 		}
 
 		const stored: IStoredSubscriptionAccount[] = [{ id: 'bad', label: 'Bad', kind: 'token' }, { id: 'good', label: 'Good', kind: 'token' }];
@@ -314,20 +315,63 @@ suite('claudeSubscriptionAccounts', () => {
 			});
 		});
 
-		test('a refused sign-in during a chat marks the account error and offers the next account', async () => {
-			const { accounts } = createAccounts(stored, () => goodTurn);
+		test('a refused sign-in during a chat marks the account error, offers the next account and checks the token again', async () => {
+			let revoked = false;
+			const { accounts, probes, persisted } = createAccounts(stored, token => token === 'revoked-token' && revoked ? rejectedTurn() : goodTurn);
 			accounts.setToken('bad', 'revoked-token');
 			accounts.setToken('good', 'good-token');
 			await accounts.refreshUsage({ explicit: true });
+			const checkedOnAdd = probes.length;
+			revoked = true;
 			const decision = accounts.handleLimit('chat', 'bad', getClaudeLimitSignal(assistantError('authentication_failed'))!);
+			const afterRefusal = summary(accounts);
+			await accounts.refreshUsage();
 			assert.deepStrictEqual({
 				decision,
-				accounts: summary(accounts),
+				afterRefusal,
+				afterCheck: summary(accounts),
+				checkedOnAdd,
+				checkedAfterRefusal: probes.slice(checkedOnAdd),
+				verified: persisted.at(-1)?.map(account => [account.id, account.verifiedToken !== undefined]),
 			}, {
 				decision: { kind: 'error', meta: { provider: 'claude', accountId: 'bad', accountLabel: 'Bad', nextAccountId: 'good', nextAccountLabel: 'Good', reason: 'authentication' } },
-				accounts: [
+				afterRefusal: [
 					{ id: 'bad', status: 'error', usage: undefined, error: true },
 					{ id: 'good', status: 'signedIn', usage: [50], error: false },
+				],
+				afterCheck: [
+					{ id: 'bad', status: 'error', usage: undefined, error: true },
+					{ id: 'good', status: 'signedIn', usage: [50], error: false },
+				],
+				checkedOnAdd: 2,
+				checkedAfterRefusal: ['revoked-token'],
+				verified: [['bad', false], ['good', true]],
+			});
+		});
+
+		test('a token Anthropic accepted before is not checked again on the next start; a replaced one is', async () => {
+			const remembered: IStoredSubscriptionAccount[] = [
+				{ id: 'bad', label: 'Bad', kind: 'token', verifiedToken: claudeTokenFingerprint('old-token') },
+				{ id: 'good', label: 'Good', kind: 'token', verifiedToken: claudeTokenFingerprint('good-token') },
+			];
+			const { accounts, probes, persisted } = createAccounts(remembered, () => goodTurn);
+			accounts.setToken('good', 'good-token');
+			accounts.setToken('bad', 'new-token');
+			await accounts.refreshUsage({ explicit: true });
+			assert.deepStrictEqual({
+				accounts: summary(accounts),
+				probes,
+				persisted: persisted.at(-1),
+			}, {
+				accounts: [
+					{ id: 'bad', status: 'signedIn', usage: [50], error: false },
+					{ id: 'good', status: 'signedIn', usage: undefined, error: false },
+				],
+				probes: ['new-token'],
+				// Only fingerprints are stored, never a token.
+				persisted: [
+					{ id: 'bad', label: 'Bad', kind: 'token', verifiedToken: claudeTokenFingerprint('new-token') },
+					{ id: 'good', label: 'Good', kind: 'token', verifiedToken: claudeTokenFingerprint('good-token') },
 				],
 			});
 		});

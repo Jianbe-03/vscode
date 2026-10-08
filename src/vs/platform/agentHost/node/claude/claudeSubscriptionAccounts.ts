@@ -20,14 +20,17 @@
 //
 // A `token` account is `unverified` until Anthropic accepted its token: the CLI's `accountInfo` only says
 // a token is set, and the usage control request answers without readings (and without an error) for an
-// invalid token and for an inference-only setup-token alike. So when a token arrives, when the account is
-// added and when the user refreshes, an account without a usage reading runs a tiny real turn
-// ({@link CLAUDE_PROBE_PROMPT} on Haiku): a 401 marks it `error`, a rejected limit marks it used up and
-// its `rate_limit_event`s become its usage. The periodic refresh never runs that turn. Chats skip an
-// unverified account while any verified one is available.
+// invalid token and for an inference-only setup-token alike. So a token that was not accepted before runs
+// a tiny real turn ({@link CLAUDE_PROBE_PROMPT} on Haiku) when it arrives: a 401 marks it `error`, a
+// rejected limit marks it used up and its `rate_limit_event`s become its usage. An accepted token is
+// remembered by its fingerprint ({@link claudeTokenFingerprint}, never the token) in the stored accounts,
+// so the tokens the workbench re-sends on every start are not checked again. The check runs again only
+// when a real turn is refused with an authentication error, or when the user refreshes an account whose
+// check failed. Chats skip an unverified account while any verified one is available.
 
 import type { AccountInfo, Options, SDKControlGetUsageResponse, SDKMessage, SDKRateLimitInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { spawn, type ChildProcess } from 'child_process';
+import { createHash } from 'crypto';
 import * as fs from 'fs';
 import { Limiter } from '../../../../base/common/async.js';
 import { Emitter } from '../../../../base/common/event.js';
@@ -93,6 +96,11 @@ export type ClaudeLimitDecision =
 	| { readonly kind: 'error'; readonly meta: ISubscriptionLimitErrorMeta };
 
 // #region Pure helpers
+
+/** What the stored accounts keep of a setup-token Anthropic accepted: a truncated SHA-256, never the token. */
+export function claudeTokenFingerprint(token: string): string {
+	return createHash('sha256').update(token).digest('hex').slice(0, 32);
+}
 
 /** Projects an account onto the published shape; an account whose limit has not reset yet is `limited`. */
 export function toSubscriptionAccount(account: IClaudeAccountState, now: number): ISubscriptionAccount {
@@ -446,6 +454,8 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	private _default: IClaudeAccountState | undefined;
 	private readonly _accounts = new Map<string, IClaudeAccountState>();
 	private readonly _tokens = new Map<string, string>();
+	/** Fingerprints of the setup-tokens Anthropic accepted, by account; persisted with the accounts. */
+	private readonly _verifiedTokens = new Map<string, string>();
 	private readonly _chatAccounts = new Map<string, string>();
 	private readonly _usageReads = new Map<string, { readonly validate: boolean; readonly read: Promise<void> }>();
 	/** Each read starts a Claude CLI process, so with many accounts only a few run at once. */
@@ -462,6 +472,9 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		super();
 		for (const stored of this._accountsService.getStoredAccounts('claude')) {
 			this._accounts.set(stored.id, { id: stored.id, label: stored.label, kind: stored.kind, status: 'signedOut', ...(stored.kind === 'token' ? { unverified: true } : {}) });
+			if (stored.kind === 'token' && stored.verifiedToken) {
+				this._verifiedTokens.set(stored.id, stored.verifiedToken);
+			}
 		}
 		this._register(toDisposable(() => {
 			for (const login of this._logins.values()) {
@@ -517,11 +530,14 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		}
 	}
 
-	/** An `explicit` refresh also checks token accounts without a usage reading with a tiny real turn. */
+	/**
+	 * An `explicit` refresh also checks an unverified account (one whose check failed or was refused)
+	 * with a tiny real turn; an account Anthropic accepted is never checked again by a refresh.
+	 */
 	async refreshUsage(options?: { readonly explicit?: boolean }): Promise<void> {
 		await Promise.all(this._orderedAccounts()
 			.filter(account => account.status === 'signedIn' || account.kind === 'login' || (account.kind === 'token' && this._tokens.has(account.id)))
-			.map(account => this._readAccount(account.id, options?.explicit === true)));
+			.map(account => this._readAccount(account.id, options?.explicit === true && account.unverified === true)));
 	}
 
 	// #endregion
@@ -582,11 +598,13 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		if (this._tokens.get(accountId) === token && account.status === 'signedIn') {
 			return true;
 		}
+		// A token Anthropic accepted before (the workbench re-sends it on every start) is not checked again.
+		const verified = this._verifiedTokens.get(accountId) === claudeTokenFingerprint(token);
 		if (this._tokens.get(accountId) !== token) {
-			this._update(accountId, { unverified: true });
+			this._update(accountId, { unverified: !verified });
 		}
 		this._tokens.set(accountId, token);
-		void this._readAccount(accountId, true);
+		void this._readAccount(accountId, !verified);
 		return true;
 	}
 
@@ -638,6 +656,9 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 				return undefined;
 			}
 			this._update(id, { status: 'error', unverified: true, error: claudeTokenRejectedMessage(refused.kind), usage: undefined, usageUpdatedAt: undefined });
+			// Check the credential again: a refusal that was only passing makes the account usable again.
+			this._setVerifiedToken(id, false);
+			void this._readAccount(id, true);
 		} else {
 			this._update(id, { limitedUntil: limit.resetsAt ?? now + CLAUDE_DEFAULT_LIMIT_MS });
 		}
@@ -693,8 +714,29 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	}
 
 	private _storeAccounts(): void {
-		const stored: IStoredSubscriptionAccount[] = [...this._accounts.values()].map(account => ({ id: account.id, label: account.label, kind: account.kind === 'login' ? 'login' : 'token' }));
+		const stored: IStoredSubscriptionAccount[] = [...this._accounts.values()].map(account => {
+			const verifiedToken = account.kind === 'token' ? this._verifiedTokens.get(account.id) : undefined;
+			return { id: account.id, label: account.label, kind: account.kind === 'login' ? 'login' : 'token', ...(verifiedToken ? { verifiedToken } : {}) };
+		});
 		this._accountsService.setStoredAccounts('claude', stored);
+	}
+
+	/** Remembers (or forgets) that Anthropic accepted the current setup-token of a `token` account. */
+	private _setVerifiedToken(id: string, verified: boolean): void {
+		const token = this._tokens.get(id);
+		if (this._accounts.get(id)?.kind !== 'token') {
+			return;
+		}
+		const fingerprint = verified && token ? claudeTokenFingerprint(token) : undefined;
+		if (this._verifiedTokens.get(id) === fingerprint) {
+			return;
+		}
+		if (fingerprint) {
+			this._verifiedTokens.set(id, fingerprint);
+		} else {
+			this._verifiedTokens.delete(id);
+		}
+		this._storeAccounts();
 	}
 
 	private async _add(id: string, label: string, kind: 'token' | 'login'): Promise<void> {
@@ -720,6 +762,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		this._logins.delete(id);
 		this._accounts.delete(id);
 		this._tokens.delete(id);
+		this._verifiedTokens.delete(id);
 		for (const [chat, accountId] of this._chatAccounts) {
 			if (accountId === id) {
 				this._chatAccounts.delete(chat);
@@ -812,7 +855,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			return;
 		}
 		// Without a reading, an added account's credential is only known to work after a real turn.
-		const probe = validate && !hasReading && before.kind !== 'default' && (before.kind === 'token' || before.unverified)
+		const probe = validate && !hasReading && before.kind !== 'default' && before.unverified
 			? await this._probe(id, credential?.env)
 			: undefined;
 		const current = this._find(id);
@@ -838,6 +881,11 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 				this._update(id, claudeProbePatch(updated, probe, now));
 			}
 		}
+		if (hasReading || probe?.kind === 'ok' || probe?.kind === 'limited') {
+			this._setVerifiedToken(id, true);
+		} else if (probe?.kind === 'rejected') {
+			this._setVerifiedToken(id, false);
+		}
 		if (!wasSignedIn && this._find(id)?.status === 'signedIn' && id !== CLAUDE_DEFAULT_ACCOUNT_ID) {
 			// A first signed-in account can stand in for a missing machine login.
 			this._delegate.refreshModels();
@@ -846,8 +894,9 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 
 	/**
 	 * Runs the check turn of an added account: {@link CLAUDE_PROBE_PROMPT} on the cheapest model, one
-	 * turn, no tools, no transcript. Only the user's explicit actions run it (adding the account, a new
-	 * token, a refresh), never the periodic refresh, as it spends a little of the subscription.
+	 * turn, no tools, no transcript. It spends a little of the subscription, so it only runs for a token
+	 * that was not accepted before, after a real turn was refused, and when the user refreshes an
+	 * unverified account; never on a start with an accepted token and never in the periodic refresh.
 	 */
 	private async _probe(id: string, env: Record<string, string | undefined> | undefined): Promise<IClaudeProbeOutcome> {
 		const options: Options = {
