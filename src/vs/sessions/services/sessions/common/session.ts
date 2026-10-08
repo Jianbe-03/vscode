@@ -6,6 +6,7 @@
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { arrayEquals } from '../../../../base/common/equals.js';
 import { IMarkdownString } from '../../../../base/common/htmlContent.js';
+import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { IObservable, IReader } from '../../../../base/common/observable.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
@@ -618,6 +619,13 @@ export interface IChatOrigin {
 	 */
 	readonly parentChat?: URI;
 	/**
+	 * CreaEditor: for a {@link ChatOriginKind.Tool} chat started by another subagent, the resource
+	 * of that subagent's chat. {@link parentChat} stays the top-level chat in that case.
+	 */
+	readonly spawningChat?: URI;
+	/** CreaEditor: for a {@link ChatOriginKind.Tool} chat, the id of the tool call that started it. */
+	readonly toolCallId?: string;
+	/**
 	 * For a {@link ChatOriginKind.Fork} or {@link ChatOriginKind.SideChat}, the
 	 * id of the turn in {@link parentChat} the chat branched from. Undefined for
 	 * other origins.
@@ -837,6 +845,11 @@ export interface ISession {
 	readonly chats: IObservable<readonly IChat[]>;
 	/** The main (first) chat of this session. Providers may replace it for a new session via {@link ISessionsProvider.createNewChat}. */
 	readonly mainChat: IObservable<IChat>;
+	/**
+	 * CreaEditor: keeps {@link chats} complete, including the subagent chats the agent starts,
+	 * while the returned disposable is held, even when no chat of the session is open.
+	 */
+	retainChats?(): IDisposable;
 	/**
 	 * Capabilities of this session. Observable so consumers (context keys, chat
 	 * catalog) react when a provider's advertised capabilities hydrate or change

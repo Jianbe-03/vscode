@@ -945,7 +945,7 @@ class AdditionalChat extends Disposable {
 	private readonly _isNew: ISettableObservable<boolean>;
 	private readonly _isArchived: ISettableObservable<boolean>;
 
-	constructor(resource: URI, summary: ChatSummary, changesets: IObservable<readonly ISessionChangeset[] | undefined>, private readonly _acquireDetails: () => IDisposable, sessionWorkspace: IObservable<ISessionWorkspace | undefined>, mapWorkingDirectoryUri: AgentHostUriMapper, isNew: boolean = false, parentChat?: URI, sessionIsArchived: IObservable<boolean> = constObservable(false), canArchive: IObservable<boolean> = constObservable(false), output?: IChatOutputObs, sessionIsReadOnly: IObservable<boolean> = constObservable(false), connectionStatus?: IObservable<RemoteAgentHostConnectionStatus>) {
+	constructor(resource: URI, summary: ChatSummary, changesets: IObservable<readonly ISessionChangeset[] | undefined>, private readonly _acquireDetails: () => IDisposable, sessionWorkspace: IObservable<ISessionWorkspace | undefined>, mapWorkingDirectoryUri: AgentHostUriMapper, isNew: boolean = false, parentChat?: URI, sessionIsArchived: IObservable<boolean> = constObservable(false), canArchive: IObservable<boolean> = constObservable(false), output?: IChatOutputObs, sessionIsReadOnly: IObservable<boolean> = constObservable(false), connectionStatus?: IObservable<RemoteAgentHostConnectionStatus>, spawningChat?: URI) {
 		super();
 		this.backendUri = URI.parse(summary.resource);
 		const modifiedAt = summary.modifiedAt ? new Date(summary.modifiedAt) : new Date();
@@ -1003,6 +1003,8 @@ class AdditionalChat extends Disposable {
 			origin: summary.origin ? {
 				kind: toSessionChatOriginKind(summary.origin.kind),
 				parentChat,
+				...(spawningChat ? { spawningChat } : {}),
+				...(summary.origin.kind === ProtocolChatOriginKind.Tool ? { toolCallId: summary.origin.toolCallId } : {}),
 				...((summary.origin.kind === ProtocolChatOriginKind.Fork || summary.origin.kind === ProtocolChatOriginKind.SideChat) ? { turnId: summary.origin.turnId } : {}),
 				...(summary.origin.kind === ProtocolChatOriginKind.SideChat && summary.origin.selection ? { selection: toSessionSideChatSelection(summary.origin.selection) } : {}),
 			} : undefined,
@@ -1131,6 +1133,9 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 
 	readonly mainChat: IObservable<IChat>;
 	readonly chats: IObservable<readonly IChat[]>;
+
+	/** CreaEditor: holds the session state subscription, which brings in the subagent chats the agent starts. */
+	readonly retainChats = (): IDisposable => this._acquireChatDetails(this.sessionId);
 	/**
 	 * Capabilities derived reactively from the connection's root state rather
 	 * than snapshotted at construction time. The root state can still be loading
@@ -1737,7 +1742,8 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 			this._supportsChatArchive,
 			output,
 			this._options.readOnly,
-			this._options.preserveStatusWhenDisconnected ? undefined : this._options.connectionStatus
+			this._options.preserveStatusWhenDisconnected ? undefined : this._options.connectionStatus,
+			summary.origin?.kind === ProtocolChatOriginKind.Tool ? this._toChatResource(summary.origin.spawningChat) : undefined,
 		);
 		const selection = this._chatModelSelections.get(chatId);
 		if (selection) {
@@ -1758,6 +1764,11 @@ export class AgentHostSessionAdapter extends Disposable implements ISession {
 			|| origin.kind === ProtocolChatOriginKind.SideChat)
 			? origin.chat
 			: undefined;
+		return this._toChatResource(parentUri);
+	}
+
+	/** Maps a protocol chat URI of this session to its UI chat resource, see {@link _resolveParentChatResource}. */
+	private _toChatResource(parentUri: string | undefined): URI | undefined {
 		if (!parentUri) {
 			return undefined;
 		}
