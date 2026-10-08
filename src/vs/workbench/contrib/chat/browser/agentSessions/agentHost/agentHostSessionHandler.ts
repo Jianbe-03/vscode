@@ -113,6 +113,8 @@ import { AgentHostResponseFileChangesProvider } from './agentHostResponseFileCha
 import type { AgentHostPromptCacheNotification } from './agentHostPromptCacheNotification.js';
 import { AgentHostChatInputState, codexWriterLockMessage } from './agentHostChatInputState.js';
 import { readChatInputState } from '../../../../../../platform/agentHost/common/meta/agentHostChatInputState.js';
+import { SubscriptionAccountsAutoSwitchSettingId, dispatchSubscriptionAccountsRequest, waitForSubscriptionAccountsRequest } from '../../../../../services/agentHost/browser/subscriptionAccountsService.js';
+import { getSubscriptionLimitErrorDetails, getSubscriptionSwitchData, readSubscriptionLimitErrorMeta } from '../../subscriptionAccounts/subscriptionAccountsLimit.js';
 import { AgentHostSandboxNotification } from './agentHostSandboxNotification.js';
 import { IChatResponseFileChangesService } from '../../chatResponseFileChangesService.js';
 import { AgentHostSessionReferenceAttachmentDisplayKind, AgentHostSessionReferenceTrajectoryAttachmentDisplayKind, toSessionReferenceAttachmentMeta, toSessionReferenceModelRepresentation } from './agentHostSessionReferenceAttachment.js';
@@ -1569,7 +1571,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 							this._config.connection.initializeResult.get()?.terminalCommandPrefix,
 							this._config.connection.resourceUris,
 							this._config.provider,
-							turn => this._getTurnErrorDetails(turn, allowTurnResume),
+							turn => this._getTurnErrorDetails(turn, allowTurnResume, chatURI),
 						));
 						this._logService.trace(`[AgentHost] provideChatSessionContent: converted ${sessionState.turns.length} turn(s) into ${history.length} history item(s) for ${resolvedSession.toString()}`);
 
@@ -2019,7 +2021,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				: completedTurn?.state === TurnState.Cancelled || cancellationToken.isCancellationRequested ? 'cancelled'
 					: completedTurn ? 'success' : 'notDispatched';
 			const details = this._getTurnResponseDetails(request.sessionResource, resolvedSession, completedTurn);
-			const errorDetails = this._getTurnErrorDetails(completedTurn);
+			const errorDetails = this._getTurnErrorDetails(completedTurn, undefined, chatId);
 
 			return {
 				timings: { firstProgress, totalElapsed: stopWatch.elapsed() },
@@ -2075,7 +2077,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 	 * non-error turns. Falls back to the raw error when no structured chat
 	 * error was forwarded in `_meta`.
 	 */
-	private _getTurnErrorDetails(turn: Turn | undefined, allowResume = true): IChatResponseErrorDetails | undefined {
+	private _getTurnErrorDetails(turn: Turn | undefined, allowResume = true, chatURI?: string): IChatResponseErrorDetails | undefined {
 		const errorPart = getErrorResponsePart(turn);
 		const error = getTurnError(turn);
 		if (!error) {
@@ -2086,6 +2088,11 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 				message: localize('agentHost.codexThreadInUse', "{0} Then send your message again in CreaEditor. Your message has not been sent.", codexWriterLockMessage()),
 				isExpectedError: true,
 			};
+		}
+		// CreaEditor: a used-up subscription account offers to continue on the next account of its pool.
+		const subscriptionLimit = readSubscriptionLimitErrorMeta(error);
+		if (subscriptionLimit) {
+			return getSubscriptionLimitErrorDetails(subscriptionLimit, Date.now(), allowResume ? chatURI : undefined);
 		}
 		const isExecutionInterrupted = error.errorType === 'executionInterrupted';
 		const forwardedDetails = getChatErrorDetailsFromMeta(error, this._chatErrorContext());
@@ -2508,7 +2515,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			const allowTurnResume = !this._isChatReadOnly(sessionStr, chatURI);
 			chatSession.updateHistory(turnsToHistory(backendSession, state.turns, this._config.agentId, this._config.connectionAuthority,
 				lookup, this._chatErrorContext(), this._config.connection.initializeResult.get()?.terminalCommandPrefix,
-				this._config.connection.resourceUris, this._config.provider, turn => this._getTurnErrorDetails(turn, allowTurnResume)));
+				this._config.connection.resourceUris, this._config.provider, turn => this._getTurnErrorDetails(turn, allowTurnResume, chatURI)));
 		};
 		disposables.add(chatSub.onDidChange(refreshHistory));
 		disposables.add(chatSub.onDidApplyAction(envelope => {
@@ -3090,7 +3097,7 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 			cancellationToken: cts.token,
 			suppressErrorMarkdown: true,
 			onTurnEnded: lastTurn => {
-				const errorDetails = this._getTurnErrorDetails(lastTurn, !this._isChatReadOnly(backendSession.toString(), chatURI));
+				const errorDetails = this._getTurnErrorDetails(lastTurn, !this._isChatReadOnly(backendSession.toString(), chatURI), chatURI);
 				if (errorDetails) {
 					const response = this._chatService.getSession(chatSession.sessionResource)
 						?.getRequests()
@@ -3153,6 +3160,15 @@ export class AgentHostSessionHandler extends Disposable implements IChatSessionC
 		onFailureStage('prepareTurn');
 		// Synchronous, so the turn dispatched next observes the current script.
 		this._shellInitSynchronizer.reconcile(session);
+		// CreaEditor: "Continue on <Claude account>" moves the chat to that account, then resumes the failed turn.
+		const subscriptionSwitch = getSubscriptionSwitchData(request.acceptedConfirmationData);
+		if (subscriptionSwitch) {
+			if (subscriptionSwitch.subscriptionSwitch.alwaysSwitch) {
+				await this._configurationService.updateValue(SubscriptionAccountsAutoSwitchSettingId, true);
+			}
+			const switchRequest = dispatchSubscriptionAccountsRequest(this._config.connection, { type: 'switchChat', chat: this._getChatURI(request.sessionResource), accountId: subscriptionSwitch.subscriptionSwitch.accountId });
+			await waitForSubscriptionAccountsRequest(this._config.connection, switchRequest, cancellationToken);
+		}
 		if (request.acceptedConfirmationData?.some(isResumeTurnConfirmationData)) {
 			return this._handleResumedTurn(session, request, progress, cancellationToken);
 		}
