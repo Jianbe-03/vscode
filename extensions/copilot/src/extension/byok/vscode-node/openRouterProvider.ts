@@ -88,8 +88,23 @@ export interface IDiscoveredGatewayModel {
 	readonly isPreset: boolean;
 }
 
-/** CreaEditor: the presets and guardrail-allowed models found by the most recent OpenRouter discovery. */
-export const lastOpenRouterDiscovery: { models: readonly IDiscoveredGatewayModel[] } = { models: [] };
+/**
+ * CreaEditor: the presets and guardrail-allowed models found by the most recent OpenRouter discovery,
+ * per provider group (named API key; `''` for models resolved without a group). Every key has its own
+ * guardrails and presets, so one key's discovery never stands in for another's.
+ */
+const lastOpenRouterDiscovery = new Map<string, readonly IDiscoveredGatewayModel[]>();
+
+/**
+ * CreaEditor: the discovery of one OpenRouter key. Without a group, the discovery of the only key is
+ * returned, or nothing when there are several keys.
+ */
+export function getOpenRouterDiscovery(group: string | undefined): readonly IDiscoveredGatewayModel[] {
+	if (group !== undefined) {
+		return lastOpenRouterDiscovery.get(group) ?? [];
+	}
+	return lastOpenRouterDiscovery.size === 1 ? [...lastOpenRouterDiscovery.values()][0] : [];
+}
 
 const OPENROUTER_PRESET_PREFIX = '@preset/';
 const DEFAULT_PRESET_CONTEXT_WINDOW = 200_000;
@@ -150,7 +165,7 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 		);
 	}
 
-	protected override async getAllModels(silent: boolean, apiKey: string | undefined, configuration: LanguageModelChatConfiguration | undefined): Promise<OpenAICompatibleLanguageModelChatInformation<LanguageModelChatConfiguration>[]> {
+	protected override async getAllModels(silent: boolean, apiKey: string | undefined, configuration: LanguageModelChatConfiguration | undefined, group?: string): Promise<OpenAICompatibleLanguageModelChatInformation<LanguageModelChatConfiguration>[]> {
 		const config = configuration as OpenRouterProviderConfig | undefined;
 		const hidden = new Set((config?.hiddenModels ?? []).map(normalizeOpenRouterModelId));
 		const entries: OpenRouterModelEntry[] = (config?.models ?? [])
@@ -211,13 +226,13 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 			.filter(model => !hidden.has(model.id))
 			.map(model => ({ ...model, url: baseUrl }));
 		const configuredIds = new Set(configuredModels.map(model => model.id));
-		lastOpenRouterDiscovery.models = [
+		lastOpenRouterDiscovery.set(group ?? '', [
 			...presets.map(preset => {
 				const id = OPENROUTER_PRESET_PREFIX + preset.slug;
 				return { id, name: configured[id]?.name ?? defaultPresetName(id), isPreset: true };
 			}),
 			...catalog.map(model => ({ id: model.id, name: model.name, contextWindow: model.maxInputTokens + model.maxOutputTokens, isPreset: false })),
-		];
+		]);
 		if (config?.showAllModels !== true) {
 			return configuredModels;
 		}

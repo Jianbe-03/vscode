@@ -99,10 +99,10 @@ function presetPick(value: string): IOpenRouterPick {
 	};
 }
 
-/** The presets and guardrail-allowed models the chat extension discovered with the OpenRouter key. */
-async function getDiscoveredModels(commandService: ICommandService): Promise<IDiscoveredModel[]> {
+/** The presets and guardrail-allowed models the chat extension discovered with the OpenRouter key of `groupName`. */
+async function getDiscoveredModels(commandService: ICommandService, groupName: string): Promise<IDiscoveredModel[]> {
 	try {
-		return await commandService.executeCommand<IDiscoveredModel[]>('creaeditor.gateway.openRouterModels') ?? [];
+		return await commandService.executeCommand<IDiscoveredModel[]>('creaeditor.gateway.openRouterModels', groupName) ?? [];
 	} catch {
 		return [];
 	}
@@ -123,7 +123,7 @@ async function fetchPublicCatalog(requestService: IRequestService, logService: I
 	}
 }
 
-async function pickOpenRouterModel(quickInputService: IQuickInputService, commandService: ICommandService, requestService: IRequestService, logService: ILogService, existingIds: ReadonlySet<string>): Promise<IOpenRouterPick | undefined> {
+async function pickOpenRouterModel(quickInputService: IQuickInputService, commandService: ICommandService, requestService: IRequestService, logService: ILogService, groupName: string, existingIds: ReadonlySet<string>): Promise<IOpenRouterPick | undefined> {
 	const disposables = new DisposableStore();
 	const picker = disposables.add(quickInputService.createQuickPick<IOpenRouterPick>({ useSeparators: true }));
 	picker.title = localize('openRouter.pickTitle', "Add OpenRouter Preset or Model");
@@ -147,7 +147,7 @@ async function pickOpenRouterModel(quickInputService: IQuickInputService, comman
 		detail: model.contextWindow ? localize('openRouter.context', "{0}K context", Math.round(model.contextWindow / 1000)) : undefined,
 	});
 	const load = async () => {
-		let models = await getDiscoveredModels(commandService);
+		let models = await getDiscoveredModels(commandService, groupName);
 		const fromKey = models.length > 0;
 		if (!fromKey) {
 			models = await fetchPublicCatalog(requestService, logService);
@@ -224,7 +224,7 @@ async function connectGateway(services: IConnectGatewayServices): Promise<Gatewa
 	const defaultName = kind === 'openrouter' ? 'OpenRouter' : 'LiteLLM';
 	const name = (await quickInputService.input({
 		title: kind === 'openrouter' ? localize('gateway.nameOpenRouter', "OpenRouter Detected") : localize('gateway.nameLiteLLM', "LiteLLM Proxy Detected"),
-		prompt: localize('gateway.namePrompt', "Name for this connection (shown as a group in the model picker)."),
+		prompt: localize('gateway.namePrompt', "Name for this key, e.g. \"Work key\". It is shown after every model of this key in the model picker; a chat and its subagents always stay on the key they started on."),
 		value: existingNames.has(defaultName) ? `${defaultName} 2` : defaultName,
 		validateInput: async value => !value.trim()
 			? localize('gateway.nameRequired', "Please enter a name.")
@@ -303,7 +303,7 @@ export class AddOpenRouterModelAction extends Action2 {
 		}
 
 		const existing: IOpenRouterModelEntry[] = Array.isArray(group.models) ? group.models as IOpenRouterModelEntry[] : [];
-		const picked = await pickOpenRouterModel(quickInputService, commandService, requestService, logService, new Set(existing.map(entry => entry.id)));
+		const picked = await pickOpenRouterModel(quickInputService, commandService, requestService, logService, group.name, new Set(existing.map(entry => entry.id)));
 		if (!picked) {
 			return;
 		}

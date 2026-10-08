@@ -26,6 +26,8 @@ export interface LanguageModelChatConfiguration {
 
 export interface ExtendedLanguageModelChatInformation<C extends LanguageModelChatConfiguration> extends LanguageModelChatInformation {
 	readonly configuration?: C;
+	/** CreaEditor: the provider group (named API key) the model was resolved for, recorded in the cost ledger. */
+	readonly providerGroup?: string;
 }
 
 export abstract class AbstractLanguageModelChatProvider<C extends LanguageModelChatConfiguration = LanguageModelChatConfiguration, T extends ExtendedLanguageModelChatInformation<C> = ExtendedLanguageModelChatInformation<C>> implements LanguageModelChatProvider<T> {
@@ -61,24 +63,27 @@ export abstract class AbstractLanguageModelChatProvider<C extends LanguageModelC
 		await commands.executeCommand('lm.migrateLanguageModelsProviderGroup', { vendor: this._id, name, ...configuration });
 	}
 
-	async provideLanguageModelChatInformation({ silent, configuration }: PrepareLanguageModelChatModelOptions, token: CancellationToken): Promise<T[]> {
+	async provideLanguageModelChatInformation({ silent, configuration, group }: PrepareLanguageModelChatModelOptions, token: CancellationToken): Promise<T[]> {
 		let apiKey: string | undefined = (configuration as C)?.apiKey;
 		if (!apiKey) {
 			apiKey = await this.configureDefaultGroupWithApiKeyOnly();
 		}
 
-		const models = await this.getAllModels(silent, apiKey, configuration as C);
+		const models = await this.getAllModels(silent, apiKey, configuration as C, group);
 		return models.map(model => ({
 			...model,
 			isBYOK: true,
 			apiKey,
-			configuration
+			configuration,
+			// CreaEditor: remember the provider group (API key) so its requests are attributed to it.
+			providerGroup: group,
 		}));
 	}
 
 	abstract provideLanguageModelChatResponse(model: T, messages: Array<LanguageModelChatMessage | LanguageModelChatMessage2>, options: ProvideLanguageModelChatResponseOptions, progress: Progress<LanguageModelResponsePart2>, token: CancellationToken): Promise<void>;
 	abstract provideTokenCount(model: T, text: string | LanguageModelChatMessage | LanguageModelChatMessage2, token: CancellationToken): Promise<number>;
-	protected abstract getAllModels(silent: boolean, apiKey: string | undefined, configuration: C | undefined): Promise<T[]>;
+	/** @param group CreaEditor: the provider group (named API key) the models are resolved for, if any. */
+	protected abstract getAllModels(silent: boolean, apiKey: string | undefined, configuration: C | undefined, group?: string): Promise<T[]>;
 }
 
 export interface OpenAICompatibleLanguageModelChatInformation<C extends LanguageModelChatConfiguration> extends ExtendedLanguageModelChatInformation<C> {
@@ -179,7 +184,7 @@ export abstract class AbstractOpenAICompatibleLMProvider<T extends LanguageModel
 		const endpoint = await this.createOpenAIEndPoint(model);
 		this.attachRequestMetadata(endpoint, model);
 		// CreaEditor: requests through OpenRouter or LiteLLM always carry chat/issue tracking and record their cost.
-		endpoint.setGateway(await this.resolveGatewayKind(endpoint));
+		endpoint.setGateway(await this.resolveGatewayKind(endpoint), model.providerGroup);
 		return endpoint;
 	}
 

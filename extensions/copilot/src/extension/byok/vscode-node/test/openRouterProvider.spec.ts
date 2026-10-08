@@ -5,7 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { BYOKModelCapabilities } from '../../common/byokProvider';
-import { lastOpenRouterDiscovery, OpenRouterLMProvider } from '../openRouterProvider';
+import { getOpenRouterDiscovery, OpenRouterLMProvider } from '../openRouterProvider';
 
 /**
  * Tests for issue #324671:
@@ -189,7 +189,7 @@ describe('OpenRouterLMProvider reasoning effort (issue #335272)', () => {
 describe('OpenRouterLMProvider presets (CreaEditor)', () => {
 	class PresetTestProvider extends OpenRouterLMProvider {
 		public listModels(configuration: unknown) {
-			return this.getAllModels(true, 'key', configuration as never);
+			return this.getAllModels(true, 'key', configuration as never, 'Work key');
 		}
 		public listModelsWithoutKey(configuration: unknown) {
 			return this.getAllModels(true, undefined, configuration as never);
@@ -222,7 +222,8 @@ describe('OpenRouterLMProvider presets (CreaEditor)', () => {
 			models: models.map(m => [m.id, m.name]),
 			contextWindow: models[0].maxInputTokens + models[0].maxOutputTokens,
 			url: models[0].url,
-			discovered: lastOpenRouterDiscovery.models.map(m => [m.id, m.isPreset]),
+			discovered: getOpenRouterDiscovery('Work key').map(m => [m.id, m.isPreset]),
+			otherKey: getOpenRouterDiscovery('Personal key'),
 		}).toEqual({
 			urls: ['https://openrouter.ai/api/v1/presets?limit=100', 'https://openrouter.ai/api/v1/models/user?supported_parameters=tools'],
 			models: [
@@ -232,6 +233,7 @@ describe('OpenRouterLMProvider presets (CreaEditor)', () => {
 			contextWindow: 200_000,
 			url: 'https://openrouter.ai/api/v1',
 			discovered: [['@preset/programmer-agent', true], ['@preset/design-review', true], ['anthropic/claude-sonnet-4.5', false]],
+			otherKey: [],
 		});
 	});
 

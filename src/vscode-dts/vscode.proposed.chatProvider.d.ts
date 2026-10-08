@@ -189,6 +189,12 @@ declare module 'vscode' {
 		readonly configuration?: {
 			readonly [key: string]: any;
 		};
+
+		/**
+		 * CreaEditor: the name of the provider group (e.g. a named API key) the models are resolved for.
+		 * Absent when the models are resolved without a group.
+		 */
+		readonly group?: string;
 	}
 
 	export interface ChatRequest {

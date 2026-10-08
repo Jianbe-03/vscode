@@ -23,7 +23,7 @@ import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
 import { LiteLLMLMProvider } from './liteLLMProvider';
 import { OllamaLMProvider } from './ollamaProvider';
 import { OAIBYOKLMProvider } from './openAIProvider';
-import { lastOpenRouterDiscovery, OpenRouterLMProvider } from './openRouterProvider';
+import { getOpenRouterDiscovery, OpenRouterLMProvider } from './openRouterProvider';
 import { XAIBYOKLMProvider } from './xAIProvider';
 
 export class BYOKContrib extends Disposable implements IExtensionContribution {
@@ -49,7 +49,8 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 
 		// CreaEditor: used by the "Add OpenRouter or LiteLLM Models" flow in the workbench.
 		this._register(commands.registerCommand('creaeditor.gateway.detect', (url: string) => detectGatewayKind(url, this._fetcherService)));
-		this._register(commands.registerCommand('creaeditor.gateway.openRouterModels', () => lastOpenRouterDiscovery.models));
+		// CreaEditor: the discovery is per OpenRouter key (provider group).
+		this._register(commands.registerCommand('creaeditor.gateway.openRouterModels', (group?: string) => getOpenRouterDiscovery(typeof group === 'string' ? group : undefined)));
 		this._register(this._instantiationService.createInstance(GatewayCostsPanel));
 	}
 
