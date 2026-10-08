@@ -5427,7 +5427,7 @@ suite('CopilotAgentSession', () => {
 			mockSession.fire('tool.execution_complete', { toolCallId: 'tc-task', success: false, error: { message: 'No GitHub OAuth token provided' } });
 			await timeout(0);
 
-			assert.deepStrictEqual(signals.flatMap(signal => signal.kind === 'subagent_completed' ? [{ kind: signal.kind, toolCallId: signal.toolCallId }]
+			assert.deepStrictEqual(signals.flatMap((signal): { kind: string; toolCallId: string | undefined; message?: string }[] => signal.kind === 'subagent_completed' ? [{ kind: signal.kind, toolCallId: signal.toolCallId }]
 				: signal.kind === 'action' && signal.action.type === ActionType.ChatError && signal.action.part.kind === ResponsePartKind.Error
 					? [{ kind: signal.action.type, toolCallId: signal.parentToolCallId, message: signal.action.part.error.message }] : []), [
 				{ kind: ActionType.ChatError, toolCallId: 'tc-task', message: 'No GitHub OAuth token provided' },
