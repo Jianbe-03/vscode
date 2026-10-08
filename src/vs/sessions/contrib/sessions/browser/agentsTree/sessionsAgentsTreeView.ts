@@ -53,6 +53,8 @@ export class SessionsAgentsTreeControl extends AgentsTreeControl {
 
 	private readonly _retainedSessions = this._register(new DisposableMap<string, IDisposable>());
 	private readonly _visibleObs = observableValue(this, false);
+	/** Subagent details from chat models, kept after a model unloads, by the tool call id that started the subagent. */
+	private readonly _knownSubagentNodes = new Map<string, IAgentsTreeSubagentNode>();
 
 	constructor(
 		@IInstantiationService instantiationService: IInstantiationService,
@@ -193,7 +195,7 @@ export class SessionsAgentsTreeControl extends AgentsTreeControl {
 	 * the agent name, model and duration of the subagents it started.
 	 */
 	private _getSubagentChatElements(mainChat: IChat, allChats: readonly IChat[], subagentChats: readonly IChat[], now: number): IAgentsTreeSubagentElement[] {
-		const nodes = new Map<string, IAgentsTreeSubagentNode>();
+		const nodes = this._knownSubagentNodes;
 		for (const chat of allChats) {
 			const model = this.chatService.getSession(chat.resource);
 			if (model) {
@@ -236,7 +238,8 @@ export class SessionsAgentsTreeControl extends AgentsTreeControl {
 					description: chat.title.get() || known?.description,
 					modelName: known?.modelName,
 					status,
-					duration: known?.duration ?? (elapsed > 0 ? elapsed : undefined),
+					// A remembered duration of a running subagent would stand still once its chat model unloads.
+					duration: (running ? undefined : known?.duration) ?? (elapsed > 0 ? elapsed : undefined),
 					chatResource: key,
 					children: [],
 				};
