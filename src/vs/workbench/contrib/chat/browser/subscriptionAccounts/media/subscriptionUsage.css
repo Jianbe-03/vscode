@@ -1,0 +1,363 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* CreaEditor: the Subscription Usage page. */
+
+.subscription-usage-editor {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background-color: var(--vscode-editor-background);
+}
+
+.subscription-usage-content {
+	box-sizing: border-box;
+	min-width: 0;
+	padding: var(--vscode-spacing-size320) var(--vscode-spacing-size240);
+}
+
+.subscription-usage-page {
+	max-width: 880px;
+	margin: 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size240);
+}
+
+.subscription-usage-page h1,
+.subscription-usage-page h2,
+.subscription-usage-page p {
+	margin: 0;
+}
+
+/* Header: the title leads, the subtitle and Refresh All support it. */
+
+.subscription-usage-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--vscode-spacing-size160);
+}
+
+.subscription-usage-titles {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size60);
+	min-width: 0;
+}
+
+.subscription-usage-page h1 {
+	font-size: var(--vscode-fontSize-heading1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.subscription-usage-subtitle {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body1);
+	line-height: 1.5;
+}
+
+.subscription-usage-header-actions .monaco-button,
+.subscription-usage-provider-header .monaco-button {
+	width: auto;
+	white-space: nowrap;
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size100);
+}
+
+/* The auto-switch setting. */
+
+.subscription-usage-setting {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--vscode-spacing-size80);
+}
+
+.subscription-usage-setting .monaco-checkbox {
+	flex-shrink: 0;
+	margin: var(--vscode-spacing-size20) 0 0;
+}
+
+.subscription-usage-setting-label {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size20);
+	cursor: pointer;
+}
+
+.subscription-usage-setting-title {
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.subscription-usage-setting-description {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+/* One section per provider. */
+
+.subscription-usage-provider {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size120);
+	padding-top: var(--vscode-spacing-size160);
+	border-top: var(--vscode-strokeThickness, 1px) solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.subscription-usage-provider-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--vscode-spacing-size120);
+}
+
+.subscription-usage-page h2 {
+	font-size: var(--vscode-fontSize-heading2);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.subscription-usage-empty {
+	color: var(--vscode-descriptionForeground);
+	padding: var(--vscode-spacing-size160);
+	border: var(--vscode-strokeThickness, 1px) dashed var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+/* The pool card. */
+
+.subscription-usage-pool {
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size240);
+	padding: var(--vscode-spacing-size160) var(--vscode-spacing-size200);
+	background-color: var(--vscode-editorWidget-background);
+	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: var(--vscode-cornerRadius-medium);
+}
+
+.subscription-usage-pool-figure {
+	display: flex;
+	flex-direction: column;
+	min-width: 96px;
+}
+
+.subscription-usage-pool-percent {
+	font-size: var(--vscode-fontSize-heading1);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	font-variant-numeric: tabular-nums;
+	line-height: 1.2;
+}
+
+.subscription-usage-pool-caption {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label1);
+}
+
+.subscription-usage-pool-details {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size80);
+	min-width: 0;
+}
+
+.subscription-usage-pool-facts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size40) var(--vscode-spacing-size160);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+/* Meters: the share left, quiet until it runs low. */
+
+.subscription-usage-meter {
+	position: relative;
+	height: 6px;
+	overflow: hidden;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background-color: var(--vscode-scrollbarSlider-background);
+}
+
+.subscription-usage-pool .subscription-usage-meter {
+	height: 8px;
+}
+
+.subscription-usage-meter-fill {
+	height: 100%;
+	border-radius: inherit;
+	background-color: var(--vscode-progressBar-background);
+}
+
+.subscription-usage-meter-fill.low {
+	background-color: var(--vscode-editorWarning-foreground);
+}
+
+.subscription-usage-meter.empty {
+	background-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+	opacity: 0.4;
+}
+
+/* Account rows. */
+
+.subscription-usage-accounts {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	border: var(--vscode-strokeThickness, 1px) solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: var(--vscode-cornerRadius-medium);
+	overflow: hidden;
+}
+
+.subscription-usage-account {
+	display: grid;
+	grid-template-columns: minmax(160px, 1fr) minmax(200px, 1.4fr) auto;
+	align-items: center;
+	gap: var(--vscode-spacing-size160);
+	padding: var(--vscode-spacing-size120) var(--vscode-spacing-size160);
+}
+
+.subscription-usage-account + .subscription-usage-account {
+	border-top: var(--vscode-strokeThickness, 1px) solid var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.subscription-usage-account:hover {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.subscription-usage-account-identity {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size40);
+	min-width: 0;
+}
+
+.subscription-usage-account-title {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size80);
+}
+
+.subscription-usage-account-label {
+	font-weight: var(--vscode-fontWeight-semiBold);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.subscription-usage-account-meta {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.subscription-usage-account-error {
+	color: var(--vscode-errorForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+/* Status: a colored dot and a word, not a filled badge. */
+
+.subscription-usage-status {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size40);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label1);
+}
+
+.subscription-usage-status-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background-color: var(--vscode-descriptionForeground);
+}
+
+.subscription-usage-status.signedIn .subscription-usage-status-dot {
+	background-color: var(--vscode-testing-iconPassed);
+}
+
+.subscription-usage-status.limited .subscription-usage-status-dot,
+.subscription-usage-status.usedUp .subscription-usage-status-dot {
+	background-color: var(--vscode-editorWarning-foreground);
+}
+
+.subscription-usage-status.signingIn .subscription-usage-status-dot {
+	background-color: var(--vscode-progressBar-background);
+}
+
+.subscription-usage-status.error .subscription-usage-status-dot {
+	background-color: var(--vscode-errorForeground);
+}
+
+/* Usage windows. */
+
+.subscription-usage-windows {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size80);
+	min-width: 0;
+}
+
+.subscription-usage-window {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size40);
+}
+
+.subscription-usage-window-head {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--vscode-spacing-size80);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.subscription-usage-window-label {
+	color: var(--vscode-foreground);
+}
+
+.subscription-usage-window-value,
+.subscription-usage-window-empty {
+	color: var(--vscode-descriptionForeground);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.subscription-usage-window-empty {
+	font-size: var(--vscode-fontSize-body2);
+}
+
+/* Row actions: quiet at rest, present on hover or keyboard focus. */
+
+.subscription-usage-account-actions {
+	opacity: 0;
+}
+
+.subscription-usage-account:hover .subscription-usage-account-actions,
+.subscription-usage-account:focus-within .subscription-usage-account-actions,
+.subscription-usage-account.needs-sign-in .subscription-usage-account-actions {
+	opacity: 1;
+}
+
+/* Narrow editors: the usage windows move below the account. */
+
+.subscription-usage-editor.narrow .subscription-usage-account {
+	grid-template-columns: 1fr auto;
+}
+
+.subscription-usage-editor.narrow .subscription-usage-windows {
+	grid-column: 1 / -1;
+	grid-row: 2;
+}
+
+.subscription-usage-editor.narrow .subscription-usage-pool {
+	flex-direction: column;
+	align-items: stretch;
+	gap: var(--vscode-spacing-size120);
+}
