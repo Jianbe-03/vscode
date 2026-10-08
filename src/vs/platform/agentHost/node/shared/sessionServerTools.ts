@@ -17,6 +17,7 @@ import { buildChatUri, buildDefaultChatUri, CustomizationType, getInlineToolInpu
 import { buildOpenSessionLinkUri, parseOpenSessionLinkChatId, parseOpenSessionLinkUri } from '../../common/openSessionLink.js';
 import { SessionServerToolName } from '../../common/serverToolNames.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
+import { readAgentModelByokKey } from '../../common/agentModelByokMeta.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import type { AgentHostStateManager } from '../agentHostStateManager.js';
 import type { AutomaticTitleGenerationStrategy } from '../agentHostSessionTitleController.js';
@@ -623,6 +624,17 @@ async function getCreateSessionCatalog(accessor: ISessionServerToolAccessor, raw
 	}
 }
 
+/**
+ * CreaEditor: the models a session may create sessions and chats with. A creator that runs on an
+ * API key (a provider group, e.g. a named OpenRouter key) only ever starts work on that same key, so
+ * only the models of that key are candidates.
+ */
+export function getModelsForCreator(models: readonly IAgentModelInfo[], creatorModel: ModelSelection | undefined): readonly IAgentModelInfo[] {
+	const creator = creatorModel !== undefined ? models.find(candidate => candidate.id === creatorModel.id) : undefined;
+	const key = creator !== undefined ? readAgentModelByokKey(creator) : undefined;
+	return key === undefined ? models : models.filter(candidate => readAgentModelByokKey(candidate) === key);
+}
+
 function resolveModel(modelName: string | undefined, models: readonly IAgentModelInfo[], provider?: AgentProvider): IAgentModelInfo | undefined {
 	if (modelName === undefined) {
 		return undefined;
@@ -1068,7 +1080,7 @@ export async function applyCreateSessionTool(accessor: ISessionServerToolAccesso
 	const sessions = await getCreateSessionCatalog(accessor, rawArgs, supportsChatWorkingDirectories);
 	const currentProvider = currentSession ? AgentSession.provider(currentSession) : undefined;
 	const defaults = source ? accessor.getCreationDefaults(source) : undefined;
-	const args = getCreateSessionArgs(rawArgs, sessions, accessor.getModels(), currentProvider, supportsChatWorkingDirectories);
+	const args = getCreateSessionArgs(rawArgs, sessions, getModelsForCreator(accessor.getModels(), defaults?.model), currentProvider, supportsChatWorkingDirectories);
 	if (args.relationship === 'currentSession') {
 		if (!currentSession) {
 			throw new Error(`Invalid ${SessionServerToolName.CreateSession} input: relationship "currentSession" requires an invoking session.`);
@@ -1382,9 +1394,9 @@ async function resolveSessionGroupWorkspace(accessor: ISessionServerToolAccessor
 export async function applyCreateSessionGroupTool(accessor: ISessionServerToolAccessor, rawArgs: unknown, source: URI, sourceTurnId?: string, enforceSpawnDepthLimit = true, maxSpawnDepth = maxSessionSpawnDepth): Promise<ICreateSessionGroupResult> {
 	const toolName = SessionServerToolName.CreateSessionGroup;
 	const currentSession = currentSessionUri(source.toString());
-	const args = getCreateSessionGroupArgs(rawArgs, accessor.getModels());
-	const parentDepth = checkSessionSpawnDepth(accessor, currentSession, enforceSpawnDepthLimit, maxSpawnDepth);
 	const defaults = accessor.getCreationDefaults(source);
+	const args = getCreateSessionGroupArgs(rawArgs, getModelsForCreator(accessor.getModels(), defaults?.model));
+	const parentDepth = checkSessionSpawnDepth(accessor, currentSession, enforceSpawnDepthLimit, maxSpawnDepth);
 	const workspace = await resolveSessionGroupWorkspace(accessor, args.workspace, currentSession, defaults);
 	const customizations = accessor.getSessionCustomizations?.(currentSession);
 	const members = args.sessions.map(member => ({
@@ -1571,7 +1583,8 @@ async function createChat(accessor: ISessionServerToolAccessor, args: IResolvedC
 export async function applyCreateChatTool(accessor: ISessionServerToolAccessor, rawArgs: unknown, source?: URI, sourceTurnId?: string): Promise<ICreateChatResult> {
 	const sessions = await accessor.listSessions();
 	const currentSession = source ? currentSessionUri(source.toString()) : undefined;
-	return createChat(accessor, getCreateChatArgs(rawArgs, sessions, accessor.getModels(), currentSession), source, sourceTurnId);
+	const defaults = source ? accessor.getCreationDefaults(source) : undefined;
+	return createChat(accessor, getCreateChatArgs(rawArgs, sessions, getModelsForCreator(accessor.getModels(), defaults?.model), currentSession), source, sourceTurnId);
 }
 
 /** Builds the model-facing `create_chat` result. */

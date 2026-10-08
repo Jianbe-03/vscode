@@ -15,6 +15,7 @@ import { SessionStatus } from '../../common/state/protocol/channels-session/stat
 import { ActionType } from '../../common/state/sessionActions.js';
 import { buildChatUri, buildDefaultChatUri, CustomizationType, withSessionCreationReference, type Customization, type SessionActiveClient, MessageKind, PendingMessageKind, readSessionCreationReference, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, TurnState, withSessionGitState, withSessionGitHubState, withSessionWorkspaceless, type ModelSelection, type ResponsePart, type ToolCallState, type Turn } from '../../common/state/sessionState.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
+import { createAgentModelByokMeta } from '../../common/agentModelByokMeta.js';
 import { AgentHostStateManager } from '../../node/agentHostStateManager.js';
 import type { AutomaticTitleGenerationStrategy } from '../../node/agentHostSessionTitleController.js';
 import { SessionServerToolName } from '../../common/serverToolNames.js';
@@ -38,6 +39,7 @@ import {
 	formatCreateChatResult,
 	getCreateChatArgs,
 	getCreateSessionArgs,
+	getModelsForCreator,
 	getDeleteSessionArgs,
 	getSetWorkspaceArgs,
 	getRenameChatArgs,
@@ -754,6 +756,29 @@ suite('SessionServerTools', () => {
 		assert.throws(
 			() => getCreateSessionArgs({ relationship: 'independent', workspace: workspace.toString(), prompt: 'hi', title: 'Task', model: 'Shared Model' }, [], models),
 			/model "Shared Model" is ambiguous; use one of these model ids: copilot-shared, claude-shared/,
+		);
+	});
+
+	test('getModelsForCreator keeps a creator on an API key to the models of that key', () => {
+		const byokModel = (group: string, id: string, name: string): IAgentModelInfo => ({ provider: 'copilotcli', id: `openrouter/${group}/${id}`, name, supportsVision: false, _meta: createAgentModelByokMeta(`openrouter/${group}/${id}`, group) });
+		const workOpus = byokModel('Work key', 'anthropic/claude-opus', 'Claude Opus (Work key)');
+		const workGpt = byokModel('Work key', 'openai/gpt-5', 'GPT-5 (Work key)');
+		const personalOpus = byokModel('Personal key', 'anthropic/claude-opus', 'Claude Opus (Personal key)');
+		const claudeModel: IAgentModelInfo = { provider: 'claude', id: 'claude-opus', name: 'Claude Opus', supportsVision: false };
+		const models = [workOpus, workGpt, personalOpus, claudeModel];
+
+		assert.deepStrictEqual({
+			onWorkKey: getModelsForCreator(models, { id: workOpus.id }).map(model => model.id),
+			withoutKey: getModelsForCreator(models, { id: claudeModel.id }).map(model => model.id),
+			withoutCreatorModel: getModelsForCreator(models, undefined).length,
+		}, {
+			onWorkKey: [workOpus.id, workGpt.id],
+			withoutKey: models.map(model => model.id),
+			withoutCreatorModel: models.length,
+		});
+		assert.throws(
+			() => getCreateSessionArgs({ relationship: 'independent', prompt: 'hi', title: 'Task', model: personalOpus.id }, [], getModelsForCreator(models, { id: workOpus.id })),
+			/model must match an available model id or name/,
 		);
 	});
 

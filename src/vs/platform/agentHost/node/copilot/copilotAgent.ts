@@ -64,7 +64,7 @@ import { ProtectedResourceMetadata, type AgentSelection, type ConfigPropertySche
 import { ActionType, AuthRequiredReason, type AuthRequiredParams, type SessionAction } from '../../common/state/sessionActions.js';
 import { areAdditionalWorkingDirectoriesEqual } from '../../common/state/sessionWorkingDirectories.js';
 import { CustomizationLoadStatus, CustomizationType, ChatInputResponseKind, customizationId, buildChatUri, buildDefaultChatUri, AH_META_WORKSPACELESS_DB_KEY, AH_META_IS_ARCHIVED_DB_KEY, AH_META_EHCLI_ADOPTED_DB_KEY, AH_META_EHCLI_LAST_TURN_DB_KEY, AH_META_IS_READ_DB_KEY, isDefaultChatUri, withSessionEhcliAdoptable, withSessionWorkspaceless, type ChildCustomization, type ClientPluginCustomization, type Customization, type DirectoryCustomization, type ISessionFolderPickerDecision, type MessageAttachment, type PendingMessage, type PluginCustomization, type PolicyState, type ChatInputAnswer, type ToolCallResult, type Turn, type UsageInfo } from '../../common/state/sessionState.js';
-import { getByokLmAgentModelId, resolveByokLmEnablement } from '../../common/agentHostByokLm.js';
+import { getByokLmAgentModelId, getByokLmKeyLock, getByokLmProviderGroup, isByokLmModelAllowedByLock, resolveByokLmEnablement } from '../../common/agentHostByokLm.js';
 import { isCustomizationEnabled } from '../../common/customizationEnablement.js';
 import { ActiveClientToolSet, structuralToolsEqual } from '../activeClientState.js';
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
@@ -2407,7 +2407,8 @@ export class CopilotAgent extends Disposable implements IAgent {
 			return;
 		}
 		this._byokModels = this._byokBridgeRegistry.getModels().map((m): IAgentModelInfo => {
-			const byokMeta = createAgentModelByokMeta(m.modelIdentifier);
+			// CreaEditor: the provider group (API key) lets session tools keep created sessions on the same key.
+			const byokMeta = createAgentModelByokMeta(m.modelIdentifier, getByokLmProviderGroup(m));
 			const thinkingLevel = this._createThinkingLevelConfigSchemaProperty(m.supportedReasoningEfforts, m.defaultReasoningEffort, m.id);
 			return {
 				provider: this.id,
@@ -5530,8 +5531,10 @@ export class CopilotAgent extends Disposable implements IAgent {
 			if (provisional) {
 				provisional.model = model;
 			} else {
-				const entry = current.target ?? await this._ensureResolvedChatSession(current);
 				const previousModelId = this._chatBackings.get(current.chatKey)?.model?.id;
+				// CreaEditor: a chat that runs on an API key (provider group) never switches to another key.
+				this._assertSameByokKey(previousModelId, model.id);
+				const entry = current.target ?? await this._ensureResolvedChatSession(current);
 				// Clear stale SDK preferences when a selection or an override is removed.
 				const autoTier = isAutoModel(model.id)
 					? resolveCopilotAutoTier(model, this._configurationService, this._logService, current.configurationId) ?? null
@@ -5553,6 +5556,24 @@ export class CopilotAgent extends Disposable implements IAgent {
 				this._onDidChangeChatData.fire({ chat, providerData: encodeProviderData(updated) });
 			}
 		});
+	}
+
+	/**
+	 * CreaEditor: throws when a chat on a model of a provider group (a named API key, e.g. an
+	 * OpenRouter key) would switch to a BYOK model of another key. Switching within the key, or to a
+	 * model that is not a BYOK model, is allowed; the BYOK proxy enforces the same key lock.
+	 */
+	private _assertSameByokKey(previousModelId: string | undefined, nextModelId: string): void {
+		if (previousModelId === undefined || previousModelId === nextModelId) {
+			return;
+		}
+		const byokModels = this._byokBridgeRegistry.getModels();
+		const previous = byokModels.find(m => getByokLmAgentModelId(m) === previousModelId);
+		const lock = previous && getByokLmKeyLock(previous);
+		const next = byokModels.find(m => getByokLmAgentModelId(m) === nextModelId);
+		if (lock && next && !isByokLmModelAllowedByLock(next, lock)) {
+			throw new Error(localize('copilotAgent.otherByokKey', "This chat runs on the {0} key \"{1}\" and cannot switch to \"{2}\" of another key. Start a new chat to use another key.", lock.vendor, lock.group, next.name ?? next.id));
+		}
 	}
 
 	private async _changeAgent(chat: URI, agent: AgentSelection | undefined, operationContext: URI | IAgentChatContext): Promise<void> {
