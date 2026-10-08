@@ -1272,6 +1272,13 @@ function initAdvanced() {
 			renderAdvanced();
 		} else if (message?.type === 'entries' && currentTab === 'advanced') {
 			scheduleQuery(400);
+		} else if (message?.type === 'showChat' && typeof message.chatId === 'string') {
+			// From the cost counter in the chat header: all requests of that chat, subagents included.
+			filters = Object.assign(defaultFilters(), { range: 'all', values: { chat: [message.chatId] } });
+			view.page = 0;
+			expanded.clear();
+			syncControls();
+			showTab('advanced');
 		}
 	});
 

@@ -30,6 +30,17 @@ type PanelMessage =
 	| { readonly type: 'query'; readonly seq: number; readonly filters: ICostFilters; readonly options: ICostQueryOptions }
 	| { readonly type: 'exportFiltered'; readonly format: 'csv' | 'json'; readonly filters: ICostFilters };
 
+/** Arguments of {@link SHOW_GATEWAY_COSTS_COMMAND_ID}. */
+interface IShowGatewayCostsOptions {
+	/** Main chat id as recorded in the ledger; the page opens filtered to that chat. */
+	readonly chatId?: string;
+}
+
+function parseShowOptions(options: unknown): IShowGatewayCostsOptions | undefined {
+	const chatId = options && typeof options === 'object' ? (options as IShowGatewayCostsOptions).chatId : undefined;
+	return typeof chatId === 'string' && chatId ? { chatId } : undefined;
+}
+
 /**
  * CreaEditor: the "AI Costs" page. Shows the cost OpenRouter and LiteLLM reported for every request,
  * grouped per issue and per chat, from the local cost ledger. Its Advanced tab sends `query` messages
@@ -41,20 +52,27 @@ export class GatewayCostsPanel extends Disposable {
 	private readonly _panelDisposables = this._register(new DisposableStore());
 	/** The ledger prepared for queries; reset whenever the ledger changes. */
 	private _dataset: ICostDataset | undefined;
+	/** Chat to show once a new page is ready. */
+	private _pendingChatId: string | undefined;
 	private readonly _subscriptionsRefresh = this._register(new RunOnceScheduler(() => this._postSubscriptions(), SUBSCRIPTIONS_REFRESH_DELAY));
 
 	constructor(
 		@IGatewayTrackingService private readonly _trackingService: IGatewayTrackingService,
 	) {
 		super();
-		this._register(commands.registerCommand(SHOW_GATEWAY_COSTS_COMMAND_ID, () => this.show()));
+		this._register(commands.registerCommand(SHOW_GATEWAY_COSTS_COMMAND_ID, (options: unknown) => this.show(parseShowOptions(options))));
 	}
 
-	show(): void {
+	/** Opens the page; with a chat id, on the Advanced tab filtered to that chat (subagents included). */
+	show(options?: IShowGatewayCostsOptions): void {
 		if (this._panel) {
 			this._panel.reveal();
+			if (options?.chatId) {
+				void this._panel.webview.postMessage({ type: 'showChat', chatId: options.chatId });
+			}
 			return;
 		}
+		this._pendingChatId = options?.chatId;
 		const panel = window.createWebviewPanel('creaeditor.aiCosts', l10n.t('AI Costs'), ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
 		this._panel = panel;
 		panel.webview.html = this._getHtml();
@@ -90,6 +108,10 @@ export class GatewayCostsPanel extends Disposable {
 		switch (message.type) {
 			case 'ready':
 				this._postEntries();
+				if (this._pendingChatId) {
+					void this._panel?.webview.postMessage({ type: 'showChat', chatId: this._pendingChatId });
+					this._pendingChatId = undefined;
+				}
 				void this._postSubscriptions();
 				break;
 			case 'refreshSubscriptions':

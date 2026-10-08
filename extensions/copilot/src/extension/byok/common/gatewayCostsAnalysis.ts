@@ -375,7 +375,7 @@ class Aggregate implements ICostAggregate {
 	completionTokens = 0;
 	cachedTokens = 0;
 
-	add(row: ICostRow): void {
+	add(row: IGatewayCostEntry): void {
 		this.requests++;
 		if (row.cost !== undefined) {
 			this.cost += row.cost;
@@ -752,4 +752,36 @@ export function computeCostComparison(dataset: ICostDataset, filters: ICostFilte
 		byKey: compareBy(current, previous, 'key'),
 		byModel: compareBy(current, previous, 'model'),
 	};
+}
+
+/** Cost, requests and tokens per chat, keyed by the main chat id, so subagents count for their main chat. */
+export function computeChatCosts(entries: readonly IGatewayCostEntry[]): Map<string, ICostAggregate> {
+	const chats = new Map<string, Aggregate>();
+	for (const entry of entries) {
+		let aggregate = chats.get(entry.rootChatId);
+		if (!aggregate) {
+			aggregate = new Aggregate();
+			chats.set(entry.rootChatId, aggregate);
+		}
+		aggregate.add(entry);
+	}
+	return new Map([...chats].map(([chatId, aggregate]) => [chatId, aggregate.toJSON()]));
+}
+
+/** The chats whose totals differ between two results of {@link computeChatCosts}, including added and removed chats. */
+export function getChangedChats(previous: ReadonlyMap<string, ICostAggregate>, next: ReadonlyMap<string, ICostAggregate>): string[] {
+	const changed: string[] = [];
+	for (const [chatId, aggregate] of next) {
+		const before = previous.get(chatId);
+		if (!before || before.cost !== aggregate.cost || before.requests !== aggregate.requests || before.costed !== aggregate.costed
+			|| before.promptTokens !== aggregate.promptTokens || before.completionTokens !== aggregate.completionTokens || before.cachedTokens !== aggregate.cachedTokens) {
+			changed.push(chatId);
+		}
+	}
+	for (const chatId of previous.keys()) {
+		if (!next.has(chatId)) {
+			changed.push(chatId);
+		}
+	}
+	return changed;
 }

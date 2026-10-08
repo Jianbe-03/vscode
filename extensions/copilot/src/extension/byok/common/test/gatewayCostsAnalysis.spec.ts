@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { IGatewayCostEntry } from '../../../../platform/endpoint/common/gatewayTrackingService';
-import { chooseCostBucket, computeCostBreakdown, computeCostChange, computeCostComparison, computeCostKpis, computeCostPivot, computeCostTimeline, filterCostRows, ICostQueryOptions, OTHER_VALUE, percentile, prepareCostDataset, resolveCostRange, resolvePreviousCostRange, runCostQuery, sortCostRows } from '../gatewayCostsAnalysis';
+import { chooseCostBucket, computeChatCosts, computeCostBreakdown, computeCostChange, computeCostComparison, computeCostKpis, computeCostPivot, computeCostTimeline, filterCostRows, getChangedChats, ICostQueryOptions, OTHER_VALUE, percentile, prepareCostDataset, resolveCostRange, resolvePreviousCostRange, runCostQuery, sortCostRows } from '../gatewayCostsAnalysis';
 
 /** Wednesday 15 October 2025, 12:00 local time. */
 const NOW = new Date(2025, 9, 15, 12).getTime();
@@ -269,6 +269,22 @@ describe('comparison with the previous period', () => {
 			byModel: [['model-c', 2, 3, 2, 1], ['model-a', 0.5, 0, 1, 0], ['model-b', 0, 1, 0, 1]],
 			viaQuery: 4,
 			notAsked: undefined,
+		});
+	});
+});
+
+describe('cost per chat', () => {
+	it('counts subagents for their main chat and finds the chats that changed', () => {
+		const before = computeChatCosts(ENTRIES);
+		const after = computeChatCosts([...ENTRIES.slice(1), entry(at(10, 15), { cost: 1, chatId: 'sub2', rootChatId: 'chat1' }), entry(at(10, 15), { chatId: 'new', rootChatId: 'new' })]);
+		expect({
+			chats: [...before].map(([chatId, aggregate]) => [chatId, aggregate.cost, aggregate.requests, aggregate.promptTokens]),
+			changed: getChangedChats(before, after).sort(),
+			unchanged: getChangedChats(before, computeChatCosts(ENTRIES)),
+		}).toEqual({
+			chats: [['old', 1, 1, 1000], ['chat1', 2.75, 4, 7500]],
+			changed: ['chat1', 'new', 'old'],
+			unchanged: [],
 		});
 	});
 });

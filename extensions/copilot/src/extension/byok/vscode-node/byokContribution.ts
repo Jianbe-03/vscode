@@ -17,6 +17,7 @@ import { AzureBYOKModelProvider } from './azureProvider';
 import { BYOKStorageService, IBYOKStorageService } from './byokStorageService';
 import { CustomEndpointBYOKModelProvider } from './customEndpointProvider';
 import { CustomOAIBYOKModelProvider } from './customOAIProvider';
+import { GatewayChatCosts } from './gatewayChatCosts';
 import { GatewayCostsPanel } from './gatewayCostsPanel';
 import { detectGatewayKind } from './gatewayDetection';
 import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
@@ -52,6 +53,8 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		// CreaEditor: the discovery is per OpenRouter key (provider group).
 		this._register(commands.registerCommand('creaeditor.gateway.openRouterModels', (group?: string) => getOpenRouterDiscovery(typeof group === 'string' ? group : undefined)));
 		this._register(this._instantiationService.createInstance(GatewayCostsPanel));
+		// CreaEditor: the cost counter in the chat header.
+		this._register(this._instantiationService.createInstance(GatewayChatCosts));
 	}
 
 	private _buildProviders(): void {
