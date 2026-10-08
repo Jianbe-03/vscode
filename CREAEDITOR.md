@@ -61,6 +61,8 @@ Run **Chat: Add OpenRouter or LiteLLM Models...**, or click **Add OpenRouter / L
 - A chat stays on the key it started on. Its subagents, their subagents, and sessions or chats it starts with `create_session`, `create_session_group` or `create_chat` all use that same key, in the editor chat and in the Agents window. A model that only another key offers is refused with an error; an agent whose `model:` is not offered by the key runs on the chat's own model. Switching an Agents window chat to a model of another key is refused too; start a new chat for that.
 - When a key hits its limit, the request fails with the error of that key. CreaEditor never falls back to another key.
 - The **AI Costs** page records which key each request used.
+- The built-in search and execution subagents of the editor chat cannot pick a model per key, so on a key they always use the chat's own model.
+- A subagent that asks for another key's model ends with "The model ... is not available to this chat: subagents stay on the key ... the chat uses." on its card; the parent chat keeps going.
 
 Agents and prompt files can use the model by name, without the key name; the model of the chat's own key is used:
 
@@ -257,6 +259,16 @@ The login you already had (`~/.claude`, `~/.codex`) is always listed first (for 
 **Usage page** (**Show Subscription Usage**, or the pulse icon next to AI Costs at the top of the Sessions list in the Agents window, where it opens full screen): per provider a card with the pool's average share left, how many accounts are available and the first reset, and one row per account with its email, plan, status and a bar per usage window ("38% left · resets in 3h"). In the editor window the status bar shows the pools in short (`Claude 62% · Codex 80%`); its hover lists every account and a click opens the page.
 
 Setup-tokens are stored in the keychain by the window and handed to the agent host on every (re)start; the agent host keeps them in memory only. Browser logins live in their own CLI config folder per account.
+
+**Good to know:**
+- A setup-token is checked with one tiny real request (Haiku, one turn) when it is added, on **Refresh** and on every agent host start while the account has no usage reading. A refused token shows an error and is skipped; Anthropic refusing a token during a chat is handled like a used-up account. Each check uses a very small amount of that account's usage.
+- Setup-tokens can only send prompts, so their usage comes from those check requests and from chats; until then the account shows "No usage reading yet". The Claude usage reading uses an API Anthropic marks as experimental.
+- Only one Codex account is active at a time. Switching restarts Codex in the next account's folder, which ends other Codex chats that are running at that moment; they continue on the new account at their next message.
+- A chat continued on another account gets its request again as text only, without the attachments of the interrupted turn. For Claude it shows as an extra "Continue where you left off." turn when the chat is replayed.
+- Each added account has its own folder (`~/.creaeditor/claude-accounts/<id>`, `~/.creaeditor/codex-accounts/<id>`) with its own login; chat history, settings, skills and agents are links to `~/.claude` and `~/.codex`, so a chat can move between accounts.
+- Some ChatGPT plans do not include Codex usage; OpenAI answers `402 Payment Required` and the account shows that note.
+- The Claude and Codex agent SDKs ship inside CreaEditor.app (about 490 MB), because CreaEditor has no SDK download server.
+- After installing a new CreaEditor build, macOS asks once for access to **CreaEditor Safe Storage** (where the tokens are kept); choose **Always Allow**. Without an Apple Developer ID that answer does not carry over to the next build.
 
 ## Building from source
 
