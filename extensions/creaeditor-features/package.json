@@ -115,6 +115,18 @@
             ]
           },
           {
+            "id": "subscriptionAccounts",
+            "title": "%step.subscriptionAccounts.title%",
+            "description": "%step.subscriptionAccounts.description%",
+            "media": {
+              "image": "media/subscription-accounts.svg",
+              "altText": "%step.subscriptionAccounts.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.showSubscriptionUsage"
+            ]
+          },
+          {
             "id": "pets",
             "title": "%step.pets.title%",
             "description": "%step.pets.description%",

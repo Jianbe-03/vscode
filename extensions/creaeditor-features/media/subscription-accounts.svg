@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="600" rx="16" fill="#16152D"/>
+	<text x="40" y="58" fill="#F8F7FA" font-size="26" font-weight="600">Subscription Usage</text>
+	<text x="40" y="88" fill="#BCBBCA" font-size="16">Your Claude and Codex accounts work as one pool.</text>
+
+	<text x="40" y="136" fill="#F8F7FA" font-size="20" font-weight="600">Claude</text>
+	<rect x="40" y="152" width="880" height="96" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="200" fill="#F8F7FA" font-size="34" font-weight="600">62%</text>
+	<text x="64" y="226" fill="#BCBBCA" font-size="14">left on average</text>
+	<rect x="200" y="186" width="690" height="8" rx="4" fill="#2F2C55"/>
+	<rect x="200" y="186" width="428" height="8" rx="4" fill="#00BD8B"/>
+	<text x="200" y="222" fill="#BCBBCA" font-size="14">2 of 3 accounts available     First reset in 2h</text>
+
+	<rect x="40" y="262" width="880" height="64" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="292" fill="#F8F7FA" font-size="16" font-weight="600">Work</text>
+	<circle cx="120" cy="287" r="4" fill="#00EC95"/>
+	<text x="130" y="292" fill="#BCBBCA" font-size="13">Available</text>
+	<text x="64" y="314" fill="#8E8CA8" font-size="13">me@work.com · Max</text>
+	<text x="400" y="292" fill="#BCBBCA" font-size="13">5-hour   60% left · resets in 3h</text>
+	<rect x="400" y="302" width="480" height="6" rx="3" fill="#2F2C55"/>
+	<rect x="400" y="302" width="288" height="6" rx="3" fill="#00BD8B"/>
+
+	<rect x="40" y="334" width="880" height="64" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="364" fill="#F8F7FA" font-size="16" font-weight="600">Personal</text>
+	<circle cx="146" cy="359" r="4" fill="#F5B83D"/>
+	<text x="156" y="364" fill="#BCBBCA" font-size="13">Limit Reached</text>
+	<text x="64" y="386" fill="#8E8CA8" font-size="13">me@home.com · Pro</text>
+	<text x="400" y="364" fill="#BCBBCA" font-size="13">5-hour   0% left · resets in 2h</text>
+	<rect x="400" y="374" width="480" height="6" rx="3" fill="#4A2C3A"/>
+
+	<text x="40" y="450" fill="#F8F7FA" font-size="20" font-weight="600">Codex</text>
+	<rect x="40" y="466" width="880" height="96" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="514" fill="#F8F7FA" font-size="34" font-weight="600">80%</text>
+	<text x="64" y="540" fill="#BCBBCA" font-size="14">left on average</text>
+	<rect x="200" y="500" width="690" height="8" rx="4" fill="#2F2C55"/>
+	<rect x="200" y="500" width="552" height="8" rx="4" fill="#00BD8B"/>
+	<text x="200" y="536" fill="#BCBBCA" font-size="14">1 of 1 account available</text>
+</svg>

@@ -8,7 +8,8 @@ CreaEditor is Creacoon's build of Visual Studio Code (based on VS Code 1.140.0).
 - tracking of every OpenRouter / LiteLLM request by chat and issue, and an **AI Costs** page with the cost per issue and per chat;
 - request metadata (extra headers and body fields) per API key and per model;
 - subagents that can start their own subagents, and an **Agents** tree that shows them all live;
-- chat groups: agents can start several sessions at once, each in its own git worktree and branch.
+- chat groups: agents can start several sessions at once, each in its own git worktree and branch;
+- several Claude and Codex subscription accounts per provider, pooled behind one model, with a **Subscription Usage** page.
 
 **Help → CreaEditor Features** opens a tour of all of this, with pictures.
 
@@ -235,6 +236,27 @@ The Agents window has a chat background behind the new-session view and every op
 The choice is stored per color theme kind in `chat.agentSessions.preferredDarkBackgroundImage` and `chat.agentSessions.preferredLightBackgroundImage` (`starryNight`, `pattern`, `codicons`, `none`, or an image path). An existing `sessions.background` value is migrated to these settings. High contrast themes show no background, and with reduced motion on the stars don't twinkle, the pattern doesn't drift and there are no shooting stars.
 
 Type `/creacoon-pet` (or use **Pet** in the same right-click menu) for the Creacoon pet, the green chat companion that replaces the VS Code pet. Its context menu switches between Green and Mint colors.
+
+## Subscription accounts
+
+Claude and Codex can each run on **several subscription accounts** (for example a work and a personal Claude Max plan). The accounts of a provider form one pool: the model picker keeps a single Claude and a single Codex entry, new work goes to the first account that has room, and a chat whose account is used up can continue on the next one.
+
+**Adding accounts** (Command Palette, category Chat):
+
+| Command | What it does |
+| --- | --- |
+| **Add Claude Account** | Asks a name, then **Paste a Setup-Token** (run `claude setup-token` in a terminal and paste the token it prints; it is kept in the keychain) or **Sign In with the Browser** (the Claude CLI opens claude.ai; if that fails, CreaEditor offers to run the printed `claude auth login` command in a terminal, or to copy it in the Agents window). |
+| **Add Codex Account** | Asks a name and opens the ChatGPT sign-in page. |
+| **Manage Subscription Accounts** | Lists the accounts per provider: sign in, refresh usage, rename, move up or down (the order in which they are tried), remove. |
+| **Show Subscription Usage** | Opens the usage page. |
+
+The login you already had (`~/.claude`, `~/.codex`) is always listed first (for Claude as **This Computer**).
+
+**When an account is used up**, the chat shows the limit with **Continue on** *next account* and **Always Switch Automatically**. With `chat.subscriptionAccounts.autoSwitch` on (default off; the "allow all" for limits), the chat moves to the next account without asking. When every account is used up, the chat says when the first one resets and offers **Add Claude Account** / **Add Codex Account**.
+
+**Usage page** (**Show Subscription Usage**, or the pulse icon next to AI Costs at the top of the Sessions list in the Agents window, where it opens full screen): per provider a card with the pool's average share left, how many accounts are available and the first reset, and one row per account with its email, plan, status and a bar per usage window ("38% left · resets in 3h"). In the editor window the status bar shows the pools in short (`Claude 62% · Codex 80%`); its hover lists every account and a click opens the page.
+
+Setup-tokens are stored in the keychain by the window and handed to the agent host on every (re)start; the agent host keeps them in memory only. Browser logins live in their own CLI config folder per account.
 
 ## Building from source
 
