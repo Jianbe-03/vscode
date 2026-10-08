@@ -105,11 +105,11 @@ import { ICodexRolloutMetadata, ICodexRolloutModel, readCodexRolloutMetadata } f
 import { codexAccountRateLimitsFromResponse, codexAccountStateFromResponse, type ICodexAccountState } from './codexAccountState.js';
 import { getCodexAccountTelemetryContext } from './codexAccountTelemetry.js';
 // CreaEditor: several Codex (ChatGPT subscription) accounts pooled behind one model picker entry.
-import { SUBSCRIPTION_LIMIT_ERROR_META_KEY, type ISubscriptionAccountsRequest } from '../../common/meta/subscriptionAccounts.js';
+import { SUBSCRIPTION_LIMIT_ERROR_META_KEY, type ISubscriptionAccount, type ISubscriptionAccountsRequest } from '../../common/meta/subscriptionAccounts.js';
 import { ISubscriptionAccountsService, type IStoredSubscriptionAccount } from '../shared/subscriptionAccountsService.js';
 import { CODEX_DEFAULT_ACCOUNT_ID, CodexAccountPool } from './codexAccountPool.js';
 import { getCodexAccountHome, prepareCodexAccountHome, removeCodexAccountSignIn, resolveDefaultCodexHome } from './codexAccountHomes.js';
-import { codexContinuationPrompt, codexLimitErrorMeta, codexUsageWindows, isCodexUsageLimitError } from './codexSubscriptionAccounts.js';
+import { CODEX_CONTINUE_PROMPT, codexContinuationPrompt, codexLimitErrorMeta, codexUsageWindows, isCodexAccountAvailable, isCodexUsageLimitError } from './codexSubscriptionAccounts.js';
 import type { IAgentProviderTurnTelemetryContext } from '../../common/agentHostTelemetry.js';
 import { CodexProfileImageStore, fetchCodexProfileImage } from './codexProfileImage.js';
 import { CodexSessionConfigKey, CODEX_DEFAULT_PERMISSIONS_PRESET, CODEX_PERMISSIONS_PRESETS, collaborationModeKind, getCodexAutonomousSessionConfig, migrateCodexPermissionValues, narrowAdditionalDirectories, narrowBoolean, narrowPersonality, narrowReasoningEffort, narrowReasoningSummary, narrowWebSearchMode, resolveCodexPermissions, type CodexApprovalPolicy, type CodexPermissionsPreset, type ICodexResolvedPermissions } from './codexSessionConfigKeys.js';
@@ -270,6 +270,8 @@ const CODEX_COPILOT_MODEL_GROUP = 'copilot';
 const CODEX_OPENAI_MODEL_PROVIDER = 'openai';
 /** CreaEditor: how long an added Codex account waits for its browser sign-in. */
 const CODEX_ACCOUNT_SIGN_IN_TIMEOUT_MS = 10 * 60 * 1000;
+/** CreaEditor: how long the app-server of an account other than the active one stays up after its last turn. */
+const CODEX_IDLE_ACCOUNT_SERVER_MS = 5 * 60 * 1000;
 const CODEX_MODEL_SELECTION_PREFIX = '@provider=';
 const CODEX_MODEL_CATALOG_TIMEOUT_MS = 15_000;
 const CODEX_MODEL_CATALOG_MAX_BUFFER = 8 * 1024 * 1024;
@@ -823,6 +825,15 @@ interface ICodexSession {
 	resumePromise: Promise<void> | undefined;
 	/** Most recent user prompt sent on this session — used as fallback userMessage text in `turn/started`. */
 	lastPromptText: string;
+	/**
+	 * CreaEditor: the pooled account whose app-server holds (or next holds) this chat's thread;
+	 * `undefined` until the chat first needs an app-server, then the active account.
+	 */
+	accountId?: string;
+	/** CreaEditor: the user's request of the current turn, kept to continue it on another account. */
+	turnRequest?: { readonly prompt: string; readonly attachments?: readonly MessageAttachment[] };
+	/** CreaEditor: whether the current turn did any work (an item besides the request) before it ended. */
+	turnMadeProgress?: boolean;
 	/** True once the workbench has disposed this session. Guards background prewarm continuations. */
 	disposed: boolean;
 	/** In-flight background or foreground materialization, shared across callers. */
@@ -909,6 +920,16 @@ type ConnectionState =
 	| { readonly kind: 'idle' }
 	| { readonly kind: 'starting'; readonly promise: Promise<IConnectionReady>; readonly cancellation: CancellationTokenSource }
 	| ({ readonly kind: 'ready' } & IConnectionReady);
+
+/**
+ * CreaEditor: the app-server of one pooled account. Every account with chats gets its own app-server,
+ * started lazily; the one of the active account (where new work starts) is "the" connection.
+ */
+interface ICodexConnectionSlot {
+	state: ConnectionState;
+	/** Invalidates the pending publication and the loss handling of a replaced app-server. */
+	generation: number;
+}
 
 interface IConnectionReady {
 	readonly client: ICodexAppServerClient;
@@ -1263,8 +1284,12 @@ export class CodexAgent extends Disposable implements IAgent {
 	 */
 	private _activated = false;
 	private _isShuttingDown = false;
-	private _connection: ConnectionState = { kind: 'idle' };
-	private _connectionGeneration = 0;
+	/** CreaEditor: one app-server per account, keyed by account id. */
+	private readonly _connectionSlots = new Map<string, ICodexConnectionSlot>();
+	/** CreaEditor: bumped whenever any app-server is replaced or stopped. */
+	private _connectionEpoch = 0;
+	/** CreaEditor: stops the app-server of an account that is not the active one once it has been idle a while. */
+	private readonly _idleConnectionTimers = this._register(new DisposableMap<string>());
 	/** Makes cleanup idempotent across shutdown and connection-loss races. */
 	private readonly _disposedConnections = new WeakSet<IConnectionReady>();
 	/** Serializes persistent startup behind the one-off account probe. */
@@ -1323,7 +1348,7 @@ export class CodexAgent extends Disposable implements IAgent {
 	/** CreaEditor: stops the short-lived account app-servers when the agent shuts down. */
 	private readonly _accountConnectionCancellation = this._register(new CancellationTokenSource());
 	/** CreaEditor: chats whose turn ended at an account limit, keyed by chat URI, for a `switchChat` request. */
-	private readonly _limitedChats = new Map<string, { readonly sessionId: string; readonly prompt: string }>();
+	private readonly _limitedChats = new Map<string, { readonly sessionId: string; readonly request: { readonly prompt: string; readonly attachments?: readonly MessageAttachment[] }; readonly madeProgress: boolean }>();
 	private _lastSignOutRequest: string | undefined;
 	private readonly _worktree: IAgentHostWorktreePendingState;
 
@@ -1490,10 +1515,190 @@ export class CodexAgent extends Disposable implements IAgent {
 
 	// #region CreaEditor: pooled subscription accounts
 
+	/** The app-server slot of `accountId`, by default the active account (where new work starts). */
+	private _slot(accountId = this._accountPool.activeAccountId): ICodexConnectionSlot {
+		let slot = this._connectionSlots.get(accountId);
+		if (!slot) {
+			slot = { state: { kind: 'idle' }, generation: 0 };
+			this._connectionSlots.set(accountId, slot);
+		}
+		return slot;
+	}
+
+	/** The app-server of the active account: model catalog, discovery, config and new chats use it. */
+	private get _connection(): ConnectionState {
+		return this._slot().state;
+	}
+
+	private set _connection(state: ConnectionState) {
+		this._slot().state = state;
+	}
+
+	/** The generation of the active account's app-server; read by tests that replace it. */
+	protected get _connectionGeneration(): number {
+		return this._slot().generation;
+	}
+
+	protected set _connectionGeneration(generation: number) {
+		this._slot().generation = generation;
+	}
+
+	/** The account a connection runs in; a connection without one (tests) belongs to the active account. */
+	private _connectionAccountId(connection: IConnectionReady): string {
+		return connection.accountId ?? this._accountPool.activeAccountId;
+	}
+
+	/** The account whose app-server a chat uses, binding an unbound chat to the account new work starts on. */
+	private _sessionAccountId(session: ICodexSession): string {
+		const accountId = session.accountId;
+		if (accountId === undefined || !this._isKnownCodexAccount(accountId)) {
+			this._setActiveCodexAccount(this._accountPool.pickAccountForNewWork(Date.now()));
+			session.accountId = this._accountPool.activeAccountId;
+		}
+		return session.accountId!;
+	}
+
+	private _isKnownCodexAccount(accountId: string): boolean {
+		return accountId === CODEX_DEFAULT_ACCOUNT_ID || this._accountPool.getStoredAccounts().some(account => account.id === accountId);
+	}
+
+	/** The app-server state of the account a chat runs on, without starting or binding anything. */
+	private _sessionConnectionState(session: ICodexSession): ConnectionState {
+		return this._connectionSlots.get(session.accountId ?? this._accountPool.activeAccountId)?.state ?? { kind: 'idle' };
+	}
+
+	/** Whether `connection` runs in the account a chat is bound to. */
+	private _isSessionConnection(session: ICodexSession, connection: IConnectionReady): boolean {
+		return this._connectionAccountId(connection) === (session.accountId ?? this._accountPool.activeAccountId);
+	}
+
+	/** Starts (or reuses) the app-server of the account a chat runs on. */
+	private _ensureSessionConnection(session: ICodexSession): Promise<IConnectionReady> {
+		return this._ensureConnection(this._sessionAccountId(session));
+	}
+
+	/** Whether `client` is the live app-server of any account. */
+	private _isLiveClient(client: ICodexAppServerClient): boolean {
+		for (const slot of this._connectionSlots.values()) {
+			if (slot.state.kind === 'ready' && slot.state.client === client) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private _readyConnections(): IConnectionReady[] {
+		return [...this._connectionSlots.values()].flatMap(slot => slot.state.kind === 'ready' ? [slot.state] : []);
+	}
+
 	/**
-	 * Offers the Codex accounts to the shared subscription accounts service. The app-server runs in one
-	 * account's CODEX_HOME at a time; moving to another account restarts it there and every chat resumes
-	 * its thread on the new process, as after any app-server restart.
+	 * Makes `accountId` the account new work starts on. The app-server of the previous active account
+	 * keeps running for its chats and stops once it has been idle a while.
+	 */
+	private _setActiveCodexAccount(accountId: string): void {
+		const previous = this._accountPool.activeAccountId;
+		if (previous === accountId) {
+			return;
+		}
+		this._logService.info(`[Codex] New work starts on account ${accountId}`);
+		this._accountPool.setActiveAccount(accountId);
+		this._idleConnectionTimers.deleteAndDispose(accountId);
+		this._scheduleIdleCodexConnectionStop(previous);
+		this._queueModelRefresh();
+	}
+
+	/** Whether a chat on `accountId` (other than `except`) has a turn running or a thread operation pending. */
+	private _hasRunningCodexWork(accountId: string, except?: ICodexSession): boolean {
+		for (const session of this._sessions.values()) {
+			if (session !== except && (session.accountId ?? this._accountPool.activeAccountId) === accountId
+				&& (session.currentTurnId !== undefined || session.resumePromise !== undefined || (session.materializePromise !== undefined && session.threadId === undefined))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Stops the app-server of `accountId` a few minutes from now unless it is the active one or busy then. */
+	private _scheduleIdleCodexConnectionStop(accountId: string): void {
+		if (accountId === this._accountPool.activeAccountId || this._connectionSlots.get(accountId)?.state.kind !== 'ready') {
+			this._idleConnectionTimers.deleteAndDispose(accountId);
+			return;
+		}
+		this._idleConnectionTimers.set(accountId, disposableTimeout(() => {
+			this._idleConnectionTimers.deleteAndLeak(accountId);
+			this._stopIdleCodexConnection(accountId);
+		}, CODEX_IDLE_ACCOUNT_SERVER_MS));
+	}
+
+	/**
+	 * Stops the app-server of `accountId` when it is not the active account's and no chat (besides
+	 * `except`) is busy on it; its chats resume their threads on their next turn. Returns whether it stopped.
+	 */
+	private _stopIdleCodexConnection(accountId: string, except?: ICodexSession): boolean {
+		const slot = this._connectionSlots.get(accountId);
+		if (!slot || slot.state.kind !== 'ready' || accountId === this._accountPool.activeAccountId) {
+			return false;
+		}
+		if (this._hasRunningCodexWork(accountId, except)) {
+			this._scheduleIdleCodexConnectionStop(accountId);
+			return false;
+		}
+		this._logService.info(`[Codex] Stopping the idle app-server of account ${accountId}`);
+		this._handleConnectionLost(slot.state, slot.generation);
+		return true;
+	}
+
+	/** Stops the app-server of an account that was removed; its chats move to another account. */
+	private _stopCodexAccountConnection(accountId: string): void {
+		const slot = this._connectionSlots.get(accountId);
+		if (!slot) {
+			return;
+		}
+		if (slot.state.kind === 'ready') {
+			this._handleConnectionLost(slot.state, slot.generation);
+		} else if (slot.state.kind === 'starting') {
+			slot.state.cancellation.dispose(true);
+			slot.generation++;
+			slot.state = { kind: 'idle' };
+		}
+		this._idleConnectionTimers.deleteAndDispose(accountId);
+		this._connectionSlots.delete(accountId);
+	}
+
+	/**
+	 * Moves a chat to the app-server of `accountId`. Its thread is released on the old app-server (which
+	 * stops right away when nothing else runs there, so the thread's writer lock is free) and resumed on
+	 * the new one before its next turn; threads are shared between the accounts' homes.
+	 */
+	private async _moveCodexSessionToAccount(session: ICodexSession, accountId: string): Promise<void> {
+		const from = session.accountId ?? this._accountPool.activeAccountId;
+		session.accountId = accountId;
+		if (from === accountId) {
+			return;
+		}
+		this._logService.info(`[Codex:${session.sessionId}] Moving chat from account ${from} to ${accountId}`);
+		const threadId = session.threadId;
+		if (threadId === undefined) {
+			return;
+		}
+		const old = this._connectionSlots.get(from)?.state;
+		session.needsResume = true;
+		session.unsubscribeBeforeResume = false;
+		if (old?.kind !== 'ready' || this._stopIdleCodexConnection(from, session)) {
+			return;
+		}
+		try {
+			await old.client.request<'thread/unsubscribe'>('thread/unsubscribe', { threadId });
+		} catch (err) {
+			this._logService.info(`[Codex:${threadId}] thread/unsubscribe before moving accounts failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		this._scheduleIdleCodexConnectionStop(from);
+	}
+
+	/**
+	 * Offers the Codex accounts to the shared subscription accounts service. Every account with chats runs
+	 * its own app-server in its own CODEX_HOME, so chats on different accounts run side by side; a chat
+	 * that moves to another account resumes its thread on that account's app-server.
 	 */
 	private _registerSubscriptionAccounts(): void {
 		const service = this._subscriptionAccountsService;
@@ -1517,11 +1722,6 @@ export class CodexAgent extends Disposable implements IAgent {
 			handleRequest: request => this._handleSubscriptionAccountsRequest(request),
 			refreshUsage: () => this._refreshCodexAccountsUsage(),
 		}));
-	}
-
-	/** Whether `connection` runs in the CODEX_HOME of an account the user added rather than the default one. */
-	private _isAddedAccountConnection(connection: IConnectionReady): boolean {
-		return this._accountPool.getStoredAccounts().some(account => account.id === connection.accountId);
 	}
 
 	private _defaultCodexHome(): string {
@@ -1610,8 +1810,9 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * already runs there, otherwise a short-lived one that is stopped afterwards.
 	 */
 	private async _withCodexAccountConnection<T>(accountId: string, operation: (client: ICodexAppServerClient, token: CancellationToken) => Promise<T>): Promise<T> {
-		const retained = this._connection;
-		if (retained.kind === 'ready' && retained.accountId === accountId) {
+		// CreaEditor: an account whose app-server runs (it has chats) is read through that app-server.
+		const retained = this._connectionSlots.get(accountId)?.state;
+		if (retained?.kind === 'ready') {
 			return operation(retained.client, this._accountConnectionCancellation.token);
 		}
 		this._throwIfShuttingDown();
@@ -1665,10 +1866,12 @@ export class CodexAgent extends Disposable implements IAgent {
 					return;
 				}
 				this._setStoredCodexAccounts(stored.filter(account => account.id !== request.accountId));
-				await removeCodexAccountSignIn(this._codexAccountHome(request.accountId));
 				if (this._accountPool.activeAccountId === request.accountId) {
-					this._moveToCodexAccount(this._accountPool.pickAccountForNewWork(Date.now()));
+					this._setActiveCodexAccount(this._accountPool.pickAccountForNewWork(Date.now()));
 				}
+				// Its chats resume on the account new work starts on at their next turn.
+				this._stopCodexAccountConnection(request.accountId);
+				await removeCodexAccountSignIn(this._codexAccountHome(request.accountId));
 				return;
 			}
 			case 'rename':
@@ -1754,25 +1957,6 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	/**
-	 * Restarts the app-server in the CODEX_HOME of `accountId`. Every chat resumes its thread on the new
-	 * process before its next turn; a turn still running on the old account ends as disconnected.
-	 */
-	private _moveToCodexAccount(accountId: string): void {
-		if (this._accountPool.activeAccountId === accountId) {
-			return;
-		}
-		this._logService.info(`[Codex] Moving to account ${accountId}`);
-		this._accountPool.setActiveAccount(accountId);
-		const connection = this._connection;
-		if (connection.kind === 'ready') {
-			this._handleConnectionLost(connection, this._connectionGeneration);
-		} else if (connection.kind === 'starting') {
-			this._disposeConnection();
-		}
-		this._queueModelRefresh();
-	}
-
-	/**
 	 * A turn Codex refused because the ChatGPT account is used up. Marks the account limited, then either
 	 * moves to the next account and continues the turn there, or ends the turn with an error that lets the
 	 * client offer the switch. Returns false when the failure is not about a pooled account.
@@ -1780,13 +1964,13 @@ export class CodexAgent extends Disposable implements IAgent {
 	private _handleCodexUsageLimit(params: TurnCompletedNotification): boolean {
 		const sessionId = this._sessionIdByThreadId.get(params.threadId);
 		const session = sessionId ? this._sessions.get(sessionId) : undefined;
-		const connection = this._connection;
+		const connection = session ? this._sessionConnectionState(session) : undefined;
 		// Only the OpenAI provider bills the ChatGPT subscription; a Copilot quota is not an account limit.
-		if (!session?.chatChannel || connection.kind !== 'ready' || session.materializedModelProvider !== CODEX_OPENAI_MODEL_PROVIDER) {
+		if (!session?.chatChannel || connection?.kind !== 'ready' || session.materializedModelProvider !== CODEX_OPENAI_MODEL_PROVIDER) {
 			return false;
 		}
 		const now = Date.now();
-		const accountId = connection.accountId;
+		const accountId = this._connectionAccountId(connection);
 		if (!this._accountPool.getAccounts(now).some(account => account.id === accountId)) {
 			return false;
 		}
@@ -1798,7 +1982,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		this._logService.info(`[Codex:${session.sessionId}] account ${accountId} reached its usage limit; ${decision.kind === 'switch' ? `continuing on ${decision.next.id}` : 'asking to switch'}`);
 		const hostTurnId = this._hostTurnId(session, params.turn.id);
 		const isCurrentTurn = session.currentTurnId === hostTurnId;
-		const prompt = session.lastPromptText;
+		const request = session.turnRequest ?? { prompt: session.lastPromptText };
+		const madeProgress = session.turnMadeProgress === true;
 		const actions = this._handleTurnCompletedNotification(session, params);
 		if (decision.kind === 'switch' && isCurrentTurn) {
 			for (const action of actions) {
@@ -1814,7 +1999,7 @@ export class CodexAgent extends Disposable implements IAgent {
 					content: localize('codexAccounts.autoSwitched', "{0} reached its usage limit. Continuing on {1}.", decision.account.label, decision.next.label),
 				},
 			});
-			void this._continueOnCodexAccount(session, decision.next.id, prompt, hostTurnId);
+			void this._continueOnCodexAccount(session, decision.next, request, madeProgress, hostTurnId);
 			return true;
 		}
 		for (const action of actions) {
@@ -1825,18 +2010,44 @@ export class CodexAgent extends Disposable implements IAgent {
 				this._fire(session.sessionUri, action);
 			}
 		}
-		this._limitedChats.set(session.chatChannel.toString(), { sessionId: session.sessionId, prompt });
+		this._limitedChats.set(session.chatChannel.toString(), { sessionId: session.sessionId, request, madeProgress });
+		this._scheduleIdleCodexConnectionStop(accountId);
 		return true;
 	}
 
-	/** Moves to `accountId` and continues the chat's refused turn there as `turnId`. */
-	private async _continueOnCodexAccount(session: ICodexSession, accountId: string, prompt: string, turnId: string): Promise<void> {
-		this._moveToCodexAccount(accountId);
+	/**
+	 * Moves the chat to `account` and continues its refused turn there as `turnId`. The chat's thread
+	 * resumes on that account's app-server, so the whole conversation (tool results, images) carries
+	 * over: a turn that did no work yet is sent again as it was, with its attachments; otherwise the model
+	 * is asked to continue. Only when the thread cannot be resumed there does the chat continue on a new
+	 * thread with the request resent, and the chat says so.
+	 */
+	private async _continueOnCodexAccount(session: ICodexSession, account: ISubscriptionAccount, request: { readonly prompt: string; readonly attachments?: readonly MessageAttachment[] }, madeProgress: boolean, turnId: string): Promise<void> {
+		const accountId = account.id;
+		this._setActiveCodexAccount(accountId);
 		try {
 			if (!session.chatChannel) {
 				throw new Error(`Codex session ${session.sessionId} has no bound chat channel`);
 			}
-			await this._sendMessage(session.chatChannel, codexContinuationPrompt(prompt), undefined, turnId, undefined, session.configurationResource);
+			await this._moveCodexSessionToAccount(session, accountId);
+			const carried = await this._resumeOnCodexAccount(session, accountId);
+			if (!carried) {
+				this._fire(session.sessionUri, {
+					type: ActionType.ChatResponsePart,
+					turnId,
+					part: {
+						kind: ResponsePartKind.SystemNotification,
+						content: localize('codexAccounts.notCarriedOver', "The conversation could not be moved to {0}, so it continues there without the earlier messages; the request was sent again.", account.label),
+					},
+				});
+			}
+			const continuation = !carried
+				? { prompt: codexContinuationPrompt(request.prompt), attachments: request.attachments }
+				: madeProgress ? { prompt: CODEX_CONTINUE_PROMPT, attachments: undefined } : request;
+			await this._sendMessage(session.chatChannel, continuation.prompt, continuation.attachments, turnId, undefined, session.configurationResource);
+			// Keep the user's own request (and what the turn already did) for a next limit in this turn.
+			session.turnRequest = request;
+			session.turnMadeProgress ||= madeProgress;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this._logService.error(`[Codex:${session.sessionId}] continuing on account ${accountId} failed: ${message}`);
@@ -1846,6 +2057,45 @@ export class CodexAgent extends Disposable implements IAgent {
 				this._fire(session.sessionUri, { type: ActionType.ChatTurnComplete, turnId, duration });
 			}
 		}
+	}
+
+	/**
+	 * Resumes the chat's thread on the app-server of `accountId` ahead of the continuation. A thread
+	 * still locked by the old app-server gets one more try after stopping that app-server when it is
+	 * idle. When the thread cannot be resumed, the chat gets a new thread; returns false then.
+	 */
+	private async _resumeOnCodexAccount(session: ICodexSession, accountId: string): Promise<boolean> {
+		if (session.threadId === undefined) {
+			return true;
+		}
+		for (let attempt = 0; ; attempt++) {
+			try {
+				await this._ensureThreadConnection(session);
+				return true;
+			} catch (error) {
+				if (error instanceof CancellationError || session.disposed) {
+					throw error;
+				}
+				const locked = isCodexWriterLockError(error, session.threadId);
+				if (attempt === 0 && locked && this._stopIdleOtherCodexConnections(accountId, session)) {
+					continue;
+				}
+				this._logService.warn(`[Codex:${session.sessionId}] resuming thread ${session.threadId} on account ${accountId} failed: ${error instanceof Error ? error.message : String(error)}`);
+				await this._replaceMissingRolloutBacking(session, session.configurationResource);
+				return false;
+			}
+		}
+	}
+
+	/** Stops every idle app-server besides the one of `accountId`; returns whether any stopped. */
+	private _stopIdleOtherCodexConnections(accountId: string, except: ICodexSession): boolean {
+		let stopped = false;
+		for (const [other, slot] of [...this._connectionSlots]) {
+			if (other !== accountId && slot.state.kind === 'ready') {
+				stopped = this._stopIdleCodexConnection(other, except) || stopped;
+			}
+		}
+		return stopped;
 	}
 
 	/** The user agreed to continue a chat whose account hit its limit on `accountId`. */
@@ -1860,8 +2110,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		}
 		this._limitedChats.delete(chat);
 		if (session.currentTurnId !== undefined) {
-			// The chat is busy again: only move it; its next turn runs on the account.
-			this._moveToCodexAccount(accountId);
+			// The chat is busy again: new work, and its next turn once its account cannot take work, go there.
+			this._setActiveCodexAccount(accountId);
 			return;
 		}
 		const turnId = generateUuid();
@@ -1875,7 +2125,31 @@ export class CodexAgent extends Disposable implements IAgent {
 			},
 		});
 		this._startTurnStopWatch(session);
-		await this._continueOnCodexAccount(session, accountId, limited?.prompt ?? session.lastPromptText, turnId);
+		await this._continueOnCodexAccount(session, account, limited?.request ?? session.turnRequest ?? { prompt: session.lastPromptText }, limited?.madeProgress ?? session.turnMadeProgress === true, turnId);
+	}
+
+	/**
+	 * Before a turn: a chat whose account can no longer take work (used up, signed out, removed) moves to
+	 * the account new work starts on, when that one can.
+	 */
+	private async _rebindCodexSessionIfUnavailable(session: ICodexSession): Promise<void> {
+		const accountId = session.accountId;
+		if (accountId === undefined || !this._accountPool.hasAddedAccounts) {
+			return;
+		}
+		const now = Date.now();
+		const accounts = this._accountPool.getAccounts(now);
+		const current = accounts.find(account => account.id === accountId);
+		if (current && isCodexAccountAvailable(current, now)) {
+			return;
+		}
+		const next = this._accountPool.pickAccountForNewWork(now);
+		const nextAccount = accounts.find(account => account.id === next);
+		if (next === accountId || !nextAccount || !isCodexAccountAvailable(nextAccount, now)) {
+			return;
+		}
+		this._setActiveCodexAccount(next);
+		await this._moveCodexSessionToAccount(session, next);
 	}
 
 	// #endregion
@@ -2021,10 +2295,13 @@ export class CodexAgent extends Disposable implements IAgent {
 		if (changed) {
 			this._modelCatalogGeneration++;
 		}
-		if (changed && this._connection.kind === 'ready' && this._connection.proxyHandle) {
+		if (changed && this._readyConnections().some(connection => connection.proxyHandle)) {
 			// The app-server stays running. The proxy reads the new token from its
 			// own cell, while MCP-backed threads reconcile their per-thread config.
-			this._connection.proxyHandle.setToken(normalizedToken ?? '');
+			// CreaEditor: every account's app-server has its own proxy handle.
+			for (const connection of this._readyConnections()) {
+				connection.proxyHandle?.setToken(normalizedToken ?? '');
+			}
 			this._queueModelRefresh();
 		} else if (changed) {
 			// Defer model refresh until the connection comes up.
@@ -2059,8 +2336,9 @@ export class CodexAgent extends Disposable implements IAgent {
 		this._modelCatalogGeneration++;
 		this._githubToken = undefined;
 		this._gitHubMcpServerConfiguration = undefined;
-		if (this._connection.kind === 'ready' && this._connection.proxyHandle) {
-			this._connection.proxyHandle.setToken('');
+		// CreaEditor: every account's app-server has its own proxy handle.
+		for (const connection of this._readyConnections()) {
+			connection.proxyHandle?.setToken('');
 		}
 		this._queueModelRefresh();
 		for (const session of this._sessions.values()) {
@@ -2479,7 +2757,7 @@ export class CodexAgent extends Disposable implements IAgent {
 
 	/** Include native skill resources and enabled plugin packages without downgrading workspace access. */
 	private async _customizationReadRoots(session: ICodexSession, plugins: readonly ICodexClientPlugin[]): Promise<string[]> {
-		const connection = await this._ensureConnection();
+		const connection = await this._ensureSessionConnection(session);
 		const skills = await this._fetchSkills(session, connection.client);
 		const roots = distinctAbsolutePaths((skills?.data ?? []).flatMap(entry =>
 			(entry.skills ?? []).filter(skill => skill.enabled).map(skill => dirname(skill.path))));
@@ -2794,10 +3072,14 @@ export class CodexAgent extends Disposable implements IAgent {
 			this._throwIfShuttingDown();
 			// Recheck after waiting for earlier one-off work: selecting Codex while
 			// this action was queued moves it onto the retained connection.
-			// CreaEditor: signing the default account in or out needs its own CODEX_HOME, which the
-			// retained connection does not run in while it serves an added account.
-			const retainedIsDefault = this._connection.kind === 'ready' ? !this._isAddedAccountConnection(this._connection) : this._accountPool.activeAccountId === CODEX_DEFAULT_ACCOUNT_ID;
-			if ((this._activated || this._connection.kind !== 'idle') && (!defaultAccountOnly || retainedIsDefault)) {
+			// CreaEditor: signing the default account in or out needs the app-server of its own
+			// CODEX_HOME: the running one, or the active one when new work starts on the default account.
+			if (defaultAccountOnly) {
+				const defaultState = this._connectionSlots.get(CODEX_DEFAULT_ACCOUNT_ID)?.state;
+				if ((defaultState !== undefined && defaultState.kind !== 'idle') || (this._activated && this._accountPool.activeAccountId === CODEX_DEFAULT_ACCOUNT_ID)) {
+					return operation((await this._ensureConnection(CODEX_DEFAULT_ACCOUNT_ID)).client, false);
+				}
+			} else if (this._activated || this._connection.kind !== 'idle') {
 				return operation((await this._ensureConnection()).client, false);
 			}
 			const settled = new DeferredPromise<void>();
@@ -2883,15 +3165,25 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * authenticate via apiKey, and return the ready connection. Idempotent
 	 * — concurrent callers share the same promise.
 	 */
-	private async _ensureConnection(): Promise<IConnectionReady> {
+	private async _ensureConnection(accountId?: string): Promise<IConnectionReady> {
 		this._throwIfShuttingDown();
-		if (this._connection.kind === 'ready') {
-			return Promise.resolve(this._connection);
+		if (accountId === undefined) {
+			// CreaEditor: the active account's app-server; when it is not running, start on the active
+			// account while it can take work, else on the next one.
+			if (this._connection.kind === 'idle') {
+				this._setActiveCodexAccount(this._accountPool.pickAccountForNewWork(Date.now()));
+			}
+			accountId = this._accountPool.activeAccountId;
 		}
-		if (this._connection.kind === 'starting') {
-			return this._connection.promise;
+		const slot = this._slot(accountId);
+		if (slot.state.kind === 'ready') {
+			return Promise.resolve(slot.state);
 		}
-		const generation = this._connectionGeneration;
+		if (slot.state.kind === 'starting') {
+			return slot.state.promise;
+		}
+		const startAccountId = accountId;
+		const generation = slot.generation;
 		const cancellation = new CancellationTokenSource();
 		const startPromise = (async () => {
 			await this._startupAccountProbe.p;
@@ -2904,19 +3196,17 @@ export class CodexAgent extends Disposable implements IAgent {
 				await transientOperation;
 			}
 			this._throwIfShuttingDown();
-			// CreaEditor: start on the active account while it can take work, else on the next one.
-			const accountId = this._accountPool.pickAccountForNewWork(Date.now());
-			this._accountPool.setActiveAccount(accountId);
-			return this._startConnection(generation, cancellation.token, accountId);
+			return this._startConnection(generation, cancellation.token, startAccountId);
 		})();
 		const promise = startPromise.then(ready => {
-			if (generation !== this._connectionGeneration) {
+			if (generation !== slot.generation || this._connectionSlots.get(startAccountId) !== slot) {
 				this._disposeConnectionResources(ready);
 				throw new CodexConnectionReplacedError('Codex app-server was replaced while starting');
 			}
 			// Authentication can complete while the connection is starting; apply the latest token before publishing ready.
 			ready.proxyHandle.setToken(this._githubToken ?? '');
-			this._connection = { kind: 'ready', ...ready };
+			slot.state = { kind: 'ready', ...ready };
+			this._scheduleIdleCodexConnectionStop(startAccountId);
 			if (ready.accountId === CODEX_DEFAULT_ACCOUNT_ID) {
 				void this._refreshAccount(ready.client);
 			} else {
@@ -2925,12 +3215,12 @@ export class CodexAgent extends Disposable implements IAgent {
 			void this._refreshMcpInventory(ready.client, null);
 			return ready;
 		}).catch(err => {
-			if (generation === this._connectionGeneration) {
-				this._connection = { kind: 'idle' };
+			if (generation === slot.generation) {
+				slot.state = { kind: 'idle' };
 			}
 			throw err;
 		}).finally(() => cancellation.dispose());
-		this._connection = { kind: 'starting', promise, cancellation };
+		slot.state = { kind: 'starting', promise, cancellation };
 		return promise;
 	}
 
@@ -3127,13 +3417,13 @@ export class CodexAgent extends Disposable implements IAgent {
 				void this._refreshAccount(client).then(() => this._queueModelRefresh());
 			}));
 			subscriptions.add(client.onNotification('account/updated', () => {
-				if (this._connection.kind === 'ready' && this._connection.client === client) {
+				if (this._isCurrentConnection(ready)) {
 					void this._refreshAccount(client);
 					this._queueModelRefresh();
 				}
 			}));
 			subscriptions.add(client.onNotification('account/rateLimits/updated', () => {
-				if (this._connection.kind === 'ready' && this._connection.client === client && this._openAIAccountState.status === 'signedIn' && this._openAIAccountState.authType === 'chatgpt') {
+				if (this._isCurrentConnection(ready) && this._openAIAccountState.status === 'signedIn' && this._openAIAccountState.authType === 'chatgpt') {
 					void this._refreshAccountRateLimits(client);
 				}
 			}));
@@ -3649,6 +3939,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		if (params.item.type === 'userMessage') {
 			return this._handleSteeredUserMessage(session, params.item.content);
 		}
+		// CreaEditor: the turn did work, so a continuation on another account must not start it over.
+		session.turnMadeProgress = true;
 		return mapItemStarted(session.mapState, this._withHostTurnId(session, params));
 	}
 
@@ -3904,8 +4196,9 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	private _isActiveAccountClient(client: ICodexAppServerClient): boolean {
-		// CreaEditor: the ChatGPT account menu follows the default account, not an added one.
-		return (this._connection.kind === 'ready' && this._connection.client === client && !this._isAddedAccountConnection(this._connection))
+		// CreaEditor: the ChatGPT account menu follows the default account's app-server, not an added one.
+		const defaultState = this._connectionSlots.get(CODEX_DEFAULT_ACCOUNT_ID)?.state;
+		return (defaultState?.kind === 'ready' && defaultState.client === client)
 			|| this._transientAccountConnection?.client === client;
 	}
 
@@ -4141,6 +4434,12 @@ export class CodexAgent extends Disposable implements IAgent {
 			return;
 		}
 		this._dispatchByThread(params.threadId, s => this._handleTurnCompletedNotification(s, params));
+		// CreaEditor: the app-server of an account that is not the active one stops a while after its last turn.
+		const sessionId = this._sessionIdByThreadId.get(params.threadId);
+		const accountId = sessionId ? this._sessions.get(sessionId)?.accountId : undefined;
+		if (accountId !== undefined) {
+			this._scheduleIdleCodexConnectionStop(accountId);
+		}
 	}
 
 	/**
@@ -4603,23 +4902,31 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	private _handleConnectionLost(connection: IConnectionReady, generation: number): void {
-		if (generation !== this._connectionGeneration) {
+		// CreaEditor: only the chats of the lost app-server's account are affected.
+		const accountId = this._connectionAccountId(connection);
+		const slot = this._connectionSlots.get(accountId);
+		if (!slot || generation !== slot.generation) {
 			return;
 		}
-		const state = this._connection;
+		const state = slot.state;
 		if (state.kind === 'idle' || (state.kind === 'ready' && state.client !== connection.client)) {
 			return;
 		}
 		// Invalidate the pending publication of a connection that died between
 		// initialization and `_ensureConnection` promoting it to `ready`.
-		this._connectionGeneration++;
-		this._modelCatalogGeneration++;
-		this._connection = { kind: 'idle' };
-		this._codexChatDiscovery.value?.invalidate();
-		this._skillHookCustomizationRefresh.clear();
-		this._pendingMcpStartupStatuses.clear();
-		this._mcpInventory.clear();
-		this._applyGlobalMcpInventoryToSessions();
+		slot.generation++;
+		this._connectionEpoch++;
+		slot.state = { kind: 'idle' };
+		this._idleConnectionTimers.deleteAndDispose(accountId);
+		const isActive = accountId === this._accountPool.activeAccountId;
+		if (isActive) {
+			this._modelCatalogGeneration++;
+			this._codexChatDiscovery.value?.invalidate();
+			this._skillHookCustomizationRefresh.clear();
+			this._pendingMcpStartupStatuses.clear();
+			this._mcpInventory.clear();
+			this._applyGlobalMcpInventoryToSessions();
+		}
 		if (state.kind === 'starting') {
 			this._disposeConnectionResources(connection);
 			return;
@@ -4627,6 +4934,12 @@ export class CodexAgent extends Disposable implements IAgent {
 		// Notify every known session with a single ChatError + complete
 		// pair so the UI surfaces "agent disconnected" cleanly.
 		for (const session of this._sessions.values()) {
+			if ((session.accountId ?? this._accountPool.activeAccountId) !== accountId) {
+				continue;
+			}
+			if (!isActive && session.threadId !== undefined) {
+				this._mcpInventory.deleteThread(session.threadId);
+			}
 			this._workingDirectoryMutations.get(session)?.updated.cancel();
 			// A replacement app-server has no in-memory copy of any thread that
 			// was materialized on this connection. The next operation must resume
@@ -4661,32 +4974,38 @@ export class CodexAgent extends Disposable implements IAgent {
 				this._fire(session.sessionUri, { type: ActionType.ChatTurnComplete, turnId, duration });
 			}
 		}
-		for (const subagent of this._subagentsByThreadId.values()) {
+		for (const [childThreadId, subagent] of [...this._subagentsByThreadId]) {
+			const parent = this._sessions.get(subagent.parentSessionId);
+			if (parent && (parent.accountId ?? this._accountPool.activeAccountId) !== accountId) {
+				continue;
+			}
 			subagent.session.pendingCommandApprovals.denyAll('decline');
 			subagent.session.pendingClientToolCalls.rejectAll(new CancellationError());
 			subagent.session.pendingUserInputs.rejectAll(new CancellationError());
 			subagent.session.currentTurnId = undefined;
 			subagent.session.currentAppTurnId = undefined;
+			this._subagentsByThreadId.delete(childThreadId);
 		}
-		this._subagentsByThreadId.clear();
 		// Release resources. The proxy handle is refcounted and drops
 		// the underlying server once everyone releases.
 		this._disposeConnectionResources(connection);
 	}
 
+	/** Stops the app-servers of every account. */
 	private _disposeConnection(): void {
-		const connection = this._connection;
-		this._connectionGeneration++;
-		this._connection = { kind: 'idle' };
+		this._connectionEpoch++;
 		this._pendingMcpStartupStatuses.clear();
-		if (connection.kind === 'starting') {
-			connection.cancellation.dispose(true);
-			return;
+		this._idleConnectionTimers.clearAndDisposeAll();
+		for (const slot of this._connectionSlots.values()) {
+			const connection = slot.state;
+			slot.generation++;
+			slot.state = { kind: 'idle' };
+			if (connection.kind === 'starting') {
+				connection.cancellation.dispose(true);
+			} else if (connection.kind === 'ready') {
+				this._disposeConnectionResources(connection);
+			}
 		}
-		if (connection.kind === 'idle') {
-			return;
-		}
-		this._disposeConnectionResources(connection);
 	}
 
 	private _disposeTransientAccountConnection(): void {
@@ -5493,6 +5812,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			// The freshly started thread is live and subscribed, so build a
 			// materialized (not resumed) entry keyed by the thread id.
 			const session = this._createResumedSessionEntry(threadId, threadId, workingDirectory, model, target, undefined, undefined, options?.agent);
+			session.accountId = conn.accountId;
 			session.needsResume = !startedOnCurrentConnection;
 			session.firstTurnSent = false;
 			session.materializedEventFired = false;
@@ -5905,6 +6225,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		);
 		session.hasNativeHistory ||= hasNativeHistory;
 		session.managedWorkingDirectory = forkManagedWorkingDirectory;
+		// CreaEditor: the forked thread is loaded on the app-server that forked it.
+		session.accountId = forkConnection.accountId;
 		this._sessions.set(sessionId, session);
 		this._sessionIdByThreadId.set(newThreadId, sessionId);
 		// Record the exact-chat binding at registration time, mirroring the
@@ -6088,7 +6410,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		}
 		// Resolve the process only after every filesystem/configuration await so a
 		// connection that died during preparation is never used for thread/start.
-		const conn = await this._ensureConnection();
+		const conn = await this._ensureSessionConnection(session);
 		const pendingHookTrustState = session.pendingHookTrustState;
 		const sessionHookTrust = pendingHookTrustState && this._isCurrentSessionHookTrustState(pendingHookTrustState, session.workingDirectory.fsPath)
 			? pendingHookTrustState
@@ -6155,7 +6477,7 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * Only safe before history exists; the first send remains responsible for publishing materialization.
 	 */
 	private async _restartThreadWithCurrentTools(session: ICodexSession, configResource: URI = session.configurationResource): Promise<void> {
-		const conn = this._connection;
+		const conn = this._sessionConnectionState(session);
 		const oldThreadId = session.threadId;
 		this._logService.info(`[Codex:${session.sessionId}] restarting thread ${oldThreadId} to apply client tools [${session.clientToolSet.merged().map(t => t.name).join(', ') || '(none)'}]`);
 		if (oldThreadId !== undefined) {
@@ -6250,7 +6572,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		this._mcpInventory.deleteThread(threadId);
 		this._applyMcpInventoryToSession(session);
 		try {
-			const conn = await this._ensureConnection();
+			const conn = await this._ensureSessionConnection(session);
 			await conn.client.request<'thread/unsubscribe'>('thread/unsubscribe', { threadId });
 			this._logService.info(`[Codex] prewarm TTL eviction session=${session.sessionUri.toString()} threadId=${threadId}`);
 		} catch (err) {
@@ -6338,7 +6660,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			session.threadId = undefined;
 			this._removeThreadRouteIfOwned(threadId, session.sessionId);
 			this._mcpInventory.deleteThread(threadId);
-			const conn = this._connection;
+			const conn = this._sessionConnectionState(session);
 			if (conn.kind === 'ready') {
 				try {
 					await conn.client.request<'thread/unsubscribe'>('thread/unsubscribe', { threadId });
@@ -6400,6 +6722,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		await this._refreshSessionMcpDiscovery(session);
 		const effectiveTurnId = turnId ?? generateUuid();
 
+		// CreaEditor: a chat whose account cannot take work any more moves to one that can.
+		await this._rebindCodexSessionIfUnavailable(session);
 		// Materialize the addressed Codex thread on first send.
 		try {
 			this._claimPrewarm(session);
@@ -6422,7 +6746,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		// Materialization acquires its own connection and may race with a process
 		// exit. Resolve the connection only after it completes so the remainder of
 		// this send never retains the pre-materialization client.
-		let conn = await this._ensureConnection();
+		let conn = await this._ensureSessionConnection(session);
 		let sessionHookTrustChanged = false;
 		if (!session.firstTurnSent && !session.needsResume) {
 			const discoveredSessionHookTrust = await this._tryBuildSessionHookTrustState(conn.client, session.workingDirectory?.fsPath);
@@ -6520,6 +6844,8 @@ export class CodexAgent extends Disposable implements IAgent {
 				// Claim the host turn only once every reconnect-prone preparation step
 				// has completed. From here, connection-loss handling owns finalization.
 				session.lastPromptText = prompt;
+				session.turnRequest = { prompt, attachments };
+				session.turnMadeProgress = false;
 				session.currentTurnId = effectiveTurnId;
 				session.modifiedTime = Date.now();
 				this._startTurnStopWatch(session);
@@ -6540,6 +6866,8 @@ export class CodexAgent extends Disposable implements IAgent {
 			const providerSwitch = session.pendingModelProviderSwitch;
 			const hostInstructions = resolveAgentHostInstructions(operationContext);
 			session.lastPromptText = prompt;
+			session.turnRequest = { prompt, attachments };
+			session.turnMadeProgress = false;
 			session.currentTurnId = effectiveTurnId;
 			session.modifiedTime = Date.now();
 			this._startTurnStopWatch(session);
@@ -6675,7 +7003,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			return;
 		}
 		const appTurnId = session.currentAppTurnId;
-		const conn = this._connection;
+		const conn = this._sessionConnectionState(session);
 		const text = steeringMessage.message.text;
 		const hasContent = text.length > 0 || (steeringMessage.message.attachments?.length ?? 0) > 0;
 		// Steering only makes sense mid-turn. Without an active codex turn, a
@@ -6732,7 +7060,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			return;
 		}
 		const threadId = session.threadId;
-		const conn = this._connection;
+		const conn = this._sessionConnectionState(session);
 		if (conn.kind !== 'ready') {
 			return;
 		}
@@ -6906,7 +7234,10 @@ export class CodexAgent extends Disposable implements IAgent {
 				this._subagentsByThreadId.delete(childThreadId);
 			}
 		}
-		const conn = this._connection;
+		const conn = this._sessionConnectionState(session);
+		if (session.accountId !== undefined) {
+			this._scheduleIdleCodexConnectionStop(session.accountId);
+		}
 		if (conn.kind === 'ready' && session.threadId !== undefined) {
 			const threadId = session.threadId;
 			// `thread/unsubscribe` is the codex-native way to release a
@@ -7124,10 +7455,10 @@ export class CodexAgent extends Disposable implements IAgent {
 		if (!session || session.currentTurnId || session.disposed || this._chatHistoryWatches.get(chat.toString()) !== watch || this._isShuttingDown) {
 			return;
 		}
-		const connectionGeneration = this._connectionGeneration;
+		const connectionEpoch = this._connectionEpoch;
 		const previous = this._chatHistorySnapshots.get(session);
 		const read = await this._readSession(session.sessionUri, true, previous?.thread);
-		if (!read || session.currentTurnId || session.disposed || connectionGeneration !== this._connectionGeneration
+		if (!read || session.currentTurnId || session.disposed || connectionEpoch !== this._connectionEpoch
 			|| this._chatHistoryWatches.get(chat.toString()) !== watch || this._isShuttingDown) {
 			return;
 		}
@@ -7229,9 +7560,9 @@ export class CodexAgent extends Disposable implements IAgent {
 				if (session.disposed) {
 					throw new CancellationError();
 				}
-				const conn = preferredConnection && this._isCurrentConnection(preferredConnection)
+				const conn = preferredConnection && this._isCurrentConnection(preferredConnection) && this._isSessionConnection(session, preferredConnection)
 					? preferredConnection
-					: await this._ensureConnection();
+					: await this._ensureSessionConnection(session);
 				resumeConnection = conn;
 				if (session.hasNativeHistory === undefined) {
 					await this._readSession(session.sessionUri, false);
@@ -7374,21 +7705,23 @@ export class CodexAgent extends Disposable implements IAgent {
 			if (!threadId) {
 				throw new Error(`Cannot use Codex session ${session.sessionId}: no backing thread`);
 			}
-			const connection = preferredConnection && this._isCurrentConnection(preferredConnection)
+			const connection = preferredConnection && this._isCurrentConnection(preferredConnection) && this._isSessionConnection(session, preferredConnection)
 				? preferredConnection
-				: await this._ensureConnection();
+				: await this._ensureSessionConnection(session);
 			preferredConnection = undefined;
 			if (session.needsResume || session.resumePromise) {
 				await this._resumeSession(session, connection);
 			}
-			if (this._isCurrentConnection(connection) && !session.needsResume && !session.resumePromise && session.threadId === threadId) {
+			if (this._isCurrentConnection(connection) && this._isSessionConnection(session, connection) && !session.needsResume && !session.resumePromise && session.threadId === threadId) {
 				return { threadId, connection };
 			}
 		}
 	}
 
+	/** Whether `connection` is still the running app-server of its account. */
 	private _isCurrentConnection(connection: IConnectionReady): boolean {
-		return this._connection.kind === 'ready' && this._connection.client === connection.client;
+		const state = this._connectionSlots.get(this._connectionAccountId(connection))?.state;
+		return state?.kind === 'ready' && state.client === connection.client;
 	}
 
 	private _assertCurrentConnection(connection: IConnectionReady): void {
@@ -7866,7 +8199,7 @@ export class CodexAgent extends Disposable implements IAgent {
 
 	private async _emitCodexChats(): Promise<boolean> {
 		try {
-			const generation = this._connectionGeneration;
+			const generation = this._connectionEpoch;
 			const chats = await this._listCodexChats('discovery');
 			if (chats && !this._isShuttingDown && !this._store.isDisposed) {
 				const changed = chats.filter(chat => !equals(this._discoveredCodexChats.get(chat.chat.toString()), chat));
@@ -7877,7 +8210,7 @@ export class CodexAgent extends Disposable implements IAgent {
 				if (this._isShuttingDown || this._store.isDisposed) {
 					return true;
 				}
-				if (generation !== this._connectionGeneration) {
+				if (generation !== this._connectionEpoch) {
 					return false;
 				}
 				this._discoveredCodexChats.clear();
@@ -8203,13 +8536,13 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	private _queueSkillHookCustomizationRefresh(client: ICodexAppServerClient): void {
-		if (this._connection.kind !== 'ready' || this._connection.client !== client) {
+		if (!this._isLiveClient(client)) {
 			return;
 		}
 		// Coalesce native catalog notifications before issuing the cwd-scoped
 		// skills/list and hooks/list requests.
 		this._skillHookCustomizationRefresh.value = disposableTimeout(() => {
-			if (this._connection.kind !== 'ready' || this._connection.client !== client) {
+			if (!this._isLiveClient(client)) {
 				return;
 			}
 			for (const session of this._sessions.values()) {
@@ -8248,7 +8581,8 @@ export class CodexAgent extends Disposable implements IAgent {
 			if (session.disposed) {
 				return [];
 			}
-			const catalogConnection = this._connection.kind === 'ready' ? this._connection : undefined;
+			const sessionConnection = this._sessionConnectionState(session);
+			const catalogConnection = sessionConnection.kind === 'ready' ? sessionConnection : undefined;
 			const controller = this._getOrCreateMcpController(session);
 			if (controller) {
 				controller.applyAll(inventoryToSdkServers(this._mcpInventory.forThread(session.threadId)));
@@ -8298,11 +8632,12 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * containers. Best-effort when no connection or working directory is known.
 	 */
 	private async _fetchSkillHookContainers(session: ICodexSession): Promise<DirectoryCustomization[]> {
-		if (this._connection.kind !== 'ready' || !session.workingDirectory) {
+		const connection = this._sessionConnectionState(session);
+		if (connection.kind !== 'ready' || !session.workingDirectory) {
 			return [];
 		}
 		const cwd = session.workingDirectory.fsPath;
-		const client = this._connection.client;
+		const client = connection.client;
 		const [skills, hooks] = await Promise.all([
 			this._fetchSkills(session, client),
 			client.request<'hooks/list', HooksListResponse>('hooks/list', { cwds: [cwd] })
@@ -8404,7 +8739,8 @@ export class CodexAgent extends Disposable implements IAgent {
 		if (session.disposed) {
 			return;
 		}
-		const catalogConnection = this._connection.kind === 'ready' ? this._connection : undefined;
+		const sessionConnection = this._sessionConnectionState(session);
+		const catalogConnection = sessionConnection.kind === 'ready' ? sessionConnection : undefined;
 		const [workspaceAgents, workspaceInstructions, workspaceSkills, nativeSkillHookContainers] = await Promise.all([
 			discoverCodexWorkspaceAgents(this._customizationWorkingDirectories(session), this._fileService),
 			discoverCodexWorkspaceInstructions(this._customizationWorkingDirectories(session), this._fileService),
@@ -8665,7 +9001,7 @@ export class CodexAgent extends Disposable implements IAgent {
 	}
 
 	private _refreshMcpInventory(client: ICodexAppServerClient, threadId: string | null): Promise<void> {
-		return this._mcpInventoryRefreshThrottler.queue(`${this._connectionGeneration}:${threadId ?? ''}`, () => this._doRefreshMcpInventory(client, threadId));
+		return this._mcpInventoryRefreshThrottler.queue(`${this._connectionEpoch}:${threadId ?? ''}`, () => this._doRefreshMcpInventory(client, threadId));
 	}
 
 	private async _doRefreshMcpInventory(client: ICodexAppServerClient, threadId: string | null): Promise<void> {
@@ -8682,7 +9018,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			return;
 		}
 		// Drop the result if the connection was replaced while we were listing.
-		if (this._connection.kind !== 'ready' || this._connection.client !== client) {
+		if (!this._isLiveClient(client)) {
 			return;
 		}
 		const session = threadId === null ? undefined : this._sessionForMcpThread(threadId);
@@ -8723,7 +9059,7 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * server settle into starting/error/stopped promptly.
 	 */
 	private _handleMcpStartupStatus(client: ICodexAppServerClient, threadId: string | null, name: string, status: McpServerStartupState, error: string | null): void {
-		if (this._connection.kind !== 'ready' || this._connection.client !== client) {
+		if (!this._isLiveClient(client)) {
 			return;
 		}
 		if (threadId !== null && !this._sessionForMcpThread(threadId)) {
@@ -8831,7 +9167,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			this._logService.warn(`[Codex] failed to discover OAuth metadata for MCP server '${name}' at ${url}; the Authenticate action may not be able to complete: ${err instanceof Error ? err.message : String(err)}`);
 		}
 		// Drop the result if the connection was replaced while discovering.
-		if (this._connection.kind !== 'ready' || this._connection.client !== client) {
+		if (!this._isLiveClient(client)) {
 			return;
 		}
 		if (this._mcpServerUrlForName(threadId, name) !== url) {

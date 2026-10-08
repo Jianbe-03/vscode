@@ -93,15 +93,20 @@ export function codexLimitErrorMeta(account: ISubscriptionAccount, next: ISubscr
 }
 
 /**
- * The input that continues a turn Codex refused because the account was used up. The thread already
- * holds the request and any work done before the limit, so the model is asked to pick up from there;
- * the request is repeated in case the refused turn never reached the thread. Model input, not UI text.
+ * The input that continues a turn Codex refused after it already did some work, once the thread was
+ * resumed on another account: the thread holds the request and that work, so the model picks up from
+ * there. Model input, not UI text.
+ */
+export const CODEX_CONTINUE_PROMPT = 'The previous attempt stopped because the subscription account reached its usage limit; this conversation now continues on another account. Continue the task where it stopped.';
+
+/**
+ * The fallback input when the thread could not be resumed on the other account and the chat continues
+ * on a new thread: the request is repeated as text. Model input, not UI text.
  */
 export function codexContinuationPrompt(originalPrompt: string): string {
-	const preamble = 'The previous attempt stopped because the subscription account reached its usage limit; this conversation now continues on another account. Continue the task where it stopped.';
 	const request = originalPrompt.trim();
-	if (request.startsWith(preamble)) {
+	if (request.startsWith(CODEX_CONTINUE_PROMPT)) {
 		return request;
 	}
-	return request ? `${preamble} The request was:\n\n${request}` : preamble;
+	return request ? `${CODEX_CONTINUE_PROMPT} The request was:\n\n${request}` : CODEX_CONTINUE_PROMPT;
 }

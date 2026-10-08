@@ -26,7 +26,7 @@ import { IProductService } from '../../../../../platform/product/common/productS
 import { ITelemetryService } from '../../../../telemetry/common/telemetry.js';
 import { NullTelemetryService } from '../../../../telemetry/common/telemetryUtils.js';
 import { AgentSession, AgentWorkingDirectoryChangedError, type AgentSignal, type IAgentChatContext, type IAgentCreateChatOptions, type IAgentCreateChatResult, type IAgentMaterializeChatEvent } from '../../../common/agent.js';
-import { buildChatUri, buildDefaultChatUri, MessageAttachmentKind, ResponsePartKind, SessionStatus } from '../../../common/state/sessionState.js';
+import { buildChatUri, buildDefaultChatUri, MessageAttachmentKind, ResponsePartKind, SessionStatus, type MessageAttachment } from '../../../common/state/sessionState.js';
 import { ActionType } from '../../../common/state/sessionActions.js';
 import { CustomizationType, McpServerStatus } from '../../../common/state/protocol/channels-session/state.js';
 import type { IAgentServerToolHost } from '../../../common/agentServerTools.js';
@@ -49,6 +49,7 @@ import { IAgentHostGitHubEndpointService } from '../../../node/agentHostGitHubEn
 import { IAgentHostProxyResolver } from '../../../node/agentHostProxyResolver.js';
 import { IAgentSdkDownloader } from '../../../node/agentSdkDownloader.js';
 import { CodexAgent, toCodexModelSelectionId } from '../../../node/codex/codexAgent.js';
+import { CODEX_CONTINUE_PROMPT } from '../../../node/codex/codexSubscriptionAccounts.js';
 import { CodexAppServerClient, type ICodexAppServerTransport } from '../../../node/codex/codexAppServerClient.js';
 import { ICodexProxyService } from '../../../node/codex/codexProxyService.js';
 import type { HookMetadata } from '../../../node/codex/protocol/generated/v2/HookMetadata.js';
@@ -4620,7 +4621,7 @@ suite('CodexAgent subscription account limits', () => {
 		agent['_accountPool'].update('codex-default', { status: 'signedIn' });
 		agent['_accountPool'].update('work', { status: 'signedIn' });
 		const continued: { accountId: string; prompt: string; turnId: string }[] = [];
-		agent['_continueOnCodexAccount'] = async (_session, accountId, prompt, turnId) => { continued.push({ accountId, prompt, turnId }); };
+		agent['_continueOnCodexAccount'] = async (_session, account, request, _madeProgress, turnId) => { continued.push({ accountId: account.id, prompt: request.prompt, turnId }); };
 
 		const sessionUri = AgentSession.uri('codex', 'session-limit');
 		const chat = URI.parse(buildDefaultChatUri(sessionUri));
@@ -4666,6 +4667,161 @@ suite('CodexAgent subscription account limits', () => {
 			meta: { provider: 'codex', accountId: 'codex-default', accountLabel: 'Codex Default', resetsAt: 'number', nextAccountId: 'work', nextAccountLabel: 'Work' },
 			continued: [],
 			statuses: [['codex-default', 'limited'], ['work', 'signedIn']],
+		});
+	});
+
+	/**
+	 * An agent with the default account and an added `work` account, each with its own (fake)
+	 * app-server that answers every request and records which methods reached it.
+	 */
+	async function createTwoAccountAgent(failResumeOn?: string) {
+		const agent = await createAgent(disposables, {
+			sdkResolvableWithoutDownload: true,
+			subscriptionAccountsService: {
+				_serviceBrand: undefined,
+				onDidChangeStoredAccounts: Event.None,
+				registerProvider: () => toDisposable(() => { }),
+				getStoredAccounts: () => [{ id: 'work', label: 'Work', kind: 'login' }],
+				setStoredAccounts: () => { },
+				isAutoSwitchEnabled: () => false,
+				publish: () => { },
+			},
+		});
+		agent.setServerToolHost(createRecordingServerToolHost([]));
+		const folder = URI.file('/repo/accounts');
+		const requests = new Map<string, ITestWireRequest[]>();
+		const connect = (accountId: string) => {
+			const peer = disposables.add(createTestPeer());
+			const received: ITestWireRequest[] = [];
+			requests.set(accountId, received);
+			let threads = 0;
+			const onData = (chunk: Buffer) => {
+				const request = JSON.parse(chunk.toString('utf8')) as ITestWireRequest;
+				received.push(request);
+				const threadId = request.params?.threadId ?? `${accountId}-thread-${++threads}`;
+				const thread = { id: threadId, cwd: folder.fsPath, modelProvider: 'vscode-proxy', historyMode: 'legacy', turns: [] };
+				if (request.method === 'thread/resume' && accountId === failResumeOn) {
+					peer.push({ id: request.id, error: { code: -32600, message: `no rollout found for thread id ${threadId}` } });
+					return;
+				}
+				const result = request.method === 'thread/start' || request.method === 'thread/read' ? { thread }
+					: request.method === 'thread/resume' ? { thread, cwd: folder.fsPath }
+						: request.method === 'hooks/list' ? { data: [{ cwd: folder.fsPath, hooks: [], warnings: [], errors: [] }] }
+							: request.method === 'mcpServerStatus/list' ? { data: [], nextCursor: null }
+								: {};
+				peer.push({ id: request.id, result });
+			};
+			peer.outbound.on('data', onData);
+			peer.disposables.add(toDisposable(() => peer.outbound.off('data', onData)));
+			const client = new CodexAppServerClient(peer.transport);
+			peer.disposables.add(client);
+			agent['_connectionSlots'].set(accountId, { state: { kind: 'ready', client, accountId, child: { kill: () => true } } as never, generation: 0 });
+			return peer;
+		};
+		connect('codex-default');
+		connect('work');
+		agent['_accountPool'].update('codex-default', { status: 'signedIn' });
+		agent['_accountPool'].update('work', { status: 'signedIn' });
+		const createChat = async (id: string) => {
+			const sessionUri = AgentSession.uri('codex', id);
+			const chat = URI.parse(buildDefaultChatUri(sessionUri));
+			await createSessionBackedChat(agent, chat, { configurationResource: sessionUri, resource: chat }, { workingDirectories: [folder], model: { id: COPILOT_TEST_MODEL } });
+			const entry = agent['_sessions'].get(id)!;
+			await entry.materializePromise;
+			return { entry, chat, sessionUri };
+		};
+		const actions: { type: string; part?: unknown }[] = [];
+		disposables.add(agent.onDidChatProgress(event => {
+			if (event.kind === 'action') {
+				actions.push(event.action as { type: string; part?: unknown });
+			}
+		}));
+		// Only the thread and turn requests; catalog reads (skills, hooks, MCP servers, models) are left out.
+		const catalogMethods = new Set(['skills/list', 'hooks/list', 'mcpServerStatus/list', 'account/read', 'account/rateLimits/read', 'config/read', 'model/list']);
+		const methods = (accountId: string) => (requests.get(accountId) ?? []).map(request => request.method).filter(method => !catalogMethods.has(method));
+		return { agent, folder, requests, methods, createChat, actions };
+	}
+
+	test('chats on different accounts run on their own app-servers; an idle one stops without touching the other', async () => {
+		const { agent, folder, methods, createChat, actions } = await createTwoAccountAgent();
+		const onDefault = await createChat('session-default');
+		agent['_accountPool'].setActiveAccount('work');
+		const onWork = await createChat('session-work');
+		agent['_accountPool'].setActiveAccount('codex-default');
+		await agent.chats.sendMessage(onDefault.chat, 'hello', [folder], undefined, 'turn-1', undefined, undefined, { configurationResource: onDefault.sessionUri, resource: onDefault.chat });
+
+		const stoppedWork = agent['_stopIdleCodexConnection']('work');
+		agent['_accountPool'].setActiveAccount('work');
+		// The default account is no longer where new work starts, but its turn still runs.
+		const stoppedBusyDefault = agent['_stopIdleCodexConnection']('codex-default');
+		agent['_idleConnectionTimers'].clearAndDisposeAll();
+		assert.deepStrictEqual({
+			stoppedWork,
+			stoppedBusyDefault,
+			defaultChat: { accountId: onDefault.entry.accountId, turn: onDefault.entry.currentTurnId, needsResume: onDefault.entry.needsResume },
+			workChat: { accountId: onWork.entry.accountId, needsResume: onWork.entry.needsResume },
+			servers: [...agent['_connectionSlots']].map(([id, slot]) => [id, slot.state.kind]),
+			defaultMethods: methods('codex-default'),
+			workMethods: methods('work'),
+			errors: actions.filter(action => action.type === ActionType.ChatError).length,
+		}, {
+			stoppedWork: true,
+			stoppedBusyDefault: false,
+			defaultChat: { accountId: 'codex-default', turn: 'turn-1', needsResume: false },
+			workChat: { accountId: 'work', needsResume: true },
+			servers: [['codex-default', 'ready'], ['work', 'idle']],
+			defaultMethods: ['thread/start', 'turn/start'],
+			workMethods: ['thread/start'],
+			errors: 0,
+		});
+	});
+
+	test('a continued chat resumes its thread on the next account\'s app-server and sends the request again with its attachments', async () => {
+		const { agent, requests, methods, createChat } = await createTwoAccountAgent();
+		const { entry } = await createChat('session-move');
+		const threadId = entry.threadId;
+		const image = { type: MessageAttachmentKind.Resource, label: 'shot.png', uri: URI.file('/repo/accounts/shot.png').toString(), contentType: 'image/png' } as MessageAttachment;
+		const work = agent['_accountPool'].getAccounts(Date.now()).find(account => account.id === 'work')!;
+		await agent['_continueOnCodexAccount'](entry, work, { prompt: 'look at this', attachments: [image] }, false, 'turn-1');
+		const turn = requests.get('work')!.find(request => request.method === 'turn/start')!;
+		agent['_idleConnectionTimers'].clearAndDisposeAll();
+		assert.deepStrictEqual({
+			accountId: entry.accountId,
+			sameThread: entry.threadId === threadId,
+			workMethods: methods('work'),
+			input: turn.params.input?.map(item => item.type === 'text' ? item.text : item.type),
+			// Nothing else ran on the default account, so its app-server stopped and released the thread.
+			servers: [...agent['_connectionSlots']].map(([id, slot]) => [id, slot.state.kind]),
+			request: entry.turnRequest?.prompt,
+		}, {
+			accountId: 'work',
+			sameThread: true,
+			workMethods: ['thread/resume', 'turn/start'],
+			input: ['look at this', 'localImage'],
+			servers: [['codex-default', 'idle'], ['work', 'ready']],
+			request: 'look at this',
+		});
+	});
+
+	test('a chat whose thread cannot be resumed on the next account continues on a new thread with the request resent, and says so', async () => {
+		const { agent, requests, methods, createChat, actions } = await createTwoAccountAgent('work');
+		const { entry } = await createChat('session-fallback');
+		const threadId = entry.threadId;
+		const work = agent['_accountPool'].getAccounts(Date.now()).find(account => account.id === 'work')!;
+		await agent['_continueOnCodexAccount'](entry, work, { prompt: 'fix the bug' }, true, 'turn-1');
+		const turn = requests.get('work')!.find(request => request.method === 'turn/start')!;
+		agent['_idleConnectionTimers'].clearAndDisposeAll();
+		const text = turn.params.input?.[0]?.text ?? '';
+		assert.deepStrictEqual({
+			newThread: entry.threadId !== threadId,
+			workMethods: methods('work'),
+			resent: text.startsWith(CODEX_CONTINUE_PROMPT) && text.endsWith('fix the bug'),
+			notes: actions.filter(action => action.type === ActionType.ChatResponsePart).map(action => (action.part as { kind: string }).kind),
+		}, {
+			newThread: true,
+			workMethods: ['thread/resume', 'thread/start', 'turn/start'],
+			resent: true,
+			notes: [ResponsePartKind.SystemNotification],
 		});
 	});
 

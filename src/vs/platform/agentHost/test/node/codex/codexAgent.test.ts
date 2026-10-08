@@ -149,6 +149,14 @@ function emptyHarness(): ICodexConversationResolverHarness {
 	return { id: CODEX_AGENT_PROVIDER_ID, _sessionIdByChatUri: new Map() };
 }
 
+/** CreaEditor: the app-server slots of a harness whose active (default) account runs `connection`. */
+function activeAccountConnection(connection: object) {
+	return {
+		_accountPool: { activeAccountId: 'codex-default' },
+		_connectionSlots: new Map([['codex-default', { state: connection, generation: 0 }]]),
+	};
+}
+
 suite('CodexAgent', () => {
 
 	suite('steering input correlation', () => {
@@ -160,18 +168,20 @@ suite('CodexAgent', () => {
 				pendingSteeringFlips: new Map<string, { readonly pendingMessage: PendingMessage; readonly inputText: string }>(),
 			};
 			const inputs: UserInput[][] = [];
+			const connection = {
+				kind: 'ready',
+				client: {
+					request: (_method: string, params: { input: UserInput[] }) => {
+						inputs.push(params.input);
+						return Promise.resolve({});
+					},
+				},
+			};
 			const harness = {
 				_sessions: new Map([[AgentSession.id(sessionUri), session]]),
 				_resolveConversationSession: () => sessionUri,
-				_connection: {
-					kind: 'ready',
-					client: {
-						request: (_method: string, params: { input: UserInput[] }) => {
-							inputs.push(params.input);
-							return Promise.resolve({});
-						},
-					},
-				},
+				// CreaEditor: the app-server of the chat's account.
+				_sessionConnectionState: () => connection,
 			};
 			const methods = CodexAgent.prototype as unknown as {
 				setPendingMessages(this: typeof harness, chat: URI, steering: PendingMessage, queued: readonly PendingMessage[]): void;
@@ -436,7 +446,7 @@ suite('CodexAgent', () => {
 		const harness = Object.assign(Object.create(CodexAgent.prototype), {
 			_githubToken: 'token',
 			_gitHubMcpServerConfiguration: createGitHubMcpServerConfiguration('https://api.enterprise.githubcopilot.com'),
-			_connection: { kind: 'ready', proxyHandle: { setToken: (token: string) => proxyTokens.push(token) } },
+			...activeAccountConnection({ kind: 'ready', proxyHandle: { setToken: (token: string) => proxyTokens.push(token) } }),
 			_queueModelRefresh: () => { modelRefreshes++; },
 			_sessions: new Map([['session', {}]]),
 			_reconcileMaterializedCustomizations: async () => { reconciliations++; },
@@ -470,7 +480,7 @@ suite('CodexAgent', () => {
 			_githubToken: undefined,
 			_gitHubMcpServerConfiguration: undefined,
 			_resolveGitHubMcpServerConfiguration: async () => resolution.p,
-			_connection: { kind: 'ready', proxyHandle: { setToken: (token: string) => proxyTokens.push(token) } },
+			...activeAccountConnection({ kind: 'ready', proxyHandle: { setToken: (token: string) => proxyTokens.push(token) } }),
 			_queueModelRefresh: () => { },
 			_sessions: new Map([['session', {}]]),
 			_reconcileMaterializedCustomizations: async () => { reconciliations++; },

@@ -4,8 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 // CreaEditor: the Codex (ChatGPT subscription) accounts pooled behind the one Codex model picker entry.
-// The Codex agent runs one app-server at a time; this pool knows which account it runs on, the status
-// and usage of every account, and which account takes over when one is used up.
+// The Codex agent runs one app-server per account with chats; this pool knows the active account (where
+// new work starts), the status and usage of every account, and which account takes over when one is used up.
 
 import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
@@ -43,7 +43,7 @@ export class CodexAccountPool extends Disposable {
 	private readonly _runtime = new Map<string, ICodexAccountRuntime>();
 	private _activeAccountId = CODEX_DEFAULT_ACCOUNT_ID;
 
-	/** The account the Codex app-server runs (or will next run) on. */
+	/** The account new work starts on; its app-server serves the model catalog and new chats. */
 	get activeAccountId(): string {
 		return this._activeAccountId;
 	}
