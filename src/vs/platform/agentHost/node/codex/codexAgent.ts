@@ -1174,6 +1174,8 @@ export class CodexAgent extends Disposable implements IAgent {
 	private _openAIAccountRateLimit: ICodexAccountInfo['rateLimit'];
 	private _openAIAccountRateLimits: ICodexAccountInfo['rateLimits'];
 	private _openAIAccountRateLimitUpdatedAt: number | undefined;
+	/** CreaEditor: why the usage of the default ChatGPT account could not be read, shown on its account. */
+	private _openAIAccountUsageError: string | undefined;
 	private _openAIAccountRateLimitRequest = 0;
 	private _openAIAccountProfileImage: ICodexAccountInfo['profileImage'];
 	private _openAIAccountProfileImageRequest = 0;
@@ -1466,6 +1468,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			this._openAIAccountRateLimit = undefined;
 			this._openAIAccountRateLimits = undefined;
 			this._openAIAccountRateLimitUpdatedAt = undefined;
+			this._openAIAccountUsageError = undefined;
 			this._openAIAccountRateLimitRequest++;
 			this._openAIAccountProfileImage = undefined;
 			void this._profileImageStore?.clear();
@@ -1556,7 +1559,7 @@ export class CodexAgent extends Disposable implements IAgent {
 			if (this._openAIAccountRateLimits) {
 				this._accountPool.applyUsage(CODEX_DEFAULT_ACCOUNT_ID, codexUsageWindows(this._openAIAccountRateLimits), Date.now(), this._openAIAccountRateLimitUpdatedAt);
 			} else if (this._accountPool.getRuntime(CODEX_DEFAULT_ACCOUNT_ID).status !== 'limited') {
-				this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'signedIn', error: undefined, authUrl: undefined });
+				this._accountPool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'signedIn', error: this._openAIAccountUsageError, authUrl: undefined });
 			}
 		} else if (state.status === 'signedOut') {
 			if (this._accountPool.getRuntime(CODEX_DEFAULT_ACCOUNT_ID).status !== 'signingIn') {
@@ -1597,7 +1600,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		} catch (error) {
 			this._logService.warn(`[Codex] account/rateLimits/read of account ${accountId} failed: ${error instanceof Error ? error.message : String(error)}`);
 			if (this._accountPool.getRuntime(accountId).status !== 'limited') {
-				this._accountPool.update(accountId, { status: 'signedIn', error: undefined, authUrl: undefined });
+				this._accountPool.update(accountId, { status: 'signedIn', error: codexUsageReadError(error), authUrl: undefined });
 			}
 		}
 	}
@@ -3875,10 +3878,15 @@ export class CodexAgent extends Disposable implements IAgent {
 			this._openAIAccountRateLimits = codexAccountRateLimitsFromResponse(response);
 			this._openAIAccountRateLimit = this._openAIAccountRateLimits[0];
 			this._openAIAccountRateLimitUpdatedAt = this._openAIAccountRateLimit ? Date.now() : undefined;
+			this._openAIAccountUsageError = undefined;
 			this._publishAccountInfo(this._toAccountInfo(this._openAIAccountState));
 			this._mirrorDefaultCodexAccount();
 		} catch (error) {
 			this._logService.warn(`[Codex] account/rateLimits/read failed: ${error instanceof Error ? error.message : String(error)}`);
+			if (request === this._openAIAccountRateLimitRequest) {
+				this._openAIAccountUsageError = codexUsageReadError(error);
+				this._mirrorDefaultCodexAccount();
+			}
 		}
 	}
 
@@ -9118,4 +9126,16 @@ async function defaultResolveCodexPackageJsonPath(): Promise<string> {
 	// for the same reason.
 	const { createRequire } = await import('node:module');
 	return createRequire(import.meta.url).resolve('@openai/codex/package.json');
+}
+
+/**
+ * CreaEditor: a short note for an account whose usage could not be read, e.g. a ChatGPT plan without
+ * Codex usage answers `402 Payment Required`.
+ */
+function codexUsageReadError(error: unknown): string {
+	const message = error instanceof Error ? error.message : String(error);
+	const status = /\b(?<status>[45]\d\d [A-Z][A-Za-z ]+?)(?=[;:,.]|$)/.exec(message)?.groups?.status;
+	return status
+		? localize('codexAccounts.usageReadFailedStatus', "Could not read the usage ({0}). This ChatGPT plan may not include Codex usage.", status)
+		: localize('codexAccounts.usageReadFailed', "Could not read the usage: {0}", message.length > 160 ? `${message.slice(0, 160)}…` : message);
 }
