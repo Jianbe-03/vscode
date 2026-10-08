@@ -68,7 +68,9 @@ export function getSubscriptionSwitchData(confirmationData: readonly unknown[] |
 export function getSubscriptionLimitErrorDetails(meta: ISubscriptionLimitErrorMeta, now: number, chat: string | undefined): IChatResponseErrorDetails {
 	const provider = getSubscriptionProviderLabel(meta.provider);
 	if (meta.nextAccountId && meta.nextAccountLabel) {
-		const message = meta.resetsAt && meta.resetsAt > now
+		const message = meta.reason === 'authentication'
+			? localize('subscriptionLimit.refused', "The sign-in of the {0} account {1} was refused.", provider, meta.accountLabel)
+			: meta.resetsAt && meta.resetsAt > now
 			? localize('subscriptionLimit.usedUpResets', "The {0} account {1} has reached its usage limit; it resets in {2}.", provider, meta.accountLabel, formatShortDuration(meta.resetsAt - now))
 			: localize('subscriptionLimit.usedUp', "The {0} account {1} has reached its usage limit.", provider, meta.accountLabel);
 		const nextAccountId = meta.nextAccountId;
@@ -90,7 +92,9 @@ export function getSubscriptionLimitErrorDetails(meta: ISubscriptionLimitErrorMe
 			] : undefined,
 		};
 	}
-	const message = meta.resetsAt && meta.resetsAt > now
+	const message = meta.reason === 'authentication'
+		? localize('subscriptionLimit.refusedNoNext', "The sign-in of the {0} account {1} was refused, and no other account is available.", provider, meta.accountLabel)
+		: meta.resetsAt && meta.resetsAt > now
 		? localize('subscriptionLimit.allUsedUpResets', "All {0} accounts are used up; the first resets in {1}.", provider, formatShortDuration(meta.resetsAt - now))
 		: localize('subscriptionLimit.allUsedUp', "All {0} accounts are used up.", provider);
 	return {
