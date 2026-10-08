@@ -10,7 +10,8 @@ import { join } from '../../../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import type { ISubscriptionAccount } from '../../../common/meta/subscriptionAccounts.js';
 import { getCodexAccountHome, prepareCodexAccountHome, removeCodexAccountSignIn, resolveDefaultCodexHome } from '../../../node/codex/codexAccountHomes.js';
-import { codexLimitedUntil, codexLimitErrorMeta, codexUsageWindows, isCodexUsageLimitError, selectCodexAccount } from '../../../node/codex/codexSubscriptionAccounts.js';
+import { CODEX_DEFAULT_ACCOUNT_ID, CodexAccountPool } from '../../../node/codex/codexAccountPool.js';
+import { codexContinuationPrompt, codexLimitedUntil, codexLimitErrorMeta, codexUsageWindows, isCodexUsageLimitError, selectCodexAccount } from '../../../node/codex/codexSubscriptionAccounts.js';
 
 function account(id: string, overrides: Partial<ISubscriptionAccount> = {}): ISubscriptionAccount {
 	return { id, provider: 'codex', label: id.toUpperCase(), kind: id === 'default' ? 'default' : 'login', status: 'signedIn', ...overrides };
@@ -124,5 +125,62 @@ suite('CodexSubscriptionAccounts', () => {
 			{ provider: 'codex', accountId: 'default', accountLabel: 'DEFAULT', resetsAt: 7, nextAccountId: 'work', nextAccountLabel: 'WORK' },
 			{ provider: 'codex', accountId: 'work', accountLabel: 'WORK' },
 		]);
+	});
+
+	suite('account pool', () => {
+		function createPool(): CodexAccountPool {
+			const pool = new CodexAccountPool();
+			pool.setStoredAccounts([{ id: 'work', label: 'Work', kind: 'login' }, { id: 'token', label: 'Token', kind: 'token' }]);
+			return pool;
+		}
+
+		test('lists the default account first and starts work on the first available account', () => {
+			const pool = createPool();
+			const before = pool.pickAccountForNewWork(0);
+			pool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'signedIn' });
+			pool.update('work', { status: 'signedIn' });
+			const listed = pool.getAccounts(0).map(account => [account.id, account.kind, account.status]);
+			const withDefault = pool.pickAccountForNewWork(0);
+			pool.applyUsage(CODEX_DEFAULT_ACCOUNT_ID, [{ kind: '300m', label: '5-hour', usedPercent: 100, resetsAt: 5_000 }], 0);
+			const whileLimited = pool.pickAccountForNewWork(0);
+			const afterReset = pool.pickAccountForNewWork(6_000);
+			assert.deepStrictEqual({ before, listed, withDefault, whileLimited, afterReset }, {
+				// Without a ChatGPT login in the default home only signed-in added accounts take over.
+				before: CODEX_DEFAULT_ACCOUNT_ID,
+				listed: [[CODEX_DEFAULT_ACCOUNT_ID, 'default', 'signedIn'], ['work', 'login', 'signedIn']],
+				withDefault: CODEX_DEFAULT_ACCOUNT_ID,
+				whileLimited: 'work',
+				afterReset: CODEX_DEFAULT_ACCOUNT_ID,
+			});
+			pool.dispose();
+		});
+
+		test('moves on without asking only when auto-switch is on and another account is available', () => {
+			const pool = createPool();
+			pool.update(CODEX_DEFAULT_ACCOUNT_ID, { status: 'signedIn' });
+			pool.update('work', { status: 'signedIn' });
+			pool.markLimited(CODEX_DEFAULT_ACCOUNT_ID, 0);
+			const auto = pool.decideOnLimit(CODEX_DEFAULT_ACCOUNT_ID, true, 0);
+			const ask = pool.decideOnLimit(CODEX_DEFAULT_ACCOUNT_ID, false, 0);
+			pool.markLimited('work', 0);
+			const none = pool.decideOnLimit(CODEX_DEFAULT_ACCOUNT_ID, true, 0);
+			assert.deepStrictEqual({
+				auto: auto?.kind === 'switch' ? auto.next.id : auto?.kind,
+				ask: ask?.kind === 'ask' ? ask.meta.nextAccountId : ask?.kind,
+				none: none?.kind === 'ask' ? none.meta : none?.kind,
+				unknown: pool.decideOnLimit('missing', true, 0),
+			}, {
+				auto: 'work',
+				ask: 'work',
+				none: { provider: 'codex', accountId: CODEX_DEFAULT_ACCOUNT_ID, accountLabel: 'Codex Default', resetsAt: 60 * 60 * 1000 },
+				unknown: undefined,
+			});
+			pool.dispose();
+		});
+	});
+
+	test('continues a refused turn without nesting the continuation', () => {
+		const once = codexContinuationPrompt('Fix the bug');
+		assert.deepStrictEqual([once.endsWith('Fix the bug'), codexContinuationPrompt(once) === once], [true, true]);
 	});
 });

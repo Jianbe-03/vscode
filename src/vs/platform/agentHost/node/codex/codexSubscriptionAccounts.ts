@@ -91,3 +91,17 @@ export function codexLimitErrorMeta(account: ISubscriptionAccount, next: ISubscr
 		...(next ? { nextAccountId: next.id, nextAccountLabel: next.label } : {}),
 	};
 }
+
+/**
+ * The input that continues a turn Codex refused because the account was used up. The thread already
+ * holds the request and any work done before the limit, so the model is asked to pick up from there;
+ * the request is repeated in case the refused turn never reached the thread. Model input, not UI text.
+ */
+export function codexContinuationPrompt(originalPrompt: string): string {
+	const preamble = 'The previous attempt stopped because the subscription account reached its usage limit; this conversation now continues on another account. Continue the task where it stopped.';
+	const request = originalPrompt.trim();
+	if (request.startsWith(preamble)) {
+		return request;
+	}
+	return request ? `${preamble} The request was:\n\n${request}` : preamble;
+}
