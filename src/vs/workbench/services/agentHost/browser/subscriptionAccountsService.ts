@@ -12,10 +12,11 @@ import { disposableTimeout } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { IObservable, derived, observableValue } from '../../../../base/common/observable.js';
+import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { localize } from '../../../../nls.js';
 import { IAgentHostService, type IAgentConnection } from '../../../../platform/agentHost/common/agentService.js';
-import { ISubscriptionAccount, ISubscriptionAccountsRequest, SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY, SUBSCRIPTION_ACCOUNTS_REQUEST_KEY, SubscriptionProvider, getPoolSummary, getRemainingPercent, readSubscriptionAccountsState, subscriptionAccountTokenResource } from '../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
+import { ISubscriptionAccount, ISubscriptionAccountsRequest, SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY, SUBSCRIPTION_ACCOUNTS_REQUEST_KEY, SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY, SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT, SubscriptionProvider, formatShortDuration, getPoolSummary, getRemainingPercent, readSubscriptionAccountsState, subscriptionAccountTokenResource } from '../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import { ActionType } from '../../../../platform/agentHost/common/state/sessionActions.js';
 import { ROOT_STATE_URI } from '../../../../platform/agentHost/common/state/sessionState.js';
 import type { RootState } from '../../../../platform/agentHost/common/state/protocol/state.js';
@@ -29,8 +30,14 @@ import { openCodexAuthUrl } from './codexAccountService.js';
 
 /** Whether a used-up Claude or Codex account hands the chat to the next account without asking. */
 export const SubscriptionAccountsAutoSwitchSettingId = 'chat.subscriptionAccounts.autoSwitch';
+/** The used share (1-99) of an account's tightest window from which it warns; 0 turns usage warnings off. */
+export const SubscriptionAccountsUsageWarningThresholdSettingId = 'chat.subscriptionAccounts.usageWarningThreshold';
+/** What a chat does when its account is used up and no other account is left: `ask` or `waitForReset`. */
+export const SubscriptionAccountsWhenNoAccountLeftSettingId = 'chat.subscriptionAccounts.whenNoAccountLeft';
 
 export const SUBSCRIPTION_PROVIDERS: readonly SubscriptionProvider[] = ['claude', 'codex'];
+
+export { formatShortDuration };
 
 export interface ISubscriptionPoolSummary {
 	readonly provider: SubscriptionProvider;
@@ -58,6 +65,9 @@ export interface ISubscriptionAccountsService {
 	/** Mirrors the {@link SubscriptionAccountsAutoSwitchSettingId} setting. */
 	readonly autoSwitch: IObservable<boolean>;
 
+	/** Mirrors the {@link SubscriptionAccountsUsageWarningThresholdSettingId} setting; 0 when warnings are off. */
+	readonly warningThreshold: IObservable<number>;
+
 	/**
 	 * Adds an account and returns its id. A `token` account needs the setup-token, which is kept in
 	 * the secret storage and handed to the agent host; a `login` account starts a browser sign-in.
@@ -71,6 +81,13 @@ export interface ISubscriptionAccountsService {
 	refreshUsage(provider?: SubscriptionProvider): void;
 	/** Continues the interrupted turn of `chat` (an agent host chat URI) on another account. */
 	switchChat(chat: string, accountId: string): void;
+	/**
+	 * The accounts chats are pinned to in the model picker, by chat session resource. A pinned chat's
+	 * next requests run on that account (the agent host gets the pin with each request).
+	 */
+	readonly pinnedAccounts: IObservable<ReadonlyMap<string, string>>;
+	/** Pins the chat of `sessionResource` to `accountId`, or back to the pool without one. */
+	pinChat(sessionResource: URI, accountId: string | undefined): void;
 	setAutoSwitch(value: boolean): Promise<void>;
 }
 
@@ -150,22 +167,6 @@ export function getPoolSummaries(accounts: readonly ISubscriptionAccount[], now:
 	return SUBSCRIPTION_PROVIDERS
 		.filter(provider => accounts.some(account => account.provider === provider))
 		.map(provider => ({ provider, ...getPoolSummary(accounts, provider), earliestResetAt: getEarliestReset(accounts, provider, now) }));
-}
-
-/** A short duration such as "45m", "3h", "3h 20m" or "2d 4h". */
-export function formatShortDuration(milliseconds: number): string {
-	const minutes = Math.max(1, Math.ceil(milliseconds / 60_000));
-	if (minutes < 60) {
-		return localize('subscriptionDuration.minutes', "{0}m", minutes);
-	}
-	const hours = Math.floor(minutes / 60);
-	if (hours < 24) {
-		const rest = minutes % 60;
-		return rest && hours < 10 ? localize('subscriptionDuration.hoursMinutes', "{0}h {1}m", hours, rest) : localize('subscriptionDuration.hours', "{0}h", hours);
-	}
-	const days = Math.floor(hours / 24);
-	const restHours = hours % 24;
-	return restHours ? localize('subscriptionDuration.daysHours', "{0}d {1}h", days, restHours) : localize('subscriptionDuration.days', "{0}d", days);
 }
 
 export function formatResetsIn(resetsAt: number, now: number): string {
@@ -248,6 +249,12 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	private readonly _autoSwitch = observableValue<boolean>(this, false);
 	readonly autoSwitch: IObservable<boolean> = this._autoSwitch;
 
+	private readonly _warningThreshold = observableValue<number>(this, SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT);
+	readonly warningThreshold: IObservable<number> = this._warningThreshold;
+
+	private readonly _pinnedAccounts = observableValue<ReadonlyMap<string, string>>(this, new Map());
+	readonly pinnedAccounts: IObservable<ReadonlyMap<string, string>> = this._pinnedAccounts;
+
 	private readonly _rootStateListeners = this._register(new DisposableStore());
 	/** Token accounts whose setup-token went to the agent host since it last started. */
 	private readonly _sentTokens = new Set<string>();
@@ -267,9 +274,11 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 	) {
 		super();
 		this._autoSwitch.set(this._configurationService.getValue<boolean>(SubscriptionAccountsAutoSwitchSettingId) === true, undefined);
+		this._warningThreshold.set(this._readWarningThreshold(), undefined);
 		this._register(this._configurationService.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration(SubscriptionAccountsAutoSwitchSettingId)) {
+			if (e.affectsConfiguration(SubscriptionAccountsAutoSwitchSettingId) || e.affectsConfiguration(SubscriptionAccountsUsageWarningThresholdSettingId)) {
 				this._autoSwitch.set(this._configurationService.getValue<boolean>(SubscriptionAccountsAutoSwitchSettingId) === true, undefined);
+				this._warningThreshold.set(this._readWarningThreshold(), undefined);
 				this._autoSwitchSent = false;
 				this._syncAutoSwitch(this._readRootState());
 			}
@@ -347,8 +356,23 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 		this._request({ type: 'switchChat', chat, accountId });
 	}
 
+	pinChat(sessionResource: URI, accountId: string | undefined): void {
+		const pins = new Map(this._pinnedAccounts.get());
+		if (accountId) {
+			pins.set(sessionResource.toString(), accountId);
+		} else {
+			pins.delete(sessionResource.toString());
+		}
+		this._pinnedAccounts.set(pins, undefined);
+	}
+
 	async setAutoSwitch(value: boolean): Promise<void> {
 		await this._configurationService.updateValue(SubscriptionAccountsAutoSwitchSettingId, value);
+	}
+
+	private _readWarningThreshold(): number {
+		const value = this._configurationService.getValue<unknown>(SubscriptionAccountsUsageWarningThresholdSettingId);
+		return typeof value === 'number' && value >= 0 && value < 100 ? Math.round(value) : SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT;
 	}
 
 	private _request(request: SubscriptionAccountsRequest): void {
@@ -377,19 +401,23 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 		this._openSignInPages(accounts);
 	}
 
-	/** Mirrors the setting into the root config once per agent host start and on every change. */
+	/** Mirrors the auto-switch and usage warning settings into the root config once per agent host start and on every change. */
 	private _syncAutoSwitch(state: RootState | undefined): void {
 		if (!state || this._autoSwitchSent) {
 			return;
 		}
 		this._autoSwitchSent = true;
-		const value = this._autoSwitch.get();
-		if (state.config?.values[SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY] === value) {
+		const values: Record<string, unknown> = {
+			[SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY]: this._autoSwitch.get(),
+			[SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY]: this._warningThreshold.get(),
+		};
+		const changed = Object.fromEntries(Object.entries(values).filter(([key, value]) => state.config?.values[key] !== value));
+		if (!Object.keys(changed).length) {
 			return;
 		}
 		this._agentHostService.dispatch(ROOT_STATE_URI, {
 			type: ActionType.RootConfigChanged,
-			config: { [SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY]: value },
+			config: changed,
 		});
 	}
 

@@ -9,7 +9,7 @@ import { Emitter, Event } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { NullAgentHostService } from '../../../../../platform/agentHost/browser/nullAgentHostService.js';
 import type { AuthenticateParams, AuthenticateResult } from '../../../../../platform/agentHost/common/agent.js';
-import { ISubscriptionAccount, SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY, SUBSCRIPTION_ACCOUNTS_META_KEY, SUBSCRIPTION_ACCOUNTS_REQUEST_KEY } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
+import { ISubscriptionAccount, SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY, SUBSCRIPTION_ACCOUNTS_META_KEY, SUBSCRIPTION_ACCOUNTS_REQUEST_KEY, SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import type { IAgentSubscription } from '../../../../../platform/agentHost/common/state/agentSubscription.js';
 import type { RootState } from '../../../../../platform/agentHost/common/state/protocol/state.js';
 import { IRootConfigChangedAction } from '../../../../../platform/agentHost/common/state/sessionActions.js';
@@ -161,8 +161,8 @@ suite('SubscriptionAccountsService', () => {
 		agentHost.startEmitter.fire();
 
 		assert.deepStrictEqual(agentHost.dispatched, [
-			{ [SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY]: true },
-			{ [SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY]: true },
+			{ [SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY]: true, [SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY]: 80 },
+			{ [SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY]: true, [SUBSCRIPTION_ACCOUNTS_WARNING_THRESHOLD_KEY]: 80 },
 		]);
 	});
 

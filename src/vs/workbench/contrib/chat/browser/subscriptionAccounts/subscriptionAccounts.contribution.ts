@@ -11,7 +11,7 @@ import { Disposable, MutableDisposable } from '../../../../../base/common/lifecy
 import { autorun } from '../../../../../base/common/observable.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
-import { ISubscriptionAccount } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
+import { ISubscriptionAccount, SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../platform/configuration/common/configurationRegistry.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
@@ -20,7 +20,7 @@ import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../../browser/editor.js';
 import { IWorkbenchContribution, WorkbenchPhase, registerWorkbenchContribution2 } from '../../../../common/contributions.js';
 import { EditorExtensions } from '../../../../common/editor.js';
-import { ISubscriptionAccountsService, ISubscriptionPoolSummary, SUBSCRIPTION_PROVIDERS, SubscriptionAccountsAutoSwitchSettingId, formatAccountLine, formatAvailability, formatPoolsStatusText, formatRemaining, getPoolSummaries, getSubscriptionProviderLabel } from '../../../../services/agentHost/browser/subscriptionAccountsService.js';
+import { ISubscriptionAccountsService, ISubscriptionPoolSummary, SUBSCRIPTION_PROVIDERS, SubscriptionAccountsAutoSwitchSettingId, SubscriptionAccountsUsageWarningThresholdSettingId, SubscriptionAccountsWhenNoAccountLeftSettingId, formatAccountLine, formatAvailability, formatPoolsStatusText, formatRemaining, getPoolSummaries, getSubscriptionProviderLabel } from '../../../../services/agentHost/browser/subscriptionAccountsService.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
 import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../../services/statusbar/browser/statusbar.js';
@@ -28,6 +28,7 @@ import { CHAT_CATEGORY } from '../actions/chatActions.js';
 import { SubscriptionAccountsFlows } from './subscriptionAccountsFlows.js';
 import { ADD_CLAUDE_ACCOUNT_COMMAND_ID, ADD_CODEX_ACCOUNT_COMMAND_ID, MANAGE_SUBSCRIPTION_ACCOUNTS_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SWITCH_SUBSCRIPTION_ACCOUNT_COMMAND_ID } from './subscriptionAccountsLimit.js';
 import { SubscriptionUsageEditor, SubscriptionUsageEditorInput } from './subscriptionUsageEditor.js';
+import { SubscriptionUsageWarningsContribution } from './subscriptionUsageWarnings.js';
 
 /** Internal command returning an {@link ISubscriptionAccountsSnapshot}, used by the AI Costs page of the Copilot extension. */
 const GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID = 'creaeditor.subscriptionAccounts.getState';
@@ -53,6 +54,25 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			default: false,
 			scope: ConfigurationScope.APPLICATION,
 			markdownDescription: localize('chat.subscriptionAccounts.autoSwitch', "Like \"allow all\" for subscription limits: when a Claude or Codex account is used up, its chat continues on the next account of the pool without asking. When off, the chat shows the limit and asks before it switches. Manage the accounts with **Manage Subscription Accounts**."),
+		},
+		[SubscriptionAccountsUsageWarningThresholdSettingId]: {
+			type: 'number',
+			default: SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT,
+			minimum: 0,
+			maximum: 99,
+			scope: ConfigurationScope.APPLICATION,
+			markdownDescription: localize('chat.subscriptionAccounts.usageWarningThreshold', "Warn when a Claude or Codex account has used this share (in percent) of its tightest limit, and again at 95%. Chats running on the account get a note too, and the usage is read every two minutes from then on. `0` turns the warnings off."),
+		},
+		[SubscriptionAccountsWhenNoAccountLeftSettingId]: {
+			type: 'string',
+			enum: ['ask', 'waitForReset'],
+			enumDescriptions: [
+				localize('chat.subscriptionAccounts.whenNoAccountLeft.ask', "Show the limit and offer to continue once the usage resets."),
+				localize('chat.subscriptionAccounts.whenNoAccountLeft.waitForReset', "Wait in the chat until the first account resets, then continue automatically."),
+			],
+			default: 'ask',
+			scope: ConfigurationScope.APPLICATION,
+			markdownDescription: localize('chat.subscriptionAccounts.whenNoAccountLeft', "What a chat does when its Claude or Codex account is used up and no other account of the pool is left."),
 		},
 	},
 });
@@ -224,3 +244,4 @@ class SubscriptionUsageStatusBarContribution extends Disposable implements IWork
 }
 
 registerWorkbenchContribution2(SubscriptionUsageStatusBarContribution.ID, SubscriptionUsageStatusBarContribution, WorkbenchPhase.AfterRestored);
+registerWorkbenchContribution2(SubscriptionUsageWarningsContribution.ID, SubscriptionUsageWarningsContribution, WorkbenchPhase.Eventually);
