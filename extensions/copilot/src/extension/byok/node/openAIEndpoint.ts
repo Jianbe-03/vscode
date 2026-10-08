@@ -10,7 +10,7 @@ import { ConfigKey, IConfigurationService } from '../../../platform/configuratio
 import { isKimiFamily } from '../../../platform/endpoint/common/chatModelCapabilities';
 import { IDomainService } from '../../../platform/endpoint/common/domainService';
 import { IChatModelInformation } from '../../../platform/endpoint/common/endpointProvider';
-import { BACKGROUND_CHAT_ID, extractUserRequestText, GatewayKind, gatewayKindFromUrl, getCostFromHeaders, getCostFromUsage, getGatewayTrackingBody, getGatewayTrackingHeaders, IChatWorkContext, normalizeGatewayRoot } from '../../../platform/endpoint/common/gatewayTracking';
+import { BACKGROUND_CHAT_ID, extractUserRequestText, formatIssue, GatewayKind, gatewayKindFromUrl, getCostFromHeaders, getCostFromUsage, getGatewayTrackingBody, getGatewayTrackingHeaders, IChatWorkContext, normalizeGatewayRoot } from '../../../platform/endpoint/common/gatewayTracking';
 import { IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
 import { applyRequestMetadataToBody, expandRequestMetadata } from '../../../platform/endpoint/common/requestMetadata';
 import { ChatEndpoint, normalizeKimiToolCallIds } from '../../../platform/endpoint/node/chatEndpoint';
@@ -27,6 +27,8 @@ import { TelemetryData } from '../../../platform/telemetry/common/telemetryData'
 import { ITokenizerProvider } from '../../../platform/tokenizer/node/tokenizer';
 import { AsyncIterableObject, timeout } from '../../../util/vs/base/common/async';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
+import { BUDGETS_SETTING, formatBudgetRefusal } from '../common/gatewayBudgetMessages';
+import { findHardStopBudget, parseCostBudgets } from '../common/gatewayCostsAnalysis';
 
 function hydrateBYOKErrorMessages(response: ChatResponse): ChatResponse {
 	if (response.type === ChatFetchResponseType.Failed && response.streamError) {
@@ -563,6 +565,33 @@ export class OpenAIEndpoint extends ChatEndpoint {
 	}
 
 	/**
+	 * CreaEditor: the chat error when a used up budget with a hard stop covers this request: its key, or the
+	 * issue or repository the ledger would record for it. `undefined` when the request may be sent.
+	 */
+	private _checkBudgetHardStop(options: IMakeChatRequestOptions): string | undefined {
+		if (!this.gatewayKind) {
+			return undefined;
+		}
+		const budgets = parseCostBudgets(this._configurationService.getNonExtensionConfig<unknown>(BUDGETS_SETTING)).filter(budget => budget.hardStop);
+		if (!budgets.length) {
+			return undefined;
+		}
+		const token = getCurrentCapturingToken();
+		const chatId = token?.chatSessionId ?? options.conversationId ?? BACKGROUND_CHAT_ID;
+		const needsContext = budgets.some(budget => budget.scope !== 'key');
+		const context = needsContext ? this._gatewayTrackingService.getWorkContext(chatId, token?.parentChatSessionId ?? chatId, extractUserRequestText(getUserMessagesText(options.messages))) : undefined;
+		const exhausted = findHardStopBudget(budgets, this._gatewayTrackingService.entries, {
+			providerGroup: this._providerGroup,
+			issue: formatIssue(context?.issue, context?.repo),
+			repo: context?.repo,
+		}, Date.now());
+		if (exhausted) {
+			this.logService.info(`[GatewayBudgets] Refused a request: budget ${exhausted.budget.id} is used up.`);
+		}
+		return exhausted ? formatBudgetRefusal(exhausted) : undefined;
+	}
+
+	/**
 	 * CreaEditor: asks the gateway for the cost of a request that did not report it inline
 	 * (OpenRouter `GET /generation`, LiteLLM `GET /spend/logs`). Gateways finalize costs
 	 * asynchronously, so this retries a few times.
@@ -597,6 +626,11 @@ export class OpenAIEndpoint extends ChatEndpoint {
 	}
 
 	public override async makeChatRequest2(options: IMakeChatRequestOptions, token: CancellationToken): Promise<ChatResponse> {
+		// CreaEditor: a used up budget with a hard stop refuses the request before it is sent (main chats and subagents).
+		const refusal = this._checkBudgetHardStop(options);
+		if (refusal) {
+			return { type: ChatFetchResponseType.Failed, reason: refusal, requestId: options.telemetryProperties?.requestId ?? '', serverRequestId: undefined };
+		}
 		// Use ignoreStatefulMarker: false as the initial request default; the parent retry flow can override it on InvalidStatefulMarker retries.
 		const modifiedOptions: IMakeChatRequestOptions = { ...options, ignoreStatefulMarker: options.ignoreStatefulMarker ?? false };
 		const response = await super.makeChatRequest2(modifiedOptions, token);

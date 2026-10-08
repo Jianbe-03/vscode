@@ -17,9 +17,11 @@ import { AzureBYOKModelProvider } from './azureProvider';
 import { BYOKStorageService, IBYOKStorageService } from './byokStorageService';
 import { CustomEndpointBYOKModelProvider } from './customEndpointProvider';
 import { CustomOAIBYOKModelProvider } from './customOAIProvider';
+import { GatewayBudgets } from './gatewayBudgets';
 import { GatewayChatCosts } from './gatewayChatCosts';
 import { GatewayCostsPanel } from './gatewayCostsPanel';
 import { detectGatewayKind } from './gatewayDetection';
+import { GatewayKeyStatusMonitor } from './gatewayKeyStatusMonitor';
 import { GeminiNativeBYOKLMProvider } from './geminiNativeProvider';
 import { LiteLLMLMProvider } from './liteLLMProvider';
 import { OllamaLMProvider } from './ollamaProvider';
@@ -35,6 +37,8 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	private _providersRegistered = false;
 	private _knownModelsRefreshed = false;
 	private _knownModelsRefreshTargets: ReadonlyArray<readonly [string, AbstractLanguageModelChatProvider]> = [];
+	/** CreaEditor: the limit and balance of the OpenRouter and LiteLLM keys. */
+	private readonly _keyStatus: GatewayKeyStatusMonitor;
 
 	constructor(
 		@IFetcherService private readonly _fetcherService: IFetcherService,
@@ -45,6 +49,7 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 	) {
 		super();
 		this._byokStorageService = new BYOKStorageService(extensionContext);
+		this._keyStatus = this._register(this._instantiationService.createInstance(GatewayKeyStatusMonitor));
 		this._applyPolicy();
 		this._register(this._authService.onDidAuthenticationChange(() => this._applyPolicy()));
 
@@ -52,7 +57,9 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		this._register(commands.registerCommand('creaeditor.gateway.detect', (url: string) => detectGatewayKind(url, this._fetcherService)));
 		// CreaEditor: the discovery is per OpenRouter key (provider group).
 		this._register(commands.registerCommand('creaeditor.gateway.openRouterModels', (group?: string) => getOpenRouterDiscovery(typeof group === 'string' ? group : undefined)));
-		this._register(this._instantiationService.createInstance(GatewayCostsPanel));
+		// CreaEditor: budgets per key, issue or repository, with alerts; the hard stop is in the BYOK endpoint.
+		const budgets = this._register(this._instantiationService.createInstance(GatewayBudgets, this._keyStatus));
+		this._register(this._instantiationService.createInstance(GatewayCostsPanel, this._keyStatus, budgets));
 		// CreaEditor: the cost counter in the chat header.
 		this._register(this._instantiationService.createInstance(GatewayChatCosts));
 	}
@@ -70,8 +77,12 @@ export class BYOKContrib extends Disposable implements IExtensionContribution {
 		this._providers.set(GeminiNativeBYOKLMProvider.providerId, gemini);
 		this._providers.set(XAIBYOKLMProvider.providerId, xai);
 		this._providers.set(OAIBYOKLMProvider.providerId, openai);
-		this._providers.set(OpenRouterLMProvider.providerId, instantiationService.createInstance(OpenRouterLMProvider, this._byokStorageService));
-		this._providers.set(LiteLLMLMProvider.providerId, instantiationService.createInstance(LiteLLMLMProvider, this._byokStorageService)); // CreaEditor
+		// CreaEditor: the gateway providers show the limit of each key; a new reading updates their models.
+		const openRouter = instantiationService.createInstance(OpenRouterLMProvider, this._byokStorageService, this._keyStatus);
+		const liteLLM = instantiationService.createInstance(LiteLLMLMProvider, this._byokStorageService, this._keyStatus);
+		this._register(this._keyStatus.onDidChangeDetail(gateway => (gateway === 'openrouter' ? openRouter : liteLLM).refreshProviderGroupStatus()));
+		this._providers.set(OpenRouterLMProvider.providerId, openRouter);
+		this._providers.set(LiteLLMLMProvider.providerId, liteLLM);
 		this._providers.set(AzureBYOKModelProvider.providerId, instantiationService.createInstance(AzureBYOKModelProvider, this._byokStorageService));
 		this._providers.set(CustomOAIBYOKModelProvider.providerId, instantiationService.createInstance(CustomOAIBYOKModelProvider, this._byokStorageService));
 		this._providers.set(CustomEndpointBYOKModelProvider.providerId, instantiationService.createInstance(CustomEndpointBYOKModelProvider, this._byokStorageService));

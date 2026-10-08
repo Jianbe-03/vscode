@@ -12,6 +12,9 @@ import { Disposable, DisposableStore } from '../../../util/vs/base/common/lifecy
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { filterCostRows, ICostDataset, ICostFilters, ICostQueryOptions, ICostRow, prepareCostDataset, runCostQuery } from '../common/gatewayCostsAnalysis';
 import { ADVANCED_STYLES, escapeHtml, getAdvancedMarkup, getAdvancedScript, getAdvancedStrings } from './gatewayCostsAdvancedView';
+import { GatewayBudgets } from './gatewayBudgets';
+import { getKeysMarkup, getKeysStrings, KEYS_SCRIPT, KEYS_STYLES, toBudgetSnapshots } from './gatewayCostsKeysView';
+import { GatewayKeyStatusMonitor } from './gatewayKeyStatusMonitor';
 import { GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID, getSubscriptionsMarkup, ISubscriptionAccountsSnapshot, getSubscriptionsStrings, REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SUBSCRIPTIONS_SCRIPT, SUBSCRIPTIONS_STYLES, toSubscriptionAccountsSnapshot } from './gatewayCostsSubscriptionsView';
 
 export const SHOW_GATEWAY_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
@@ -27,6 +30,10 @@ type PanelMessage =
 	| { readonly type: 'clear' }
 	| { readonly type: 'refreshSubscriptions' }
 	| { readonly type: 'openSubscriptionUsage' }
+	| { readonly type: 'refreshKeys' }
+	| { readonly type: 'addBudget' }
+	| { readonly type: 'editBudget'; readonly id: string }
+	| { readonly type: 'removeBudget'; readonly id: string }
 	| { readonly type: 'query'; readonly seq: number; readonly filters: ICostFilters; readonly options: ICostQueryOptions }
 	| { readonly type: 'exportFiltered'; readonly format: 'csv' | 'json'; readonly filters: ICostFilters };
 
@@ -57,6 +64,8 @@ export class GatewayCostsPanel extends Disposable {
 	private readonly _subscriptionsRefresh = this._register(new RunOnceScheduler(() => this._postSubscriptions(), SUBSCRIPTIONS_REFRESH_DELAY));
 
 	constructor(
+		private readonly _keyStatus: GatewayKeyStatusMonitor,
+		private readonly _budgets: GatewayBudgets,
 		@IGatewayTrackingService private readonly _trackingService: IGatewayTrackingService,
 	) {
 		super();
@@ -81,6 +90,9 @@ export class GatewayCostsPanel extends Disposable {
 			this._dataset = undefined;
 			this._postEntries();
 		}));
+		// CreaEditor: the Keys and Budgets sections.
+		this._panelDisposables.add(this._keyStatus.onDidChange(() => this._postKeys()));
+		this._panelDisposables.add(this._budgets.onDidChange(() => this._postBudgets()));
 		// The Subscriptions section reads the accounts from the workbench while the page is visible.
 		const subscriptionsPoll = this._panelDisposables.add(new IntervalTimer());
 		const updateSubscriptionsPoll = () => {
@@ -113,6 +125,22 @@ export class GatewayCostsPanel extends Disposable {
 					this._pendingChatId = undefined;
 				}
 				void this._postSubscriptions();
+				this._postKeys();
+				this._postBudgets();
+				void this._keyStatus.refresh();
+				break;
+			case 'refreshKeys':
+				await this._keyStatus.refresh();
+				this._postKeys();
+				break;
+			case 'addBudget':
+				await this._budgets.editBudget(undefined);
+				break;
+			case 'editBudget':
+				await this._budgets.editBudget(message.id);
+				break;
+			case 'removeBudget':
+				await this._budgets.removeBudget(message.id);
 				break;
 			case 'refreshSubscriptions':
 				try {
@@ -155,6 +183,14 @@ export class GatewayCostsPanel extends Disposable {
 			state = undefined;
 		}
 		void this._panel?.webview.postMessage({ type: 'subscriptions', state });
+	}
+
+	private _postKeys(): void {
+		void this._panel?.webview.postMessage({ type: 'keys', statuses: this._keyStatus.getStatuses() });
+	}
+
+	private _postBudgets(): void {
+		void this._panel?.webview.postMessage({ type: 'budgets', statuses: toBudgetSnapshots(this._budgets.getStatuses()) });
 	}
 
 	private _postEntries(): void {
@@ -230,6 +266,7 @@ export class GatewayCostsPanel extends Disposable {
 			viaAgent: l10n.t('set by agent'),
 			...getAdvancedStrings(),
 			...getSubscriptionsStrings(),
+			...getKeysStrings(),
 		};
 		return `<!DOCTYPE html>
 <html lang="en">
@@ -269,12 +306,14 @@ export class GatewayCostsPanel extends Disposable {
 	.empty { color: var(--vscode-descriptionForeground); padding: 40px 0; text-align: center; }
 ${ADVANCED_STYLES}
 ${SUBSCRIPTIONS_STYLES}
+${KEYS_STYLES}
 </style>
 </head>
 <body>
 <h1>${escapeHtml(strings.title)}</h1>
 <div class="subtitle">${escapeHtml(strings.subtitle)}</div>
 ${getSubscriptionsMarkup(strings)}
+${getKeysMarkup(strings)}
 <div class="tabs" role="tablist" aria-label="${escapeHtml(strings.tabsLabel)}">
 	<button type="button" class="tab" role="tab" id="tab-overview" data-tab="overview" aria-controls="overview" aria-selected="true">${escapeHtml(strings.tabOverview)}</button>
 	<button type="button" class="tab" role="tab" id="tab-advanced" data-tab="advanced" aria-controls="advanced" aria-selected="false" tabindex="-1">${escapeHtml(strings.tabAdvanced)}</button>
@@ -369,6 +408,9 @@ ${getAdvancedScript()}
 </script>
 <script nonce="${nonce}">
 ${SUBSCRIPTIONS_SCRIPT}
+</script>
+<script nonce="${nonce}">
+${KEYS_SCRIPT}
 </script>
 </body>
 </html>`;

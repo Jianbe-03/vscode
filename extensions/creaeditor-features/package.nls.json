@@ -32,5 +32,15 @@
   "step.subagents.title": "Subagents that start subagents",
   "step.subagents.description": "When an agent splits up work, its subagents can start their own subagents. They appear as cards inside the parent's card in the chat, and in the Agents tree.\nA subagent that fails shows why on its card; the parent keeps going.\n**Where:** click the button below to change how many levels deep they may go (setting **chat.subagents.maxNestingDepth**).\n[Subagent Settings](command:workbench.action.openSettings?%5B%22chat.subagents%22%5D)",
   "step.metadata.title": "Request metadata per key and model",
-  "step.metadata.description": "Send extra headers or body fields with your requests, for example your team or project name for the gateway's logs. Set them per API key, per model, or on a single model entry, with variables such as ${sessionId}, ${workspaceFolderName} and ${env:NAME}.\n**Where:** click the button below (or Cmd+Shift+P, **Open Language Models (JSON)**) to open the file where your models are configured.\n[Open Language Models (JSON)](command:workbench.action.openLanguageModelsJson)"
+  "step.metadata.description": "Send extra headers or body fields with your requests, for example your team or project name for the gateway's logs. Set them per API key, per model, or on a single model entry, with variables such as ${sessionId}, ${workspaceFolderName} and ${env:NAME}.\n**Where:** click the button below (or Cmd+Shift+P, **Open Language Models (JSON)**) to open the file where your models are configured.\n[Open Language Models (JSON)](command:workbench.action.openLanguageModelsJson)",
+  "creaeditor.config.aiCosts.budgets": "Budgets for the AI costs of OpenRouter and LiteLLM requests, per key, issue or repository. Spend is counted from the costs recorded on this machine. Add and edit them on the AI Costs page or with the **CreaEditor: Add AI Budget** command.",
+  "creaeditor.config.aiCosts.budgets.id": "Identifies the budget; set automatically.",
+  "creaeditor.config.aiCosts.budgets.scope.key": "The requests of an OpenRouter or LiteLLM key, by its name.",
+  "creaeditor.config.aiCosts.budgets.scope.issue": "The requests of chats working on an issue, e.g. `acme/web#42` or `PROJ-7`.",
+  "creaeditor.config.aiCosts.budgets.scope.repo": "The requests made in a repository, e.g. `acme/web`.",
+  "creaeditor.config.aiCosts.budgets.value": "The key name, issue or repository the budget is for.",
+  "creaeditor.config.aiCosts.budgets.amount": "The budget in US dollars per period.",
+  "creaeditor.config.aiCosts.budgets.period": "How often the budget starts over: every day, week (from Monday) or month.",
+  "creaeditor.config.aiCosts.budgets.warnAt": "Percentages of the budget that show a notification, once per period.",
+  "creaeditor.config.aiCosts.budgets.hardStop": "Refuse the requests of the key, issue or repository once the budget is used up."
 }

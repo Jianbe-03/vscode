@@ -12,6 +12,83 @@
     "Other"
   ],
   "contributes": {
+    "configuration": [
+      {
+        "id": "creaeditor",
+        "title": "CreaEditor",
+        "properties": {
+          "creaeditor.aiCosts.budgets": {
+            "type": "array",
+            "scope": "application",
+            "default": [],
+            "markdownDescription": "%creaeditor.config.aiCosts.budgets%",
+            "items": {
+              "type": "object",
+              "required": [
+                "scope",
+                "value",
+                "amount"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "%creaeditor.config.aiCosts.budgets.id%"
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "key",
+                    "issue",
+                    "repo"
+                  ],
+                  "enumDescriptions": [
+                    "%creaeditor.config.aiCosts.budgets.scope.key%",
+                    "%creaeditor.config.aiCosts.budgets.scope.issue%",
+                    "%creaeditor.config.aiCosts.budgets.scope.repo%"
+                  ]
+                },
+                "value": {
+                  "type": "string",
+                  "description": "%creaeditor.config.aiCosts.budgets.value%"
+                },
+                "amount": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "description": "%creaeditor.config.aiCosts.budgets.amount%"
+                },
+                "period": {
+                  "type": "string",
+                  "enum": [
+                    "day",
+                    "week",
+                    "month"
+                  ],
+                  "default": "month",
+                  "description": "%creaeditor.config.aiCosts.budgets.period%"
+                },
+                "warnAt": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "default": [
+                    80,
+                    100
+                  ],
+                  "description": "%creaeditor.config.aiCosts.budgets.warnAt%"
+                },
+                "hardStop": {
+                  "type": "boolean",
+                  "default": false,
+                  "description": "%creaeditor.config.aiCosts.budgets.hardStop%"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
     "walkthroughs": [
       {
         "id": "creaeditor.features",

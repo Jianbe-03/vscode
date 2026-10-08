@@ -4102,6 +4102,11 @@
         "title": "Show AI Costs per Issue and Chat",
         "category": "CreaEditor",
         "icon": "$(credit-card)"
+      },
+      {
+        "command": "creaeditor.aiCosts.addBudget",
+        "title": "%creaeditor.command.addAiBudget%",
+        "category": "CreaEditor"
       }
     ],
     "configuration": [

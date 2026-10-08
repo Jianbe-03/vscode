@@ -7,7 +7,9 @@ import { Raw } from '@vscode/prompt-tsx';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatFetchResponseType, ChatResponse } from '../../../../platform/chat/common/commonTypes';
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
+import { InMemoryConfigurationService } from '../../../../platform/configuration/test/common/inMemoryConfigurationService';
 import { IChatModelInformation, ModelSupportedEndpoint } from '../../../../platform/endpoint/common/endpointProvider';
+import { IGatewayCostEntry, IGatewayTrackingService, NullGatewayTrackingService } from '../../../../platform/endpoint/common/gatewayTrackingService';
 import { CacheType, CustomDataPartMimeTypes } from '../../../../platform/endpoint/common/endpointTypes';
 import { ChatEndpoint } from '../../../../platform/endpoint/node/chatEndpoint';
 import { ICreateEndpointBodyOptions, IEndpointBody, IMakeChatRequestOptions } from '../../../../platform/networking/common/networking';
@@ -814,6 +816,49 @@ describe('OpenAIEndpoint - Reasoning Properties', () => {
 			apply(body, buildOptions());
 
 			expect(body.reasoning_effort).toBeUndefined();
+		});
+	});
+});
+
+/** A ledger in which the Personal key spent $50 this month. */
+class LedgerWithSpend extends NullGatewayTrackingService {
+	override readonly entries: readonly IGatewayCostEntry[] = [
+		{ id: 'e1', time: Date.now(), chatId: 'chat', rootChatId: 'chat', gateway: 'openrouter', gatewayHost: 'openrouter.ai', providerGroup: 'Personal', model: 'm', cost: 50 },
+	];
+}
+
+describe('OpenAIEndpoint - budget hard stop (CreaEditor)', () => {
+	const disposables = new DisposableStore();
+
+	afterEach(() => {
+		disposables.clear();
+		vi.restoreAllMocks();
+	});
+
+	async function request(budgets: unknown, providerGroup: string): Promise<ChatResponse> {
+		const testingServiceCollection = createExtensionUnitTestingServices();
+		testingServiceCollection.define(IGatewayTrackingService, new LedgerWithSpend());
+		const accessor = disposables.add(testingServiceCollection.createTestingAccessor());
+		await (accessor.get(IConfigurationService) as InMemoryConfigurationService).setNonExtensionConfig('creaeditor.aiCosts.budgets', budgets);
+		const endpoint = accessor.get(IInstantiationService).createInstance(OpenAIEndpoint, { id: 'm', name: 'M', capabilities: { type: 'chat', family: 'openai', tokenizer: 'o200k_base', supports: {}, limits: {} } } as unknown as IChatModelInformation, 'key', 'https://openrouter.ai/api/v1/chat/completions');
+		endpoint.setGateway('openrouter', providerGroup);
+		vi.spyOn(ChatEndpoint.prototype, 'makeChatRequest2').mockResolvedValue({ type: ChatFetchResponseType.Success, requestId: 'sent', serverRequestId: undefined, usage: undefined, resolvedModel: 'm', value: '' });
+		return endpoint.makeChatRequest2(createMakeRequestOptions([{ role: Raw.ChatRole.User, content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: 'hi' }] }]), CancellationToken.None);
+	}
+
+	it('refuses the requests of a key whose budget with a hard stop is used up', async () => {
+		const budgets = [{ scope: 'key', value: 'Personal', amount: 50, period: 'month', hardStop: true }];
+		const refused = await request(budgets, 'Personal');
+		const otherKey = await request(budgets, 'Work');
+		const warnOnly = await request([{ ...budgets[0], hardStop: false }], 'Personal');
+		expect({
+			refused: [refused.type, refused.type === ChatFetchResponseType.Failed ? refused.reason : undefined],
+			otherKey: otherKey.type,
+			warnOnly: warnOnly.type,
+		}).toEqual({
+			refused: [ChatFetchResponseType.Failed, 'The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page.'],
+			otherKey: ChatFetchResponseType.Success,
+			warnOnly: ChatFetchResponseType.Success,
 		});
 	});
 });
