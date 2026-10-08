@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import type { McpServerConfig, OnElicitation, Options, PermissionMode, SDKUserMessage, SyncHookJSONOutput, WarmQuery } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServerConfig, OnElicitation, Options, PermissionMode, SDKRateLimitInfo, SDKUserMessage, SyncHookJSONOutput, WarmQuery } from '@anthropic-ai/claude-agent-sdk';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { Sequencer } from '../../../../base/common/async.js';
 import { CancellationError } from '../../../../base/common/errors.js';
@@ -11,6 +11,7 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../../base/common/lifecycle.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
+import { generateUuid } from '../../../../base/common/uuid.js';
 import { INativeEnvironmentService } from '../../../environment/common/environment.js';
 import { IFileService } from '../../../files/common/files.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
@@ -28,7 +29,7 @@ import { ActionType } from '../../common/state/sessionActions.js';
 import { areAdditionalWorkingDirectoriesEqual, areSessionWorkingDirectoriesEqual } from '../../common/state/sessionWorkingDirectories.js';
 import { PendingMessage, ChatInputAnswer, ChatInputRequest, ChatInputResponseKind, ToolCallContributorKind, ToolCallPendingConfirmationState, type AgentSelection, type ModelSelection, type ToolDefinition } from '../../common/state/protocol/state.js';
 import type { ClientPluginCustomization, CustomizationEnablement } from '../../common/state/protocol/channels-session/state.js';
-import { CustomizationType, parseRequiredSessionUriFromChatUri, type Customization, type ToolCallResult } from '../../common/state/sessionState.js';
+import { CustomizationType, parseRequiredSessionUriFromChatUri, ResponsePartKind, type Customization, type ToolCallResult } from '../../common/state/sessionState.js';
 import { IClaudeAgentSdkService } from './claudeAgentSdkService.js';
 import { buildClientMcpServers, buildOptions, toClaudeMcpServers, type ClaudeDeniedMcpServerSpec } from './claudeSdkOptions.js';
 import { claudeTransportForProvider, parseClaudeModelSelection, toClaudeSdkModelId } from './claudeModelSelection.js';
@@ -48,6 +49,7 @@ import { scanClaudeRules } from './customizations/scan/claudeRuleScan.js';
 import { discoverClaudeMultiRootCustomizations } from './customizations/claudeMultiRootCustomizationDiscovery.js';
 import { resolvePromptToContentBlocks } from './claudePromptResolver.js';
 import type { ClaudeTransport } from './claudeProxyService.js';
+import { ClaudeSubscriptionLimitTracker, type ClaudeLimitDecision, type IClaudeLimitSignal } from './claudeSubscriptionAccounts.js';
 import { SessionMcpDiscovery } from '../shared/sessionMcpDiscovery.js';
 import { parsePlugin, type IMcpServerDefinition } from '../../../agentPlugins/common/pluginParsers.js';
 import { hasClientPluginMcpDefaultCwds, readClientPluginMcpDefaultCwd } from '../../common/meta/clientPluginCustomizationMeta.js';
@@ -117,6 +119,18 @@ export interface IMaterializeContext {
 	 * by providers that don't support server-side tools.
 	 */
 	readonly serverToolHost?: IAgentServerToolHost;
+	/**
+	 * CreaEditor: decides what happens when the session's subscription account hits its limit during
+	 * a turn, and receives the usage the CLI reports. Omitted when limits need no handling.
+	 */
+	readonly subscriptionLimits?: IClaudeSessionSubscriptionLimits;
+}
+
+/** CreaEditor: the agent's side of a session's subscription limit handling. */
+export interface IClaudeSessionSubscriptionLimits {
+	/** `accountId` is the account the session runs on, `undefined` for the machine's own login. */
+	resolve(turnId: string, limit: IClaudeLimitSignal, accountId: string | undefined): ClaudeLimitDecision | undefined;
+	onRateLimitInfo(info: SDKRateLimitInfo, accountId: string | undefined): void;
 }
 
 function resolveCurrentPermissionMode(
@@ -376,6 +390,46 @@ export class ClaudeAgentSession extends Disposable {
 	 * at materialize, never re-derived.
 	 */
 	private _materializedTransport: ClaudeTransport | undefined;
+
+	/** CreaEditor: watches the turns for subscription limits; set at materialize. */
+	private _limitTracker: ClaudeSubscriptionLimitTracker | undefined;
+
+	/**
+	 * CreaEditor: the subscription account the session runs on (or will run on after a staged switch),
+	 * `undefined` for the machine's own login and for Copilot-routed sessions.
+	 */
+	get accountId(): string | undefined {
+		const transport = this._pendingSwitchTransport ?? this._materializedTransport;
+		return transport?.kind === 'native' ? transport.account?.id : undefined;
+	}
+
+	/**
+	 * CreaEditor: moves a live native session to another subscription account. Like a transport
+	 * switch, the next {@link send} rebuilds the subprocess on it and resumes the same SDK session.
+	 * Returns false when the session is not a live native one.
+	 */
+	switchAccount(transport: ClaudeTransport): boolean {
+		if (!this.isPipelineReady || this._transportKind !== 'native' || transport.kind !== 'native') {
+			return false;
+		}
+		this._pendingTransportSwitch = true;
+		this._pendingSwitchTransport = transport;
+		return true;
+	}
+
+	/** CreaEditor: whether `turnId` hit a limit the agent continues on another account; forgets it. */
+	takeLimitRetry(turnId: string): Extract<ClaudeLimitDecision, { kind: 'retry' }> | undefined {
+		return this._limitTracker?.takeRetry(turnId);
+	}
+
+	/** CreaEditor: adds a short visible note to the response of `turnId`. */
+	emitNote(turnId: string, text: string): void {
+		this._onDidSessionProgress.fire({
+			kind: 'action',
+			resource: this._chatChannelUri,
+			action: { type: ActionType.ChatResponsePart, turnId, part: { kind: ResponsePartKind.Markdown, id: generateUuid(), content: text } },
+		});
+	}
 
 	/**
 	 * Accumulate proxy-reported billed credits for the in-flight turn.
@@ -687,7 +741,25 @@ export class ClaudeAgentSession extends Disposable {
 			await warm[Symbol.asyncDispose]();
 			throw err;
 		}
-		this._register(pipeline.onDidProduceSignal(s => this._onDidSessionProgress.fire(this._enrichSignalWithMcpContributor(this._enrichSignalWithCredits(s)))));
+		// CreaEditor: a turn that hit its subscription limit ends (or retries) on the agent's terms.
+		const subscriptionLimits = ctx.subscriptionLimits;
+		const limitTracker = subscriptionLimits ? new ClaudeSubscriptionLimitTracker(
+			(turnId, limit) => this._transportKind === 'native' ? subscriptionLimits.resolve(turnId, limit, this.accountId) : undefined,
+			info => {
+				if (this._transportKind === 'native') {
+					subscriptionLimits.onRateLimitInfo(info, this.accountId);
+				}
+			},
+		) : undefined;
+		this._limitTracker = limitTracker;
+		if (limitTracker) {
+			this._register(pipeline.onDidReceiveMessage(e => limitTracker.observe(e.message, e.turnId)));
+		}
+		this._register(pipeline.onDidProduceSignal(s => {
+			for (const signal of limitTracker ? limitTracker.filter(s) : [s]) {
+				this._onDidSessionProgress.fire(this._enrichSignalWithMcpContributor(this._enrichSignalWithCredits(signal)));
+			}
+		}));
 		this._pipeline = pipeline;
 		this._register(this._configurationService.onDidSessionConfigChange(event => {
 			if (!event.origin || event.session !== ctx.configResource.toString()) {

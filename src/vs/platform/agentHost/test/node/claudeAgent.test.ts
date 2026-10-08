@@ -20,6 +20,7 @@ import {
 	makeContentBlockStop,
 	makeMessageStart,
 	makeMessageStop,
+	makeResultError,
 	makeResultSuccess,
 	makeStreamEvent,
 	makeSystemInitMessage,
@@ -62,6 +63,7 @@ import { IAgentHostCheckpointService, NULL_CHECKPOINT_SERVICE } from '../../comm
 import { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { IAgentHostOTelService } from '../../common/otel/agentHostOTelService.js';
 import { AgentConfigurationService, IAgentConfigurationService } from '../../node/agentConfigurationService.js';
+import { ISubscriptionAccountsService, SubscriptionAccountsService } from '../../node/shared/subscriptionAccountsService.js';
 import { AgentHostStateManager, IAgentHostStateManager } from '../../node/agentHostStateManager.js';
 import { IAgentHostCustomizationEnablementService, type IAgentHostCustomizationEnablementService as ICustomizationEnablementService } from '../../node/agentHostCustomizationEnablementService.js';
 import { AgentHostSessionTitleSignal, IAgentHostSessionTitleSignal } from '../../node/agentHostSessionTitleSignal.js';
@@ -77,6 +79,7 @@ import { makeMcpServerCustomization } from '../../../agentPlugins/common/pluginP
 import { ClaudeAgent, fromSdkModelInfo } from '../../node/claude/claudeAgent.js';
 import { CLAUDE_PROVIDER_ANTHROPIC, CLAUDE_PROVIDER_COPILOT } from '../../common/claudeProviders.js';
 import { toClaudeModelSelectionId } from '../../node/claude/claudeModelSelection.js';
+import { readSubscriptionAccountsState, SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY, SUBSCRIPTION_ACCOUNTS_REQUEST_KEY, SUBSCRIPTION_LIMIT_ERROR_META_KEY, subscriptionAccountTokenResource } from '../../common/meta/subscriptionAccounts.js';
 import { ClaudeAgentSession } from '../../node/claude/claudeAgentSession.js';
 import { createClaudeInternalMcpServerCustomization } from '../../node/claude/customizations/claudeSessionCustomizationDiscovery.js';
 import { ClaudeSessionMetadataStore } from '../../node/claude/claudeSessionMetadataStore.js';
@@ -1166,6 +1169,7 @@ function createTestContext(
 		[IAgentHostGitService, createNoopGitService()],
 		[IAgentHostCheckpointService, overrides?.checkpointService ?? NULL_CHECKPOINT_SERVICE],
 		[IAgentConfigurationService, configService],
+		[ISubscriptionAccountsService, disposables.add(new SubscriptionAccountsService(undefined, configService, logService))],
 		[IAgentHostStateManager, stateManager],
 		[IAgentHostCustomizationEnablementService, reducerBackedEnablementService(stateManager)],
 		[IAgentHostSessionTitleSignal, disposables.add(new AgentHostSessionTitleSignal(stateManager))],
@@ -1264,8 +1268,10 @@ function claudeFileEnvServices(disposables: Pick<DisposableStore, 'add'>): [type
 function createTestAgentStateServices(disposables: Pick<DisposableStore, 'add'>): ConstructorParameters<typeof ServiceCollection> {
 	const logService = new NullLogService();
 	const stateManager = disposables.add(new AgentHostStateManager(logService));
+	const configService = disposables.add(new AgentConfigurationService(stateManager, logService));
 	return [
-		[IAgentConfigurationService, disposables.add(new AgentConfigurationService(stateManager, logService))],
+		[IAgentConfigurationService, configService],
+		[ISubscriptionAccountsService, disposables.add(new SubscriptionAccountsService(undefined, configService, logService))],
 		[IAgentHostStartupPerformance, NullAgentHostStartupPerformance],
 		[IAgentHostStateManager, stateManager],
 		[IAgentHostSessionTitleSignal, disposables.add(new AgentHostSessionTitleSignal(stateManager))],
@@ -4345,6 +4351,7 @@ suite('ClaudeAgent', () => {
 			[IAgentHostGitService, createNoopGitService()],
 			[IAgentHostCheckpointService, NULL_CHECKPOINT_SERVICE],
 			[IAgentConfigurationService, configService],
+			[ISubscriptionAccountsService, disposables.add(new SubscriptionAccountsService(undefined, configService, logService))],
 			[IAgentHostStateManager, stateManager],
 			[IAgentHostCustomizationEnablementService, reducerBackedEnablementService(stateManager)],
 			[IAgentHostSessionTitleSignal, disposables.add(new AgentHostSessionTitleSignal(stateManager))],
@@ -5719,6 +5726,7 @@ suite('ClaudeAgent', () => {
 			[IAgentHostGitService, createNoopGitService()],
 			[IAgentHostCheckpointService, NULL_CHECKPOINT_SERVICE],
 			[IAgentConfigurationService, configService],
+			[ISubscriptionAccountsService, disposables.add(new SubscriptionAccountsService(undefined, configService, logService))],
 			[IAgentHostStateManager, stateManager],
 			[IAgentHostCustomizationEnablementService, reducerBackedEnablementService(stateManager)],
 			[IAgentHostSessionTitleSignal, disposables.add(new AgentHostSessionTitleSignal(stateManager))],
@@ -8602,6 +8610,7 @@ suite('ClaudeAgent — Phase 11 customizations', () => {
 			[IAgentHostGitService, createNoopGitService()],
 			[IAgentHostCheckpointService, NULL_CHECKPOINT_SERVICE],
 			[IAgentConfigurationService, configService],
+			[ISubscriptionAccountsService, disposables.add(new SubscriptionAccountsService(undefined, configService, logService))],
 			[IAgentHostStateManager, stateManager],
 			[IAgentHostSessionTitleSignal, disposables.add(new AgentHostSessionTitleSignal(stateManager))],
 			[IAgentHostOTelService, otelService],
@@ -11323,6 +11332,96 @@ suite('ClaudeAgent — host seams', () => {
 			lastSessionId: sessionId,
 			lastResume: undefined,
 			sessionPresent: true,
+		});
+	});
+});
+
+// #endregion
+
+// #region CreaEditor: subscription accounts
+
+suite('ClaudeAgent — subscription accounts', () => {
+	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
+
+	async function until(condition: () => boolean): Promise<void> {
+		for (let i = 0; i < 100 && !condition(); i++) {
+			await tick();
+		}
+		assert.ok(condition(), 'condition not reached');
+	}
+
+	/**
+	 * A native session on the machine's own login plus an added token account "Work", whose first
+	 * turn hits the 5-hour limit; a second startup completes the turn.
+	 */
+	async function runLimitedTurn(autoSwitch: boolean): Promise<{ readonly ctx: ITestContext; readonly sessionId: string; readonly signals: AgentSignal[] }> {
+		const ctx = createTestContext(disposables, { nativeAccount: NATIVE_ACCOUNT, rootConfig: { [SUBSCRIPTION_ACCOUNTS_AUTO_SWITCH_KEY]: autoSwitch } });
+		await until(() => readSubscriptionAccountsState(ctx.stateManager.rootState).accounts.length === 1);
+		ctx.configService.updateRootConfig({ [SUBSCRIPTION_ACCOUNTS_REQUEST_KEY]: { id: 'r1', type: 'add', provider: 'claude', kind: 'token', label: 'Work', accountId: 'work' } });
+		await ctx.agent.handleAuthenticationToken({ resource: subscriptionAccountTokenResource('work'), token: 'tok-work' });
+		await until(() => readSubscriptionAccountsState(ctx.stateManager.rootState).accounts.find(account => account.id === 'work')?.status === 'signedIn');
+
+		const created = await createSession(ctx.agent, { workingDirectories: [URI.file('/work')], model: { id: toClaudeModelSelectionId(CLAUDE_PROVIDER_ANTHROPIC, 'claude-sonnet-4-5-20250929') } });
+		const sessionId = created.sdkSessionId;
+		ctx.sdk.nextQueryMessages = [
+			makeSystemInitMessage(sessionId),
+			{ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt: 1_900_000_000 }, uuid: '00000000-0000-0000-0000-00000000000a', session_id: sessionId },
+			makeResultError(sessionId, ['Claude AI usage limit reached']),
+		];
+		ctx.sdk.startupAdvance = async callIndex => {
+			if (callIndex === 2) {
+				ctx.sdk.nextQueryMessages = [makeSystemInitMessage(sessionId), makeResultSuccess(sessionId)];
+			}
+		};
+		const signals: AgentSignal[] = [];
+		disposables.add(ctx.agent.onDidChatProgress(signal => signals.push(signal)));
+		await ctx.agent.chats.sendMessage(defaultChatUri(created.session), 'hi', undefined, undefined, 'turn-1', undefined, undefined, chatContext(defaultChatUri(created.session)));
+		return { ctx, sessionId, signals };
+	}
+
+	function turnEnds(signals: readonly AgentSignal[]): unknown[] {
+		return signals.flatMap((signal): unknown[] => {
+			if (signal.kind !== 'action') {
+				return [];
+			}
+			switch (signal.action.type) {
+				case ActionType.ChatError: return [{ error: signal.action.part.error._meta?.[SUBSCRIPTION_LIMIT_ERROR_META_KEY], resumable: signal.action.part.resumable }];
+				case ActionType.ChatTurnComplete: return ['complete'];
+				case ActionType.ChatResponsePart: return signal.action.part.kind === ResponsePartKind.Markdown ? [signal.action.part.content] : [];
+				default: return [];
+			}
+		});
+	}
+
+	test('auto switch continues the limited turn on the next account, resuming the same SDK session', async () => {
+		const { ctx, sessionId, signals } = await runLimitedTurn(true);
+		const rebuild = ctx.sdk.capturedStartupOptions[1];
+		assert.deepStrictEqual({
+			startups: ctx.sdk.startupCallCount,
+			firstToken: ctx.sdk.capturedStartupOptions[0]?.env?.CLAUDE_CODE_OAUTH_TOKEN === 'tok-work',
+			rebuild: { token: rebuild?.env?.CLAUDE_CODE_OAUTH_TOKEN, resume: rebuild?.resume },
+			turnEnds: turnEnds(signals),
+			accounts: readSubscriptionAccountsState(ctx.stateManager.rootState).accounts.map(account => [account.id, account.status]),
+		}, {
+			startups: 2,
+			firstToken: false,
+			rebuild: { token: 'tok-work', resume: sessionId },
+			turnEnds: ['Claude account This Computer hit its limit; continued on Work.', 'complete'],
+			accounts: [['claude-default', 'limited'], ['work', 'signedIn']],
+		});
+	});
+
+	test('without auto switch the turn ends with a resumable limit error that names the next account', async () => {
+		const { ctx, signals } = await runLimitedTurn(false);
+		assert.deepStrictEqual({
+			startups: ctx.sdk.startupCallCount,
+			turnEnds: turnEnds(signals),
+		}, {
+			startups: 1,
+			turnEnds: [{
+				error: { provider: 'claude', accountId: 'claude-default', accountLabel: 'This Computer', resetsAt: 1_900_000_000_000, nextAccountId: 'work', nextAccountLabel: 'Work' },
+				resumable: true,
+			}],
 		});
 	});
 });

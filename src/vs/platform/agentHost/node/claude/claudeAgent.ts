@@ -29,13 +29,13 @@ import { AgentHostAutoApprovePolicyRestrictedConfigKey, AgentHostClaudeMultiRoot
 import { ClaudePermissionMode, ClaudeSessionConfigKey, narrowClaudePermissionMode } from '../../common/claudeSessionConfigKeys.js';
 import { createClaudeThinkingLevelSchema, isClaudeEffortLevel } from '../../common/claudeModelConfig.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
-import { AgentChatMigrationDeferred, type AgentChatMigrationResult, AgentProvider, AgentSession, AgentSignal, CLAUDE_AGENT_PROVIDER_ID, IActiveClient, IAgent, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, type IAgentChatMetadataOptions, IAgentChats, IAgentChatConfigCompletionsParams, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSessionProjectInfo, IAgentSpawnChatEvent, IAgentSpawnedChatParent, SubagentChatSignal, resolveAgentChatContext, resolveAgentHostCustomizations, resolveAgentHostInstructions, resolveSubagentChatParent } from '../../common/agent.js';
+import { AgentChatMigrationDeferred, type AgentChatMigrationResult, AgentProvider, AgentSession, AgentSignal, type AuthenticateParams, CLAUDE_AGENT_PROVIDER_ID, IActiveClient, IAgent, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, type IAgentChatMetadataOptions, IAgentChats, IAgentChatConfigCompletionsParams, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSessionProjectInfo, IAgentSpawnChatEvent, IAgentSpawnedChatParent, SubagentChatSignal, resolveAgentChatContext, resolveAgentHostCustomizations, resolveAgentHostInstructions, resolveSubagentChatParent } from '../../common/agent.js';
 import { ensureWorkspacelessScratchDir } from '../workspacelessScratchDir.js';
 import { ActionType } from '../../common/state/sessionActions.js';
 import type { ResolveSessionConfigResult, SessionConfigCompletionsResult } from '../../common/state/protocol/commands.js';
 import { AHP_AUTH_REQUIRED, ProtocolError } from '../../common/state/sessionProtocol.js';
 import { PolicyState, ProtectedResourceMetadata, type AgentSelection, type ModelSelection, type ToolDefinition } from '../../common/state/protocol/state.js';
-import { buildDefaultChatUri, ChatInputResponseKind, isDefaultChatUri, parseRequiredSessionUriFromChatUri, type ClientPluginCustomization, type Customization, type ISessionFolderPickerDecision, type MessageAttachment, type PendingMessage, type ChatInputAnswer, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
+import { buildDefaultChatUri, ChatInputResponseKind, createErrorResponsePart, isDefaultChatUri, parseRequiredSessionUriFromChatUri, type ClientPluginCustomization, type Customization, type ISessionFolderPickerDecision, type MessageAttachment, type PendingMessage, type ChatInputAnswer, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import { IFileService } from '../../../files/common/files.js';
 import { computeFolderPickerDecisionForRoots } from '../shared/folderPickerDecision.js';
 import { claudeDirectoryQualifiesForPrimary } from './claudeFolderPickerCriteria.js';
@@ -53,14 +53,16 @@ import { mergeClaudeModelCatalogs, resolveClaudeSessionTransport } from './claud
 import { mapSessionMessagesToTurns, resolveForkAnchorUuid } from './claudeReplayMapper.js';
 import { getSubagentTranscript } from './claudeSubagentResolver.js';
 import { SubagentRegistry } from './claudeSubagentRegistry.js';
-import { ClaudeAgentSession } from './claudeAgentSession.js';
+import { ClaudeAgentSession, type IClaudeSessionSubscriptionLimits } from './claudeAgentSession.js';
 import { handleCanUseTool } from './claudeCanUseTool.js';
 import { handleElicitation } from './claudeElicitationBridge.js';
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { createPricingMetaFromBilling, normalizeCAPIBilling } from '../../common/agentModelPricing.js';
 import { tryParseClaudeModelId } from './claudeModelId.js';
 import { resolvePromptToContentBlocks } from './claudePromptResolver.js';
-import { IClaudeProxyHandle, IClaudeProxyService, type ClaudeTransport } from './claudeProxyService.js';
+import { IClaudeProxyHandle, IClaudeProxyService, type ClaudeTransport, type IClaudeAccountCredential } from './claudeProxyService.js';
+import { CLAUDE_CONTINUE_PROMPT, CLAUDE_DEFAULT_ACCOUNT_ID, ClaudeSubscriptionAccounts } from './claudeSubscriptionAccounts.js';
+import { parseSubscriptionAccountTokenResource } from '../../common/meta/subscriptionAccounts.js';
 import { readClaudePermissionMode } from './claudeSessionPermissionMode.js';
 import { ClaudeSessionMetadataStore, IClaudeSessionOverlay } from './claudeSessionMetadataStore.js';
 import { IAgentHostSessionTitleSignal } from '../agentHostSessionTitleSignal.js';
@@ -679,7 +681,15 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			restartChatDiscovery: () => this._restartChatDiscovery(),
 			refreshModels: () => this._startModelRefresh(),
 		}, this._configurationService, this._agentSdkDownloader, this._logService));
+		// CreaEditor: the Claude subscription accounts pooled behind the native models.
+		this._accounts = this._register(this._instantiationService.createInstance(ClaudeSubscriptionAccounts, {
+			switchChat: (chat, accountId) => this._switchChatAccount(chat, accountId),
+			refreshModels: () => { void this._startModelRefresh(); },
+		}));
 	}
+
+	/** CreaEditor: the subscription accounts a native chat runs on. */
+	private readonly _accounts: ClaudeSubscriptionAccounts;
 
 	/**
 	 * Publishes whether the SDK is on disk — and deliberately nothing about the
@@ -752,13 +762,15 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 * otherwise {@link AHP_AUTH_REQUIRED} is thrown so the client can drive
 	 * Copilot sign-in.
 	 */
-	private _ensureAuthenticated(model?: ModelSelection): ClaudeTransport {
+	private _ensureAuthenticated(model?: ModelSelection, chatKey?: string): ClaudeTransport {
 		const transport = resolveClaudeSessionTransport({
 			model,
 			defaultMode: this._defaultTransportMode(),
 		});
 		if (transport !== 'proxy') {
-			return { kind: 'native' };
+			// CreaEditor: a native chat runs on its subscription account.
+			const account = chatKey !== undefined ? this._accounts.credentialForChat(chatKey) : undefined;
+			return account ? { kind: 'native', account } : { kind: 'native' };
 		}
 		const handle = this._proxyHandle;
 		if (!handle) {
@@ -992,21 +1004,35 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 * filesystem can see it. When it says no, the catalog is published empty.
 	 */
 	private async _fetchNativeModels(): Promise<readonly IAgentModelInfo[]> {
+		let models = await this._enumerateNativeModels(undefined);
+		// CreaEditor: without a machine login, an added subscription account can serve the native models.
+		const standIn = models === undefined ? this._accounts.credentialForModels() : undefined;
+		if (standIn) {
+			models = await this._enumerateNativeModels(standIn);
+		}
+		this._nativeAccountSetUp = models !== undefined;
+		return models ?? [];
+	}
+
+	/** Lists the native models on `account` (the machine's own login when undefined); undefined when it is not set up. */
+	private async _enumerateNativeModels(account: IClaudeAccountCredential | undefined): Promise<readonly IAgentModelInfo[] | undefined> {
 		// A prompt iterable that never yields: enumeration only needs the
 		// control-request channel (`Query.supportedModels()`), not a real turn.
 		const neverYieldingPrompt: AsyncIterable<SDKUserMessage> = {
 			[Symbol.asyncIterator]: () => ({ next: () => new Promise<IteratorResult<SDKUserMessage>>(() => { /* never resolves */ }) }),
 		};
-		const options = buildModelEnumerationOptions();
+		const options = buildModelEnumerationOptions(account?.env);
 		const query = await this._sdkService.query({ prompt: neverYieldingPrompt, options });
 		try {
-			const [account, models] = await Promise.all([query.accountInfo(), query.supportedModels()]);
-			const setUp = isClaudeAccountSetUp(account);
-			this._nativeAccountSetUp = setUp;
+			const [accountInfo, models] = await Promise.all([query.accountInfo(), query.supportedModels()]);
+			const setUp = isClaudeAccountSetUp(accountInfo);
+			if (!account) {
+				this._accounts.setDefaultAccountInfo(accountInfo);
+			}
 			// Origin only — never the credential itself.
-			this._logService.info(`[Claude] Native account check: setUp=${setUp}, provider=${account.apiProvider ?? 'none'}, tokenSource=${account.tokenSource ?? 'absent'}, apiKeySource=${account.apiKeySource ?? 'absent'}`);
+			this._logService.info(`[Claude] Native account check: account=${account?.id ?? 'default'}, setUp=${setUp}, provider=${accountInfo.apiProvider ?? 'none'}, tokenSource=${accountInfo.tokenSource ?? 'absent'}, apiKeySource=${accountInfo.apiKeySource ?? 'absent'}`);
 			if (!setUp) {
-				return [];
+				return undefined;
 			}
 			return models
 				.filter(m => !isSdkDefaultModel(m))
@@ -1194,6 +1220,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			return this._changeAgent(chatUri, agent, context);
 		},
 		getMessages: (chat, context) => this._getChatMessages(chat, context),
+		resumeTurn: (chat, turnId, context) => this._resumeTurn(chat, turnId, context),
 	};
 
 	/**
@@ -1266,7 +1293,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		// value: the agent owns transport resolution (it holds the live proxy
 		// handle), the session just consumes it. A later per-session provider
 		// switch is pushed in separately at send time (see `hasPendingTransportSwitch`).
-		const transport = this._ensureAuthenticated(session.provisionalModel);
+		const transport = this._ensureAuthenticated(session.provisionalModel, context.chatKey);
 
 		const canUseTool = this._makeCanUseTool(sessionId, context.configurationResource);
 		const onElicitation = this._makeOnElicitation(sessionId);
@@ -1282,6 +1309,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 				customizations: context.customizations,
 				workingDirectories,
 				serverToolHost: this._serverToolHost,
+				subscriptionLimits: this._subscriptionLimitsFor(context.chatKey),
 			});
 			await this._persistSessionOverlay(resource, context.configurationResource, session, transport.kind);
 			if (session.abortController.signal.aborted) {
@@ -1714,7 +1742,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 		// this pre-`try` site so the freshly-built chat is left registered for a
 		// retry rather than disposed. The resolved transport is passed into materialize
 		// as a value; a per-session provider switch is pushed in later at send time.
-		const transport = this._ensureAuthenticated(chatSession.provisionalModel);
+		const transport = this._ensureAuthenticated(chatSession.provisionalModel, chatKey);
 		const canUseTool = this._makeCanUseTool(chatSession.sessionId, configurationResource);
 		const onElicitation = this._makeOnElicitation(chatSession.sessionId);
 		this._recordChatScope(chat, configurationResource, resource);
@@ -1729,6 +1757,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 				customizations: context.customizations,
 				workingDirectories,
 				serverToolHost: this._serverToolHost,
+				subscriptionLimits: this._subscriptionLimitsFor(chatKey),
 			});
 			await this._persistSessionOverlay(resource, configurationResource, chatSession, transport.kind);
 		} catch (err) {
@@ -2342,12 +2371,104 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			if (current.customizations) {
 				session.setHostCustomizations(current.customizations);
 			}
-			const switchTransport = session.hasPendingTransportSwitch ? this._ensureAuthenticated(session.provisionalModel) : undefined;
-			await session.send(this._buildSdkPrompt(session.sessionId, prompt, attachments, effectiveTurnId), effectiveTurnId, current.configurationResource, workingDirectories, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, !!operationContext && !URI.isUri(operationContext) && operationContext.agentMergeTurn === true);
+			const switchTransport = session.hasPendingTransportSwitch ? this._ensureAuthenticated(session.provisionalModel, current.chatKey) : this._accountSwitchFor(session, current.chatKey);
+			const agentMergeTurn = !!operationContext && !URI.isUri(operationContext) && operationContext.agentMergeTurn === true;
+			await session.send(this._buildSdkPrompt(session.sessionId, prompt, attachments, effectiveTurnId), effectiveTurnId, current.configurationResource, workingDirectories, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
+			await this._continueOnNextAccount(session, current, effectiveTurnId, operationContext, clientTelemetryContext, agentMergeTurn);
 			if (workingDirectories) {
 				await this._metadataStore.write(current.resource, { workingDirectories });
 			}
 		});
+	}
+
+	/**
+	 * CreaEditor: resumes a turn that ended with a resumable error — a subscription limit — on the
+	 * chat's current account (a `switchChat` request moves the chat first) without a new user message.
+	 */
+	private async _resumeTurn(chat: URI, turnId: string, operationContext: URI | IAgentChatContext): Promise<void> {
+		const sendContext = this._requireChatContext(chat, operationContext, 'resumeTurn');
+		const clientTelemetryContext = URI.isUri(operationContext) ? undefined : operationContext.clientTelemetryContext;
+		const context = this._resolveChatContext(chat, sendContext);
+		return this._sessionSequencer.queue(context.sequencerKey, async () => {
+			const current = this._resolveChatContext(chat, sendContext);
+			const session = await this._ensureResolvedChatSession(current);
+			const switchTransport = session.hasPendingTransportSwitch ? this._ensureAuthenticated(session.provisionalModel, current.chatKey) : this._accountSwitchFor(session, current.chatKey);
+			const agentMergeTurn = !URI.isUri(operationContext) && operationContext.agentMergeTurn === true;
+			await session.send(this._buildSdkPrompt(session.sessionId, CLAUDE_CONTINUE_PROMPT, undefined, generateUuid()), turnId, current.configurationResource, undefined, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
+			await this._continueOnNextAccount(session, current, turnId, operationContext, clientTelemetryContext, agentMergeTurn);
+		});
+	}
+
+	/**
+	 * CreaEditor: the native transport that moves a live session onto the account its chat should run
+	 * on now (its account hit a limit or the user switched it), or undefined when it stays put.
+	 */
+	private _accountSwitchFor(session: ClaudeAgentSession, chatKey: string): ClaudeTransport | undefined {
+		if (!session.isPipelineReady || !this._accounts.hasAddedAccounts) {
+			return undefined;
+		}
+		const account = this._accounts.credentialForChat(chatKey);
+		if (!account || account.id === (session.accountId ?? CLAUDE_DEFAULT_ACCOUNT_ID)) {
+			return undefined;
+		}
+		const transport: ClaudeTransport = { kind: 'native', account };
+		return session.switchAccount(transport) ? transport : undefined;
+	}
+
+	/**
+	 * CreaEditor: when the turn's account hit its limit and auto switch handed the chat to the next
+	 * account, continues the same turn there (resuming the SDK session) with a short visible note.
+	 */
+	private async _continueOnNextAccount(session: ClaudeAgentSession, context: IResolvedClaudeChatContext, turnId: string, operationContext: URI | IAgentChatContext | undefined, clientTelemetryContext: IAgentChatContext['clientTelemetryContext'], agentMergeTurn: boolean): Promise<void> {
+		let retry = session.takeLimitRetry(turnId);
+		for (let attempt = 0; retry && attempt < 8; attempt++) {
+			const switchTransport = this._accountSwitchFor(session, context.chatKey);
+			if (!switchTransport) {
+				break;
+			}
+			session.emitNote(turnId, localize('claudeAccountSwitched', "Claude account {0} hit its limit; continued on {1}.", retry.fromAccountLabel, retry.toAccountLabel));
+			await session.send(this._buildSdkPrompt(session.sessionId, CLAUDE_CONTINUE_PROMPT, undefined, generateUuid()), turnId, context.configurationResource, undefined, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
+			retry = session.takeLimitRetry(turnId);
+		}
+		if (retry) {
+			// The turn's own end was held back for the switch that could not happen: end it here.
+			this._onDidChatProgress.fire({
+				kind: 'action',
+				resource: session.chatChannelUri,
+				action: {
+					type: ActionType.ChatError,
+					turnId,
+					duration: 0,
+					part: createErrorResponsePart({ errorType: 'subscriptionLimit', message: localize('claudeAccountLimitNoSwitch', "Claude account {0} hit its usage limit.", retry.fromAccountLabel) }, true),
+				},
+			});
+		}
+	}
+
+	/** CreaEditor: moves `chat` to `accountId`; a live session rebuilds on it at its next turn. */
+	private async _switchChatAccount(chat: string, accountId: string): Promise<void> {
+		const session = this._findChatByUri(chat);
+		if (!session) {
+			return;
+		}
+		await this._sessionSequencer.queue(session.sessionId, async () => {
+			this._accountSwitchFor(session, chat);
+		});
+		this._logService.info(`[Claude] Chat ${chat} switched to subscription account ${accountId}`);
+	}
+
+	/** CreaEditor: the limit handling of a native session of `chatKey`. */
+	private _subscriptionLimitsFor(chatKey: string): IClaudeSessionSubscriptionLimits {
+		return {
+			resolve: (_turnId, limit, accountId) => this._accounts.handleLimit(chatKey, accountId, limit),
+			onRateLimitInfo: (info, accountId) => this._accounts.applyRateLimitInfo(accountId, info),
+		};
+	}
+
+	/** CreaEditor: the setup-token of a `token` subscription account. */
+	async handleAuthenticationToken(params: AuthenticateParams): Promise<boolean> {
+		const accountId = parseSubscriptionAccountTokenResource(params.resource);
+		return accountId !== undefined && this._accounts.setToken(accountId, params.token);
 	}
 
 	/** Builds the SDK user message for a send, addressed to `sdkSessionId`. */
