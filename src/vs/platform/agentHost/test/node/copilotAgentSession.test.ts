@@ -5411,6 +5411,31 @@ suite('CopilotAgentSession', () => {
 		assert.deepStrictEqual(signals.filter(signal => signal.kind === 'subagent_completed' || signal.kind === 'subagent_resumed'), []);
 	});
 
+	// CreaEditor: a subagent that fails before any child turn ends must not keep running.
+	for (const failure of ['task tool error', 'subagent.failed'] as const) {
+		test(`ends a subagent with an error when it fails before its first round (${failure})`, async () => {
+			const { session, mockSession, signals } = await createAgentSession(disposables, { subagentTaskCompletionDelay: 20 });
+			session.resetTurnState('turn-parent');
+			mockSession.fire('assistant.turn_start', { turnId: 'sdk-parent' });
+			mockSession.fire('tool.execution_start', { toolCallId: 'tc-task', toolName: 'task', arguments: { description: 'Mock subtask', prompt: 'Do it', model: 'other-key/mock-mini' } });
+			mockSession.fire('subagent.started', {
+				toolCallId: 'tc-task', agentName: 'general-purpose', agentDisplayName: 'Mock subtask', agentDescription: 'Mock subtask',
+			}, { agentId: 'agent-1' });
+			if (failure === 'subagent.failed') {
+				mockSession.fire('subagent.failed', { toolCallId: 'tc-task', agentName: 'general-purpose', agentDisplayName: 'Mock subtask', error: 'No GitHub OAuth token provided' }, { agentId: 'agent-1' });
+			}
+			mockSession.fire('tool.execution_complete', { toolCallId: 'tc-task', success: false, error: { message: 'No GitHub OAuth token provided' } });
+			await timeout(0);
+
+			assert.deepStrictEqual(signals.flatMap(signal => signal.kind === 'subagent_completed' ? [{ kind: signal.kind, toolCallId: signal.toolCallId }]
+				: signal.kind === 'action' && signal.action.type === ActionType.ChatError && signal.action.part.kind === ResponsePartKind.Error
+					? [{ kind: signal.action.type, toolCallId: signal.parentToolCallId, message: signal.action.part.error.message }] : []), [
+				{ kind: ActionType.ChatError, toolCallId: 'tc-task', message: 'No GitHub OAuth token provided' },
+				{ kind: 'subagent_completed', toolCallId: 'tc-task' },
+			]);
+		});
+	}
+
 	test('rechecks an inactive subagent before the completion timer closes its turn', async () => {
 		const { session, mockSession, signals } = await createAgentSession(disposables, { subagentTaskCompletionDelay: 20 });
 		session.resetTurnState('turn-parent');

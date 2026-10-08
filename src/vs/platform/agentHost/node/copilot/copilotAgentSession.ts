@@ -1740,6 +1740,54 @@ export class CopilotAgentSession extends Disposable {
 		this._autoModeResolvedByToolCallId.delete(parentToolCallId);
 	}
 
+	// CreaEditor: end a subagent whose run is over without a child turn ending (e.g. it failed before its first model call).
+	/** The active subagent spawned by a parent tool call, if any. */
+	private _activeSubagentAgentIdForToolCall(parentToolCallId: string): string | undefined {
+		for (const [agentId, toolCallId] of this._parentToolCallIdsByAgentId) {
+			if (toolCallId === parentToolCallId && this._activeSubagentAgentIds.has(agentId)) {
+				return agentId;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * Ends an active subagent's turn with an error so its chat stops running.
+	 * A no-op when the subagent already ended.
+	 */
+	private _failSubagentTurn(parentToolCallId: string, message: string): void {
+		const agentId = this._activeSubagentAgentIdForToolCall(parentToolCallId);
+		if (!agentId) {
+			return;
+		}
+		if (!this._dropLateRootTurnEvents) {
+			this._emitAction({
+				type: ActionType.ChatError,
+				turnId: this._turnId,
+				duration: 0,
+				part: createErrorResponsePart(buildChatErrorInfoFromCopilotSdkFields({ errorType: 'subagent_failed', message })),
+			}, parentToolCallId);
+		}
+		this._completeSubagentTurn(agentId, parentToolCallId);
+	}
+
+	/**
+	 * Settles a subagent once the tool call that spawned it completes. A failed
+	 * call means the subagent cannot still be running; a successful one may have
+	 * been promoted to the background, so it is confirmed against the task list.
+	 */
+	private _settleSubagentForCompletedToolCall(parentToolCallId: string, success: boolean, errorMessage: string | undefined): void {
+		const agentId = this._activeSubagentAgentIdForToolCall(parentToolCallId);
+		if (!agentId) {
+			return;
+		}
+		if (!success) {
+			this._failSubagentTurn(parentToolCallId, errorMessage || localize('copilot.subagentFailed', "The subagent failed."));
+		} else {
+			this._scheduleSubagentTurnCompletion(agentId, parentToolCallId);
+		}
+	}
+
 	private _scheduleSubagentTurnCompletion(agentId: string, toolCallId?: string): void {
 		if (!this._activeSubagentAgentIds.has(agentId)) {
 			return;
@@ -6028,6 +6076,8 @@ export class CopilotAgentSession extends Disposable {
 
 		const handleToolComplete = (e: SessionEventPayload<'tool.execution_complete'>): void => {
 			this._approvedDuplicablePermissionSignatures.delete(e.data.toolCallId);
+			// CreaEditor: a subagent whose spawning tool call completed must not keep running.
+			this._settleSubagentForCompletedToolCall(e.data.toolCallId, e.data.success, e.data.error?.message);
 			const tracked = this._activeToolCalls.get(e.data.toolCallId);
 			if (!tracked) {
 				this._unroutableSubagentToolCallIds.delete(e.data.toolCallId);
@@ -6274,6 +6324,10 @@ export class CopilotAgentSession extends Disposable {
 				}
 			}
 			this._clearActivity();
+			if (!e.agentId && !e.data.aborted && this._activeSubagentAgentIds.size > 0) {
+				// CreaEditor: settle children whose run ended without a child turn end once the root goes idle.
+				this._refreshSubagentTaskStatuses();
+			}
 			const turn = this._currentTurn.value;
 			if (!turn) {
 				return;
@@ -7963,6 +8017,8 @@ export class CopilotAgentSession extends Disposable {
 		this._register(wrapper.onSubagentFailed(e => {
 			this._seedSubagentDisplayNames([e]);
 			this._logService.error(`[Copilot:${sessionId}] Subagent failed: ${e.data.agentName} - ${e.data.error}`);
+			// CreaEditor: a failed subagent may never end a child turn, so end its chat here.
+			this._failSubagentTurn(e.data.toolCallId, e.data.error);
 		}));
 
 		this._register(wrapper.onSubagentSelected(e => {
