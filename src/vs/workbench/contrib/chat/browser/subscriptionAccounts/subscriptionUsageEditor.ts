@@ -233,7 +233,8 @@ export class SubscriptionUsageEditor extends EditorPane {
 		if (meta) {
 			DOM.append(identity, $('.subscription-usage-account-meta', undefined, meta));
 		}
-		if (account.status === 'error' && account.error) {
+		// A signed-in account can carry a note too, such as why its usage could not be read.
+		if (account.error) {
 			DOM.append(identity, $('.subscription-usage-account-error', undefined, account.error));
 		}
 
