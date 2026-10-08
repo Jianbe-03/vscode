@@ -10,9 +10,10 @@ import { IFetcherService } from '../../../platform/networking/common/fetcherServ
 import { IExperimentationService } from '../../../platform/telemetry/common/nullExperimentationService';
 import { IInstantiationService } from '../../../util/vs/platform/instantiation/common/instantiation';
 import { BYOKModelCapabilities } from '../common/byokProvider';
-import { AbstractOpenAICompatibleLMProvider, LanguageModelChatConfiguration, OpenAICompatibleLanguageModelChatInformation } from './abstractLanguageModelChatProvider';
+import { AbstractOpenAICompatibleLMProvider, IProviderGroupStatusPresentation, LanguageModelChatConfiguration, OpenAICompatibleLanguageModelChatInformation } from './abstractLanguageModelChatProvider';
 import { byokKnownModelToAPIInfoWithEffort } from './byokModelInfo';
 import { IBYOKStorageService } from './byokStorageService';
+import { GatewayKeyStatusMonitor } from './gatewayKeyStatusMonitor';
 
 /** CreaEditor: an optional per-model override in a LiteLLM provider group. */
 interface LiteLLMModelEntry {
@@ -64,6 +65,8 @@ export class LiteLLMLMProvider extends AbstractOpenAICompatibleLMProvider<LiteLL
 
 	constructor(
 		byokStorageService: IBYOKStorageService,
+		/** The budget and spend of the keys. */
+		private readonly _keyStatus: GatewayKeyStatusMonitor,
 		@IFetcherService fetcherService: IFetcherService,
 		@ILogService logService: ILogService,
 		@IInstantiationService instantiationService: IInstantiationService,
@@ -97,6 +100,11 @@ export class LiteLLMLMProvider extends AbstractOpenAICompatibleLMProvider<LiteLL
 			this._knownModels = { ...this._knownModels, [model.id]: capabilities };
 			return { ...byokKnownModelToAPIInfoWithEffort(this._name, model.id, capabilities), url: model.url };
 		});
+	}
+
+	/** The remaining budget of the key, shown next to it in the model picker. */
+	protected override getProviderGroupStatus(group: string | undefined, apiKey: string | undefined, configuration: LiteLLMProviderConfig | undefined): IProviderGroupStatusPresentation | undefined {
+		return this._keyStatus.present('litellm', group, apiKey, configuration?.url);
 	}
 
 	protected override getModelsBaseUrl(configuration: LiteLLMProviderConfig | undefined): string | undefined {

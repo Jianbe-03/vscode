@@ -13,10 +13,11 @@ describe('LiteLLMLMProvider (CreaEditor)', () => {
 		}
 	}
 
-	function createProvider(fetch: ReturnType<typeof vi.fn>): TestProvider {
+	function createProvider(fetch: ReturnType<typeof vi.fn>, present = vi.fn()): TestProvider {
 		const logService = { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 		return new TestProvider(
 			{ getAPIKey: vi.fn().mockResolvedValue(undefined), storeAPIKey: vi.fn(), deleteAPIKey: vi.fn() } as any,
+			{ present } as any,
 			{ fetch } as any,
 			logService as any,
 			{ createInstance: vi.fn().mockReturnValue({}) } as any,
@@ -48,6 +49,31 @@ describe('LiteLLMLMProvider (CreaEditor)', () => {
 				{ id: 'claude-sonnet', name: 'claude-sonnet', url: 'http://litellm.tailnet.ts.net:4000/v1', input: 136_000, output: 64_000, tools: true, vision: true },
 				{ id: 'local-llama', name: 'Llama (local)', url: 'http://litellm.tailnet.ts.net:4000/v1', input: 112_000, output: 16_000, tools: false, vision: false },
 			],
+		});
+	});
+
+	it('shows the status of the key and reuses the models when only the status changed', async () => {
+		const fetch = vi.fn(async (url: string) => ({
+			ok: true,
+			status: 200,
+			json: async () => url.endsWith('/model/info') ? { data: [] } : { data: [{ id: 'claude-sonnet' }] },
+		}));
+		const present = vi.fn().mockReturnValueOnce(undefined).mockReturnValue({ detail: '$12.40 left of $50', info: 'Work: $12.40 left of $50' });
+		const provider = createProvider(fetch, present);
+		const configuration = { url: 'http://localhost:4111', apiKey: 'sk-test' };
+		const list = async () => (await provider.provideLanguageModelChatInformation({ silent: true, configuration, group: 'Work' } as any, {} as any))
+			.map(m => ({ id: m.id, detail: (m as { providerGroupDetail?: string }).providerGroupDetail, info: m.infoText?.creaeditorKeyStatus }));
+		const before = await list();
+		let changed = 0;
+		provider.onDidChangeLanguageModelChatInformation(() => changed++);
+		provider.refreshProviderGroupStatus();
+		const after = await list();
+		expect({ before, after, changed, modelRequests: fetch.mock.calls.filter(call => call[0].endsWith('/v1/models')).length, present: present.mock.calls[0] }).toEqual({
+			before: [{ id: 'claude-sonnet', detail: undefined, info: undefined }],
+			after: [{ id: 'claude-sonnet', detail: '$12.40 left of $50', info: 'Work: $12.40 left of $50' }],
+			changed: 1,
+			modelRequests: 1,
+			present: ['litellm', 'Work', 'sk-test', 'http://localhost:4111'],
 		});
 	});
 

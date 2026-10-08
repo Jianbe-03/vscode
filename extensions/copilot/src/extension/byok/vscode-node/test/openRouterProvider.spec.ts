@@ -33,6 +33,7 @@ function createProvider(): TestableOpenRouterLMProvider {
 
 	return new TestableOpenRouterLMProvider(
 		{ getAPIKey: vi.fn().mockResolvedValue(undefined), storeAPIKey: vi.fn(), deleteAPIKey: vi.fn() } as any,
+		{ present: vi.fn() } as any,
 		{ fetch: vi.fn() } as any,
 		logService as any,
 		{ createInstance: vi.fn().mockReturnValue({}) } as any,
@@ -200,6 +201,7 @@ describe('OpenRouterLMProvider presets (CreaEditor)', () => {
 		const logService = { trace: vi.fn(), debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 		return new PresetTestProvider(
 			{ getAPIKey: vi.fn().mockResolvedValue(undefined), storeAPIKey: vi.fn(), deleteAPIKey: vi.fn() } as any,
+			{ present: vi.fn() } as any,
 			{ fetch } as any,
 			logService as any,
 			{ createInstance: vi.fn().mockReturnValue({}) } as any,

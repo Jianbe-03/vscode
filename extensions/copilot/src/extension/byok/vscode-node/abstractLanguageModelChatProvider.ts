@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { GatewayKind } from '../../../platform/endpoint/common/gatewayTracking';
-import { CancellationToken, commands, LanguageModelChatInformation, LanguageModelChatMessage, LanguageModelChatMessage2, LanguageModelChatProvider, LanguageModelResponsePart2, PrepareLanguageModelChatModelOptions, Progress, ProvideLanguageModelChatResponseOptions } from 'vscode';
+import { CancellationToken, commands, EventEmitter, LanguageModelChatInformation, LanguageModelChatMessage, LanguageModelChatMessage2, LanguageModelChatProvider, LanguageModelResponsePart2, PrepareLanguageModelChatModelOptions, Progress, ProvideLanguageModelChatResponseOptions } from 'vscode';
 import { IConfigurationService } from '../../../platform/configuration/common/configurationService';
 import { IChatModelInformation, ModelSupportedEndpoint } from '../../../platform/endpoint/common/endpointProvider';
 import { ILogService } from '../../../platform/log/common/logService';
@@ -30,7 +30,24 @@ export interface ExtendedLanguageModelChatInformation<C extends LanguageModelCha
 	readonly providerGroup?: string;
 }
 
+/** CreaEditor: what the models of a provider group show of the status of its key. */
+export interface IProviderGroupStatusPresentation {
+	/** Short text next to the group in the model picker. */
+	readonly detail: string;
+	/** Text for the model hover. */
+	readonly info: string;
+}
+
+/** CreaEditor: how long after a status refresh the models of a group are reused instead of listed again. */
+const STATUS_REFRESH_REUSE_WINDOW = 30_000;
+
 export abstract class AbstractLanguageModelChatProvider<C extends LanguageModelChatConfiguration = LanguageModelChatConfiguration, T extends ExtendedLanguageModelChatInformation<C> = ExtendedLanguageModelChatInformation<C>> implements LanguageModelChatProvider<T> {
+
+	// CreaEditor: lets a provider update the key status its models show without listing them again.
+	private readonly _onDidChangeLanguageModelChatInformation = new EventEmitter<void>();
+	readonly onDidChangeLanguageModelChatInformation = this._onDidChangeLanguageModelChatInformation.event;
+	private readonly _lastModels = new Map<string, { readonly apiKey: string | undefined; readonly configuration: string; readonly models: T[] }>();
+	private _reuseModelsUntil = 0;
 
 	constructor(
 		protected readonly _id: string,
@@ -69,7 +86,17 @@ export abstract class AbstractLanguageModelChatProvider<C extends LanguageModelC
 			apiKey = await this.configureDefaultGroupWithApiKeyOnly();
 		}
 
-		const models = await this.getAllModels(silent, apiKey, configuration as C, group);
+		// CreaEditor: right after a key status refresh, the models of an unchanged group are reused.
+		const serializedConfiguration = JSON.stringify(configuration ?? null);
+		const cached = this._lastModels.get(group ?? '');
+		let models: T[];
+		if (cached && Date.now() < this._reuseModelsUntil && cached.apiKey === apiKey && cached.configuration === serializedConfiguration) {
+			models = cached.models;
+		} else {
+			models = await this.getAllModels(silent, apiKey, configuration as C, group);
+			this._lastModels.set(group ?? '', { apiKey, configuration: serializedConfiguration, models });
+		}
+		const status = this.getProviderGroupStatus(group, apiKey, configuration as C | undefined);
 		return models.map(model => ({
 			...model,
 			isBYOK: true,
@@ -77,7 +104,22 @@ export abstract class AbstractLanguageModelChatProvider<C extends LanguageModelC
 			configuration,
 			// CreaEditor: remember the provider group (API key) so its requests are attributed to it.
 			providerGroup: group,
+			...(status ? { providerGroupDetail: status.detail, infoText: { ...model.infoText, creaeditorKeyStatus: status.info } } : {}),
 		}));
+	}
+
+	/**
+	 * CreaEditor: the status of the key of a provider group (e.g. its remaining limit) its models show.
+	 * Must answer from memory; model listing never waits for it.
+	 */
+	protected getProviderGroupStatus(group: string | undefined, apiKey: string | undefined, configuration: C | undefined): IProviderGroupStatusPresentation | undefined {
+		return undefined;
+	}
+
+	/** CreaEditor: shows a new key status in the model picker; the models are reused for a short while instead of listed again. */
+	refreshProviderGroupStatus(): void {
+		this._reuseModelsUntil = Date.now() + STATUS_REFRESH_REUSE_WINDOW;
+		this._onDidChangeLanguageModelChatInformation.fire();
 	}
 
 	abstract provideLanguageModelChatResponse(model: T, messages: Array<LanguageModelChatMessage | LanguageModelChatMessage2>, options: ProvideLanguageModelChatResponseOptions, progress: Progress<LanguageModelResponsePart2>, token: CancellationToken): Promise<void>;

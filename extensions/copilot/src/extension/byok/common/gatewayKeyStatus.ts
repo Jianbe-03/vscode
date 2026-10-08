@@ -129,3 +129,8 @@ export function getKeyUsedShare(status: Pick<IGatewayKeyStatus, 'limit' | 'remai
 	}
 	return Math.min(1, Math.max(0, 1 - status.remaining / status.limit));
 }
+
+/** Formats a dollar amount: whole dollars without cents, otherwise with cents. */
+export function formatUsd(value: number): string {
+	return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
+}

@@ -17,8 +17,9 @@ import { IInstantiationService } from '../../../util/vs/platform/instantiation/c
 import { BYOKKnownModels, BYOKModelCapabilities } from '../common/byokProvider';
 import { OpenAIEndpoint } from '../node/openAIEndpoint';
 import { byokKnownModelsToAPIInfoWithEffort } from './byokModelInfo';
-import { AbstractOpenAICompatibleLMProvider, LanguageModelChatConfiguration, OpenAICompatibleLanguageModelChatInformation } from './abstractLanguageModelChatProvider';
+import { AbstractOpenAICompatibleLMProvider, IProviderGroupStatusPresentation, LanguageModelChatConfiguration, OpenAICompatibleLanguageModelChatInformation } from './abstractLanguageModelChatProvider';
 import { IBYOKStorageService } from './byokStorageService';
+import { GatewayKeyStatusMonitor } from './gatewayKeyStatusMonitor';
 
 interface OpenRouterModelData {
 	id: string;
@@ -146,6 +147,8 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 
 	constructor(
 		byokStorageService: IBYOKStorageService,
+		/** CreaEditor: the limit and balance of the keys. */
+		private readonly _keyStatus: GatewayKeyStatusMonitor,
 		@IFetcherService fetcherService: IFetcherService,
 		@ILogService logService: ILogService,
 		@IInstantiationService instantiationService: IInstantiationService,
@@ -237,6 +240,11 @@ export class OpenRouterLMProvider extends AbstractOpenAICompatibleLMProvider {
 			return configuredModels;
 		}
 		return [...configuredModels, ...catalog.filter(model => !configuredIds.has(model.id) && !hidden.has(model.id))];
+	}
+
+	/** CreaEditor: the remaining limit of the key, shown next to it in the model picker. */
+	protected override getProviderGroupStatus(group: string | undefined, apiKey: string | undefined): IProviderGroupStatusPresentation | undefined {
+		return this._keyStatus.present('openrouter', group, apiKey, this.getModelsBaseUrl());
 	}
 
 	/** CreaEditor: the presets of the key's account (`GET /api/v1/presets`). */
