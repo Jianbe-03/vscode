@@ -32,7 +32,7 @@ function getSessionStatus(status: SessionStatus): AgentsTreeStatus | undefined {
 }
 
 /** How many of the most recent sessions keep their subagent chats listed, on top of the running ones. */
-const RECENT_SESSIONS_TO_RETAIN = 20;
+const RECENT_SESSIONS_TO_RETAIN = 5;
 
 /**
  * Returns the sessions whose subagents the tree shows: the running ones and the most recent ones that are not archived.

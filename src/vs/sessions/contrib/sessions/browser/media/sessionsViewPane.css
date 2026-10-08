@@ -201,7 +201,7 @@
 	.agent-sessions-agents-tree-section .agents-tree-section-header {
 		flex-shrink: 0;
 		height: 26px;
-		margin: 0 var(--vscode-spacing-size80, 8px);
+		margin: 0 var(--vscode-spacing-size40, 4px);
 		border-radius: var(--vscode-cornerRadius-medium, 6px);
 		cursor: pointer;
 		outline-offset: -1px;
