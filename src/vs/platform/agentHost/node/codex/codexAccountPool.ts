@@ -170,7 +170,8 @@ export class CodexAccountPool extends Disposable {
 			...(runtime.usage ? { usage: runtime.usage } : {}),
 			...(runtime.usageUpdatedAt !== undefined ? { usageUpdatedAt: runtime.usageUpdatedAt } : {}),
 			...(limited ? { limitedUntil: runtime.limitedUntil } : {}),
-			...(runtime.error && status === 'error' ? { error: runtime.error } : {}),
+			// A signed-in account keeps its note too, such as why its usage could not be read.
+			...(runtime.error ? { error: runtime.error } : {}),
 			...(runtime.authUrl && status === 'signingIn' ? { authUrl: runtime.authUrl } : {}),
 		};
 	}
