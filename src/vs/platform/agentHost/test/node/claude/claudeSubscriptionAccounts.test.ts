@@ -129,6 +129,25 @@ suite('claudeSubscriptionAccounts', () => {
 		});
 	});
 
+	test('knows whether the model answered in a limited turn, so a continuation sends the request again only when it did not', () => {
+		const decision: ClaudeLimitDecision = { kind: 'retry', fromAccountLabel: 'Work', toAccountLabel: 'Home' };
+		const tracker = new ClaudeSubscriptionLimitTracker(() => decision, () => { });
+		const answer: SDKMessage = { type: 'assistant', message: {} as never, parent_tool_use_id: null, uuid: '00000000-0000-0000-0000-000000000004', session_id: 's' };
+		tracker.observe(answer, 'answered');
+		tracker.observe(assistantError('rate_limit'), 'answered');
+		tracker.observe(assistantError('rate_limit'), 'refused');
+		tracker.observe(answer, 'normal');
+		turnEnd('answered').forEach(signal => tracker.filter(signal));
+		const normalEnd = turnEnd('normal')[1];
+		tracker.filter(normalEnd);
+		assert.deepStrictEqual({
+			answered: tracker.hasProgress('answered'),
+			refused: tracker.hasProgress('refused'),
+			// A turn that ended without a limit is forgotten.
+			normal: tracker.hasProgress('normal'),
+		}, { answered: true, refused: false, normal: false });
+	});
+
 	/** What the CLI streams for a turn with an invalid setup-token (captured from the real CLI, trimmed). */
 	function rejectedTurn(): SDKMessage[] {
 		return [

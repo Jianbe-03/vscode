@@ -710,7 +710,12 @@ class FakeClaudeAgentSdkService implements IClaudeAgentSdkService {
 			this.supportedModelsOptions.push(params.options);
 		}
 		if (typeof params.prompt === 'string') {
-			throw new Error('FakeClaudeAgentSdkService.query: enumeration always passes an AsyncIterable prompt');
+			// CreaEditor: the check turn of a setup-token, which Anthropic accepts.
+			const messages: SDKMessage[] = [
+				{ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.1 }, uuid: '00000000-0000-0000-0000-0000000000c1', session_id: 'probe' },
+				makeResultSuccess('probe'),
+			];
+			return { close: () => { }, [Symbol.asyncIterator]: async function* () { yield* messages; } } as Partial<Query> as Query;
 		}
 		const query = new FakeQuery(params.prompt, this);
 		this.enumerationQueries.push(query);

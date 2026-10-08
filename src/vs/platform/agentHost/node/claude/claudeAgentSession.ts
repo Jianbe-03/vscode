@@ -29,7 +29,7 @@ import { ActionType } from '../../common/state/sessionActions.js';
 import { areAdditionalWorkingDirectoriesEqual, areSessionWorkingDirectoriesEqual } from '../../common/state/sessionWorkingDirectories.js';
 import { PendingMessage, ChatInputAnswer, ChatInputRequest, ChatInputResponseKind, ToolCallContributorKind, ToolCallPendingConfirmationState, type AgentSelection, type ModelSelection, type ToolDefinition } from '../../common/state/protocol/state.js';
 import type { ClientPluginCustomization, CustomizationEnablement } from '../../common/state/protocol/channels-session/state.js';
-import { CustomizationType, parseRequiredSessionUriFromChatUri, ResponsePartKind, type Customization, type ToolCallResult } from '../../common/state/sessionState.js';
+import { CustomizationType, parseRequiredSessionUriFromChatUri, ResponsePartKind, type Customization, type MessageAttachment, type ToolCallResult } from '../../common/state/sessionState.js';
 import { IClaudeAgentSdkService } from './claudeAgentSdkService.js';
 import { buildClientMcpServers, buildOptions, toClaudeMcpServers, type ClaudeDeniedMcpServerSpec } from './claudeSdkOptions.js';
 import { claudeTransportForProvider, parseClaudeModelSelection, toClaudeSdkModelId } from './claudeModelSelection.js';
@@ -421,6 +421,14 @@ export class ClaudeAgentSession extends Disposable {
 	takeLimitRetry(turnId: string): Extract<ClaudeLimitDecision, { kind: 'retry' }> | undefined {
 		return this._limitTracker?.takeRetry(turnId);
 	}
+
+	/** CreaEditor: whether the model already answered in `turnId` before its account hit a limit. */
+	limitedTurnMadeProgress(turnId: string): boolean {
+		return this._limitTracker?.hasProgress(turnId) ?? true;
+	}
+
+	/** CreaEditor: the user's request of the last turn, sent again when that turn continues on another account. */
+	lastRequest: { readonly turnId: string; readonly prompt: string; readonly attachments?: readonly MessageAttachment[] } | undefined;
 
 	/** CreaEditor: adds a short visible note to the response of `turnId`. */
 	emitNote(turnId: string, text: string): void {

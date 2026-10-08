@@ -2373,6 +2373,8 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			}
 			const switchTransport = session.hasPendingTransportSwitch ? this._ensureAuthenticated(session.provisionalModel, current.chatKey) : this._accountSwitchFor(session, current.chatKey);
 			const agentMergeTurn = !!operationContext && !URI.isUri(operationContext) && operationContext.agentMergeTurn === true;
+			// CreaEditor: kept to send the request again when the turn continues on another account.
+			session.lastRequest = { turnId: effectiveTurnId, prompt, attachments };
 			await session.send(this._buildSdkPrompt(session.sessionId, prompt, attachments, effectiveTurnId), effectiveTurnId, current.configurationResource, workingDirectories, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
 			await this._continueOnNextAccount(session, current, effectiveTurnId, operationContext, clientTelemetryContext, agentMergeTurn);
 			if (workingDirectories) {
@@ -2394,9 +2396,30 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			const session = await this._ensureResolvedChatSession(current);
 			const switchTransport = session.hasPendingTransportSwitch ? this._ensureAuthenticated(session.provisionalModel, current.chatKey) : this._accountSwitchFor(session, current.chatKey);
 			const agentMergeTurn = !URI.isUri(operationContext) && operationContext.agentMergeTurn === true;
-			await session.send(this._buildSdkPrompt(session.sessionId, CLAUDE_CONTINUE_PROMPT, undefined, generateUuid()), turnId, current.configurationResource, undefined, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
+			await this._sendContinuation(session, turnId, current.configurationResource, switchTransport, operationContext, clientTelemetryContext, agentMergeTurn);
 			await this._continueOnNextAccount(session, current, turnId, operationContext, clientTelemetryContext, agentMergeTurn);
 		});
+	}
+
+	/**
+	 * CreaEditor: continues `turnId` on the account the chat moved to. The rebuild resumes the same SDK
+	 * session there (transcripts are shared between the accounts' config folders), so the whole
+	 * conversation carries over, tool results and images included. A turn the model already answered in
+	 * only needs to go on; a turn it never answered is sent again as it was, with its attachments. When
+	 * the session cannot be resumed on that account, the chat says so and the turn ends with the error.
+	 */
+	private async _sendContinuation(session: ClaudeAgentSession, turnId: string, configurationResource: URI, switchTransport: ClaudeTransport | undefined, operationContext: URI | IAgentChatContext | undefined, clientTelemetryContext: IAgentChatContext['clientTelemetryContext'], agentMergeTurn: boolean): Promise<void> {
+		const request = session.lastRequest?.turnId === turnId ? session.lastRequest : undefined;
+		const prompt = request && !session.limitedTurnMadeProgress(turnId)
+			? this._buildSdkPrompt(session.sessionId, request.prompt, request.attachments, generateUuid())
+			: this._buildSdkPrompt(session.sessionId, CLAUDE_CONTINUE_PROMPT, undefined, generateUuid());
+		try {
+			await session.send(prompt, turnId, configurationResource, undefined, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
+		} catch (error) {
+			const account = this._accounts.getAccounts().find(candidate => candidate.id === (session.accountId ?? CLAUDE_DEFAULT_ACCOUNT_ID));
+			session.emitNote(turnId, localize('claudeAccountResumeFailed', "The conversation could not be resumed on Claude account {0}: {1}", account?.label ?? '', error instanceof Error ? error.message : String(error)));
+			throw error;
+		}
 	}
 
 	/**
@@ -2417,7 +2440,8 @@ export class ClaudeAgent extends Disposable implements IAgent {
 
 	/**
 	 * CreaEditor: when the turn's account hit its limit and auto switch handed the chat to the next
-	 * account, continues the same turn there (resuming the SDK session) with a short visible note.
+	 * account, continues the same turn there (resuming the SDK session, see {@link _sendContinuation})
+	 * with a short visible note.
 	 */
 	private async _continueOnNextAccount(session: ClaudeAgentSession, context: IResolvedClaudeChatContext, turnId: string, operationContext: URI | IAgentChatContext | undefined, clientTelemetryContext: IAgentChatContext['clientTelemetryContext'], agentMergeTurn: boolean): Promise<void> {
 		let retry = session.takeLimitRetry(turnId);
@@ -2429,7 +2453,7 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			session.emitNote(turnId, retry.reason === 'authentication'
 				? localize('claudeAccountRejectedSwitched', "Anthropic refused the sign-in of Claude account {0}; continued on {1}.", retry.fromAccountLabel, retry.toAccountLabel)
 				: localize('claudeAccountSwitched', "Claude account {0} hit its limit; continued on {1}.", retry.fromAccountLabel, retry.toAccountLabel));
-			await session.send(this._buildSdkPrompt(session.sessionId, CLAUDE_CONTINUE_PROMPT, undefined, generateUuid()), turnId, context.configurationResource, undefined, switchTransport, resolveAgentHostInstructions(operationContext), clientTelemetryContext, agentMergeTurn);
+			await this._sendContinuation(session, turnId, context.configurationResource, switchTransport, operationContext, clientTelemetryContext, agentMergeTurn);
 			retry = session.takeLimitRetry(turnId);
 		}
 		if (retry) {

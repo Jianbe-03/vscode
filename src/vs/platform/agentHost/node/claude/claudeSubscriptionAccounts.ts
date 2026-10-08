@@ -349,6 +349,8 @@ export function claudeProbePatch(account: IClaudeAccountState, outcome: IClaudeP
 export class ClaudeSubscriptionLimitTracker {
 	private readonly _decisions = new Map<string, ClaudeLimitDecision>();
 	private readonly _erroredTurns = new Set<string>();
+	/** Turns that got an answer (text or a tool call) from the model; kept until the turn ends without a limit. */
+	private readonly _progressedTurns = new Set<string>();
 
 	constructor(
 		private readonly _resolve: (turnId: string, limit: IClaudeLimitSignal) => ClaudeLimitDecision | undefined,
@@ -359,6 +361,9 @@ export class ClaudeSubscriptionLimitTracker {
 	observe(message: SDKMessage, turnId: string | undefined): void {
 		if (message.type === 'rate_limit_event') {
 			this._onRateLimitInfo(message.rate_limit_info);
+		}
+		if (turnId !== undefined && message.type === 'assistant' && !message.error) {
+			this._progressedTurns.add(turnId);
 		}
 		const limit = getClaudeLimitSignal(message);
 		if (!limit || turnId === undefined) {
@@ -382,6 +387,9 @@ export class ClaudeSubscriptionLimitTracker {
 		const turnId = signal.action.turnId;
 		const decision = this._decisions.get(turnId);
 		if (!decision) {
+			if (signal.action.type === ActionType.ChatTurnComplete) {
+				this._progressedTurns.delete(turnId);
+			}
 			return [signal];
 		}
 		if (decision.kind === 'retry') {
@@ -401,6 +409,14 @@ export class ClaudeSubscriptionLimitTracker {
 			resource: signal.resource,
 			action: { type: ActionType.ChatError, turnId, duration: signal.action.duration, part: this._errorPart(decision.meta, undefined) },
 		}];
+	}
+
+	/**
+	 * Whether the model already answered in `turnId`: a continuation then asks it to go on rather than
+	 * sending the request again.
+	 */
+	hasProgress(turnId: string): boolean {
+		return this._progressedTurns.has(turnId);
 	}
 
 	/** Whether `turnId` hit a limit that the agent should continue on another account; forgets it. */
