@@ -11,6 +11,7 @@ import { Disposable, MutableDisposable } from '../../../../../base/common/lifecy
 import { autorun } from '../../../../../base/common/observable.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
+import { ISubscriptionAccount } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../platform/configuration/common/configurationRegistry.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
@@ -19,7 +20,7 @@ import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { EditorPaneDescriptor, IEditorPaneRegistry } from '../../../../browser/editor.js';
 import { IWorkbenchContribution, WorkbenchPhase, registerWorkbenchContribution2 } from '../../../../common/contributions.js';
 import { EditorExtensions } from '../../../../common/editor.js';
-import { ISubscriptionAccountsService, SUBSCRIPTION_PROVIDERS, SubscriptionAccountsAutoSwitchSettingId, formatAccountLine, formatAvailability, formatPoolsStatusText, formatRemaining, getSubscriptionProviderLabel } from '../../../../services/agentHost/browser/subscriptionAccountsService.js';
+import { ISubscriptionAccountsService, ISubscriptionPoolSummary, SUBSCRIPTION_PROVIDERS, SubscriptionAccountsAutoSwitchSettingId, formatAccountLine, formatAvailability, formatPoolsStatusText, formatRemaining, getPoolSummaries, getSubscriptionProviderLabel } from '../../../../services/agentHost/browser/subscriptionAccountsService.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
 import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../../services/statusbar/browser/statusbar.js';
@@ -27,6 +28,17 @@ import { CHAT_CATEGORY } from '../actions/chatActions.js';
 import { SubscriptionAccountsFlows } from './subscriptionAccountsFlows.js';
 import { ADD_CLAUDE_ACCOUNT_COMMAND_ID, ADD_CODEX_ACCOUNT_COMMAND_ID, MANAGE_SUBSCRIPTION_ACCOUNTS_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SWITCH_SUBSCRIPTION_ACCOUNT_COMMAND_ID } from './subscriptionAccountsLimit.js';
 import { SubscriptionUsageEditor, SubscriptionUsageEditorInput } from './subscriptionUsageEditor.js';
+
+/** Internal command returning an {@link ISubscriptionAccountsSnapshot}, used by the AI Costs page of the Copilot extension. */
+const GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID = 'creaeditor.subscriptionAccounts.getState';
+/** Internal command that asks the agent host for new usage readings, optionally of one provider only. */
+const REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID = 'creaeditor.subscriptionAccounts.refreshUsage';
+
+/** The subscription accounts as the AI Costs page of the Copilot extension gets them. */
+interface ISubscriptionAccountsSnapshot {
+	readonly accounts: readonly ISubscriptionAccount[];
+	readonly pools: readonly ISubscriptionPoolSummary[];
+}
 
 /** Maximizes the editor area of the Agents window over the chat (see the sessions editor contribution). */
 const MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID = 'workbench.action.agentSessions.maximizeMainEditorPart';
@@ -131,6 +143,23 @@ CommandsRegistry.registerCommand(SWITCH_SUBSCRIPTION_ACCOUNT_COMMAND_ID, async (
 		await subscriptionAccountsService.setAutoSwitch(true);
 	}
 	subscriptionAccountsService.switchChat(chat, accountId);
+});
+
+/**
+ * Internal command behind the Subscriptions section of the AI Costs page of the Copilot extension: the
+ * accounts (without any sign-in URL; tokens are never part of the state) and the pool summary per provider.
+ */
+CommandsRegistry.registerCommand(GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID, (accessor): ISubscriptionAccountsSnapshot => {
+	const subscriptionAccountsService = accessor.get(ISubscriptionAccountsService);
+	return {
+		accounts: subscriptionAccountsService.accounts.get().map(account => ({ ...account, authUrl: undefined })),
+		pools: getPoolSummaries(subscriptionAccountsService.accounts.get(), Date.now()),
+	};
+});
+
+/** Internal command behind the Refresh button of the Subscriptions section of the AI Costs page. */
+CommandsRegistry.registerCommand(REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID, (accessor, provider: unknown) => {
+	accessor.get(ISubscriptionAccountsService).refreshUsage(provider === 'claude' || provider === 'codex' ? provider : undefined);
 });
 
 /**
