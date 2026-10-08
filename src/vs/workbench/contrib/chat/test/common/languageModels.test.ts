@@ -2016,6 +2016,86 @@ suite('LanguageModels - Provider Group Detail Fallback', function () {
 			{ localDetail: 'Detailed (Local)', remoteDetail: 'Detailed (Remote)' }
 		);
 	});
+
+	test('OpenRouter models carry the key name in their name and still match their bare name', async function () {
+		const languageModelsService = disposables.add(new LanguageModelsService(
+			new class extends mock<IExtensionService>() {
+				override activateByEvent() {
+					return Promise.resolve();
+				}
+			},
+			new NullLogService(),
+			disposables.add(new TestStorageService()),
+			new MockContextKeyService(),
+			new class extends mock<ILanguageModelsConfigurationService>() {
+				override onDidChangeLanguageModelGroups = Event.None;
+				override getLanguageModelsProviderGroups() {
+					return [
+						{ vendor: 'openrouter', name: 'Work key' },
+						{ vendor: 'openrouter', name: 'Personal key' }
+					];
+				}
+			},
+			new class extends mock<IQuickInputService>() { },
+			new TestSecretStorageService(),
+			new class extends mock<IProductService>() { override readonly version = '1.100.0'; },
+			new class extends mock<IRequestService>() { },
+			new TestNotificationService(),
+			NullOpenerService,
+			NullTelemetryService,
+		));
+
+		languageModelsService.deltaLanguageModelChatProviderDescriptors([
+			// Cast needed: see equivalent comment in the multi-vendor test above.
+			{ vendor: 'openrouter', displayName: 'OpenRouter', configuration: {} as unknown as undefined, managementCommand: undefined, when: undefined }
+		], []);
+
+		disposables.add(languageModelsService.registerLanguageModelProvider('openrouter', {
+			onDidChange: Event.None,
+			provideLanguageModelChatInfo: async options => {
+				if (!options.group) {
+					return [];
+				}
+				return [{
+					metadata: {
+						extension: nullExtensionDescription.identifier,
+						name: 'Claude Opus',
+						vendor: 'openrouter',
+						family: 'claude',
+						version: '1.0',
+						id: 'anthropic/claude-opus',
+						maxInputTokens: 100,
+						maxOutputTokens: 100,
+						isDefaultForLocation: {}
+					} satisfies ILanguageModelChatMetadata,
+					identifier: `openrouter/${options.group}/anthropic/claude-opus`
+				}];
+			},
+			sendChatRequest: async () => { throw new Error(); },
+			provideTokenCount: async () => { throw new Error(); }
+		}));
+
+		await languageModelsService.selectLanguageModels({});
+
+		const work = languageModelsService.lookupLanguageModel('openrouter/Work key/anthropic/claude-opus')!;
+		const personal = languageModelsService.lookupLanguageModel('openrouter/Personal key/anthropic/claude-opus')!;
+
+		assert.deepStrictEqual({
+			names: [work.name, personal.name],
+			groups: [work.providerGroupName, personal.providerGroupName],
+			details: [work.detail, personal.detail],
+			matchesBareName: ILanguageModelChatMetadata.matchesQualifiedName('Claude Opus', work),
+			matchesQualifiedName: ILanguageModelChatMetadata.matchesQualifiedName('Claude Opus (openrouter)', work),
+			sameKey: ILanguageModelChatMetadata.isSameProviderGroup(work, personal),
+		}, {
+			names: ['Claude Opus (Work key)', 'Claude Opus (Personal key)'],
+			groups: ['Work key', 'Personal key'],
+			details: [undefined, undefined],
+			matchesBareName: true,
+			matchesQualifiedName: true,
+			sameKey: false,
+		});
+	});
 });
 
 suite('LanguageModels - Provider Deprecation Notice', function () {

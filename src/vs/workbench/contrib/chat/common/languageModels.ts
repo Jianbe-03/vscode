@@ -80,6 +80,13 @@ const BUILT_IN_BYOK_VENDOR_IDS = new Set<string>([
  */
 export const THIRD_PARTY_PROVIDER_TELEMETRY_NAME = '3p-extension';
 
+/**
+ * CreaEditor: LLM gateway vendors whose provider groups are separate API keys (one group per named
+ * key). Their models carry the key name in their display name, e.g. "Claude Opus (Work key)", so the
+ * model picker shows which key a chat runs on.
+ */
+const KEY_SCOPED_GATEWAY_VENDORS = new Set<string>(['openrouter', 'litellm']);
+
 const BUILT_IN_BYOK_EXTENSION_IDS = [
 	'github.copilot-chat',
 	'github.copilot',
@@ -321,6 +328,12 @@ export interface ILanguageModelChatMetadata {
 	 */
 	readonly byokModelIdentifier?: string;
 	/**
+	 * CreaEditor: the name of the provider group (e.g. a named OpenRouter key) the model was
+	 * resolved for. Set by the language models service for every model of a configured group.
+	 * A chat that runs on a grouped model never uses a model of another group (key).
+	 */
+	readonly providerGroupName?: string;
+	/**
 	 * An optional JSON schema describing the per-model configuration options.
 	 * Used to validate user-provided per-model configuration in `chatLanguageModels.json`.
 	 */
@@ -378,10 +391,29 @@ export namespace ILanguageModelChatMetadata {
 		// CreaEditor: accept the bare model name for every vendor (not only Copilot), so agent `model:`
 		// headers and subagent dispatches can say "Programmer Agent (preset)" instead of
 		// "Programmer Agent (preset) (customendpoint)".
-		if (name === metadata.name) {
+		if (name === metadata.name || name === asQualifiedName(metadata)) {
 			return true;
 		}
-		return name === asQualifiedName(metadata);
+		// CreaEditor: the name without the key suffix (see `getNameWithoutProviderGroup`) keeps matching too.
+		const baseName = getNameWithoutProviderGroup(metadata);
+		return baseName !== metadata.name && (name === baseName || name === `${baseName} (${metadata.vendor})`);
+	}
+
+	/**
+	 * CreaEditor: the model name without the ` (<key name>)` suffix that the language models service
+	 * appends to the models of a key-scoped gateway (see {@link KEY_SCOPED_GATEWAY_VENDORS}).
+	 */
+	export function getNameWithoutProviderGroup(metadata: ILanguageModelChatMetadata): string {
+		const suffix = metadata.providerGroupName ? ` (${metadata.providerGroupName})` : undefined;
+		return suffix && metadata.name.endsWith(suffix) ? metadata.name.slice(0, -suffix.length) : metadata.name;
+	}
+
+	/**
+	 * CreaEditor: whether two models belong to the same provider group (API key) of the same vendor.
+	 * Models without a group only match other models without a group of the same vendor.
+	 */
+	export function isSameProviderGroup(a: ILanguageModelChatMetadata, b: ILanguageModelChatMetadata): boolean {
+		return a.vendor === b.vendor && a.providerGroupName === b.providerGroupName;
 	}
 
 	export function hasPromoDiscount(metadata: ILanguageModelChatMetadata): metadata is ILanguageModelChatMetadata & { readonly promo: NonNullable<ILanguageModelChatMetadata['promo']> } {
@@ -780,12 +812,16 @@ export function getLanguageModelDisplayNameWithProvider(model: ILanguageModelCha
 	const providerVendor = originalMetadata?.vendor ?? metadata.modelGroup?.id ?? metadata.vendor;
 	const providerName = getLanguageModelProviderDisplayName(languageModelsService, providerVendor);
 	const identifierSuffix = originalMetadata?.id;
-	const modelName = identifierSuffix && metadata.name.endsWith(` (${identifierSuffix})`)
-		? metadata.name.slice(0, -identifierSuffix.length - 3)
-		: metadata.name;
 	const groupName = languageModelsService.getLanguageModelGroups(providerVendor)
 		.find(group => group.modelIdentifiers.includes(originalIdentifier))
 		?.group?.name;
+	// CreaEditor: the group is shown as a path segment, so drop the key suffix of the name.
+	let modelName = groupName && metadata.name.endsWith(` (${groupName})`)
+		? metadata.name.slice(0, -groupName.length - 3)
+		: metadata.name;
+	if (identifierSuffix && modelName.endsWith(` (${identifierSuffix})`)) {
+		modelName = modelName.slice(0, -identifierSuffix.length - 3);
+	}
 	return groupName && groupName !== providerName
 		? localize('chat.languageModelNameWithProviderAndGroup', "{0}/{1}/{2}", providerName, groupName, modelName)
 		: localize('chat.languageModelNameWithProvider', "{0}/{1}", providerName, modelName);
@@ -1375,10 +1411,14 @@ export class LanguageModelsService implements ILanguageModelsService {
 						// Providers that supply their own `detail` keep it; when
 						// the provider does not set one, fall back to the user-
 						// configured group name.
+						// CreaEditor: every model records its group, and the models of a key-scoped gateway
+						// (OpenRouter, LiteLLM) carry the key name in their name instead of the detail.
+						const appendGroupToName = KEY_SCOPED_GATEWAY_VENDORS.has(vendorId);
 						for (let i = 0; i < models.length; i++) {
-							if (!models[i].metadata.detail) {
-								models[i] = { ...models[i], metadata: { ...models[i].metadata, detail: group.name } };
-							}
+							const metadata = models[i].metadata;
+							const name = appendGroupToName && !metadata.name.endsWith(` (${group.name})`) ? `${metadata.name} (${group.name})` : metadata.name;
+							const detail = metadata.detail || (appendGroupToName ? undefined : group.name);
+							models[i] = { ...models[i], metadata: { ...metadata, name, ...(detail ? { detail } : {}), providerGroupName: group.name } };
 						}
 						allModels.push(...models);
 						languageModelsGroups.push({ group, modelIdentifiers: models.map(m => m.identifier) });

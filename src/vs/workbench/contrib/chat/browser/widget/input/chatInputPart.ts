@@ -1367,7 +1367,7 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	public switchModelByQualifiedName(qualifiedModelNames: readonly string[]): boolean {
 		const models = this.getModels();
 		for (const qualifiedModelName of qualifiedModelNames) {
-			const model = models.find(m => ILanguageModelChatMetadata.matchesQualifiedName(qualifiedModelName, m.metadata));
+			const model = this._findModelByQualifiedName(qualifiedModelName, models);
 			if (model) {
 				this._applyProgrammaticLanguageModel(model);
 				return true;
@@ -1385,8 +1385,19 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 	public requestModelByQualifiedName(qualifiedModelNames: readonly string[]): Promise<boolean> {
 		return this._requestProgrammaticLanguageModel(() => {
 			const models = this.getModels();
-			return qualifiedModelNames.map(name => models.find(model => ILanguageModelChatMetadata.matchesQualifiedName(name, model.metadata))).find(isDefined);
+			return qualifiedModelNames.map(name => this._findModelByQualifiedName(name, models)).find(isDefined);
 		});
+	}
+
+	/**
+	 * CreaEditor: finds a model by its qualified name, preferring a model of the provider group (API
+	 * key) of the current model, so an agent's `model:` keeps the chat on the key it runs on when
+	 * several keys offer a model with that name.
+	 */
+	private _findModelByQualifiedName(qualifiedModelName: string, models: readonly ILanguageModelChatMetadataAndIdentifier[]): ILanguageModelChatMetadataAndIdentifier | undefined {
+		const matches = models.filter(model => ILanguageModelChatMetadata.matchesQualifiedName(qualifiedModelName, model.metadata));
+		const current = this._currentLanguageModel.get()?.metadata;
+		return (current?.providerGroupName !== undefined ? matches.find(model => ILanguageModelChatMetadata.isSameProviderGroup(model.metadata, current)) : undefined) ?? matches[0];
 	}
 
 	get hasPendingProgrammaticModelSelection(): boolean {
