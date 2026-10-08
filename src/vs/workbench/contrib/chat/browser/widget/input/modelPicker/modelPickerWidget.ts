@@ -21,6 +21,7 @@ import { URI } from '../../../../../../../base/common/uri.js';
 import { localize } from '../../../../../../../nls.js';
 import { IActionListHeaderLink } from '../../../../../../../platform/actionWidget/browser/actionList.js';
 import { IActionWidgetService } from '../../../../../../../platform/actionWidget/browser/actionWidget.js';
+import { ActionListItemKind, IActionListItem } from '../../../../../../../platform/actionWidget/browser/actionList.js';
 import { IActionWidgetDropdownAction } from '../../../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
 import { AgentHostAllowSignedOutWhenUsableSettingId } from '../../../../../../../platform/agentHost/common/agentService.js';
 import { ICommandService } from '../../../../../../../platform/commands/common/commands.js';
@@ -41,6 +42,8 @@ import { IInstantiationService } from '../../../../../../../platform/instantiati
 import { IWorkspaceTrustManagementService, IWorkspaceTrustRequestService } from '../../../../../../../platform/workspace/common/workspaceTrust.js';
 import { getCompactCodicon } from '../../../chatIcons.js';
 import { withChatInputPickerMotion } from '../chatInputPickerActionItem.js';
+import { createSubscriptionAccountActions, getModelSubscriptionProvider, getPinnedModelLabel } from './modelPickerSubscriptionAccounts.js';
+import { ISubscriptionAccountsService } from '../../../../../../services/agentHost/browser/subscriptionAccountsService.js';
 import { buildModelPickerItems, createAddOpenRouterModelAction, createManageModelsAction, getModelPickerAccessibilityProvider, getModelPickerControlModels, ModelPickerSection, shouldShowManageModelsAction } from './modelPickerItems.js';
 import { ModelPickerConfiguration } from './modelPickerConfiguration.js';
 import { getCompactModelPickerIcon } from './modelProviderIcons.js';
@@ -166,6 +169,8 @@ export class ModelPickerWidget extends Disposable {
 		@IStorageService private readonly _storageService: IStorageService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IInstantiationService private readonly _instantiationService: IInstantiationService,
+		// CreaEditor: the accounts of pooled Claude and Codex models. Missing where a test does not provide it.
+		@ISubscriptionAccountsService private readonly _subscriptionAccountsService: ISubscriptionAccountsService,
 	) {
 		super();
 		this._configuration = this._instantiationService.createInstance(ModelPickerConfiguration, {
@@ -204,6 +209,16 @@ export class ModelPickerWidget extends Disposable {
 			}
 			this._renderLabel();
 		}));
+
+		// CreaEditor: the label names the account the chat is pinned to.
+		const subscriptionAccountsService: ISubscriptionAccountsService | undefined = this._subscriptionAccountsService;
+		if (subscriptionAccountsService) {
+			this._register(autorun(reader => {
+				subscriptionAccountsService.accounts.read(reader);
+				subscriptionAccountsService.pinnedAccounts.read(reader);
+				this._renderLabel();
+			}));
+		}
 
 		// Trust reads as untrusted until initialization resolves; gate on it so a
 		// trusted workspace doesn't briefly render as restricted at startup.
@@ -640,7 +655,7 @@ export class ModelPickerWidget extends Disposable {
 		// after the picker hides and pinning re-shows it in place; defer the close
 		// so it stays the last event of this picker's session.
 		let deferClose = false;
-		const items = buildModelPickerItems({
+		let items = buildModelPickerItems({
 			models,
 			selectedModelId: this._selectedModel?.identifier,
 			recentModelIds: this._languageModelsService.getRecentlyUsedModelIds().filter(id => !this._languageModelsService.isModelHidden(id)),
@@ -675,6 +690,9 @@ export class ModelPickerWidget extends Disposable {
 				onRequestSetup: () => { this._requestSetup(); },
 			},
 		});
+
+		// CreaEditor: a pooled Claude or Codex model lists its accounts.
+		items = this._withSubscriptionAccounts(items, models);
 
 		// Collect all hover disposables so they are properly cleaned up when the
 		// picker is hidden. The ActionListWidget only tracks the disposable for the
@@ -750,6 +768,27 @@ export class ModelPickerWidget extends Disposable {
 		);
 	}
 
+	/**
+	 * CreaEditor: gives the entry of a pooled Claude or Codex model the list of its accounts when the
+	 * provider has more than one; choosing an account pins the current chat to it and picks the model.
+	 */
+	private _withSubscriptionAccounts(items: IActionListItem<IActionWidgetDropdownAction>[], models: readonly ILanguageModelChatMetadataAndIdentifier[]): IActionListItem<IActionWidgetDropdownAction>[] {
+		const service: ISubscriptionAccountsService | undefined = this._subscriptionAccountsService;
+		const sessionResource = this._delegate.getSessionResource?.();
+		if (!service || !sessionResource) {
+			return items;
+		}
+		const accounts = service.accounts.get();
+		const pinned = service.pinnedAccounts.get().get(sessionResource.toString());
+		const now = Date.now();
+		return items.map(item => {
+			const model = item.kind === ActionListItemKind.Action ? models.find(candidate => candidate.identifier === item.item?.id) : undefined;
+			const provider = model && getModelSubscriptionProvider(model);
+			const actions = provider && createSubscriptionAccountActions(accounts, provider, pinned, now, accountId => service.pinChat(sessionResource, accountId));
+			return actions ? { ...item, submenuActions: actions, hover: item.hover ? { ...item.hover, expandable: true } : undefined } : item;
+		});
+	}
+
 	private _updateBadge(): void {
 		if (this._badgeIcon) {
 			if (this._badge) {
@@ -764,13 +803,24 @@ export class ModelPickerWidget extends Disposable {
 		}
 	}
 
+	/** CreaEditor: "Claude Opus 5.5 · Work" when the chat is pinned to the Work account. */
+	private _withPinnedAccount(model: ILanguageModelChatMetadataAndIdentifier, name: string): string {
+		const service: ISubscriptionAccountsService | undefined = this._subscriptionAccountsService;
+		const sessionResource = this._delegate.getSessionResource?.();
+		const provider = getModelSubscriptionProvider(model);
+		if (!service || !sessionResource || !provider) {
+			return name;
+		}
+		return getPinnedModelLabel(name, service.accounts.get(), provider, service.pinnedAccounts.get().get(sessionResource.toString()));
+	}
+
 	private _renderLabel(): void {
 		if (!this._domNode || !this._nameButton) {
 			return;
 		}
 
 		const name = this._selectedModel
-			? getLanguageModelDisplayNameWithSubscriptionSource(this._selectedModel)
+			? this._withPinnedAccount(this._selectedModel, getLanguageModelDisplayNameWithSubscriptionSource(this._selectedModel))
 			: undefined;
 
 		const { reason, activating, genericNoModels, noModels: noModelsAvailable } = this._availability();

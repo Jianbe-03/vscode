@@ -1475,6 +1475,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 			},
 			getModels: () => this.getModels(),
 			isCacheWarm: () => (this._widget?.viewModel?.model.getRequests().length ?? 0) > 0,
+			// CreaEditor: lets the picker pin this chat to a subscription account.
+			getSessionResource: () => this._widget?.viewModel?.sessionResource,
 			getPresentationOptions: () => this._getModelPickerPresentationOptions(),
 			modelConfiguration: this._modelConfigStore,
 		};

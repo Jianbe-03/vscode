@@ -10,6 +10,7 @@ import { getDefaultHoverDelegate } from '../../../../../../../base/browser/ui/ho
 import { BaseActionViewItem } from '../../../../../../../base/browser/ui/actionbar/actionViewItems.js';
 import { IAction } from '../../../../../../../base/common/actions.js';
 import { MutableDisposable } from '../../../../../../../base/common/lifecycle.js';
+import { URI } from '../../../../../../../base/common/uri.js';
 import { autorun, IObservable } from '../../../../../../../base/common/observable.js';
 import { localize } from '../../../../../../../nls.js';
 import { IContextKeyService } from '../../../../../../../platform/contextkey/common/contextkey.js';
@@ -50,6 +51,11 @@ export interface IModelPickerDelegate {
 	 * expiry or a cache that was already reset. Defaults to `false` when omitted.
 	 */
 	isCacheWarm?(): boolean;
+	/**
+	 * CreaEditor: the resource of the chat the picker belongs to, so a pooled Claude or Codex model can
+	 * pin that chat to one of its subscription accounts.
+	 */
+	getSessionResource?(): URI | undefined;
 	/**
 	 * Per-editor model configuration access. When omitted, the picker reads and
 	 * writes configuration through the global {@link ILanguageModelsService}.

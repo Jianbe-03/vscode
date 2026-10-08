@@ -2929,6 +2929,8 @@ export class ActionListWidget<T> extends Disposable {
 				submenuItems.push({
 					item: child,
 					kind: ActionListItemKind.Action,
+					// CreaEditor: a disabled action (such as a used-up account) cannot be chosen.
+					disabled: !child.enabled || undefined,
 					label: child.label,
 					description: child.tooltip && child.tooltip !== child.label ? child.tooltip : undefined,
 					group: { title: '', icon },

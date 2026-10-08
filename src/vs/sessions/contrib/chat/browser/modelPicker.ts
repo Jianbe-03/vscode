@@ -87,6 +87,8 @@ export class ModelPicker extends Disposable {
 					showModelIcon: true,
 				};
 			},
+			// CreaEditor: lets the picker pin the active chat to a subscription account.
+			getSessionResource: () => this._sessionContext.session.get()?.activeChat.get().resource,
 			isCacheWarm: () => {
 				const session = this._sessionContext.session.get();
 				// The session's prompt cache is warm once its first request has
