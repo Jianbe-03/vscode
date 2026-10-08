@@ -4,7 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 // CreaEditor: the Subscription Usage page. Per provider (Claude, Codex) a card with the pool as a
-// whole, and below it one row per account with a bar per usage window and the account's actions.
+// whole, and below it one row per account with a bar per usage window and the account's actions. The
+// pool and every account also chart their usage of the past weeks, read from the usage history the
+// agent host records (`agent-subscription-usage-history.jsonl` in the user's `globalStorage`).
 
 import './media/subscriptionUsage.css';
 import * as DOM from '../../../../../base/browser/dom.js';
@@ -17,11 +19,15 @@ import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../base/common/observable.js';
+import { joinPath } from '../../../../../base/common/resources.js';
 import { ScrollbarVisibility } from '../../../../../base/common/scrollable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize } from '../../../../../nls.js';
 import { ISubscriptionAccount, ISubscriptionUsageWindow, SubscriptionAccountStatus, SubscriptionProvider, getRemainingPercent } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
+import { ISubscriptionUsageSample, SUBSCRIPTION_USAGE_HISTORY_FILE, parseUsageHistory } from '../../../../../platform/agentHost/common/meta/subscriptionUsageHistory.js';
 import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
+import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
+import { IFileService } from '../../../../../platform/files/common/files.js';
 import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService } from '../../../../../platform/storage/common/storage.js';
@@ -34,6 +40,7 @@ import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IEditorGroup } from '../../../../services/editor/common/editorGroupsService.js';
 import { ISubscriptionAccountsService, ISubscriptionPoolSummary, SUBSCRIPTION_PROVIDERS, formatAvailability, formatRemaining, formatResetsIn, formatShortDuration, getEarliestReset, getPoolSummaries, getSubscriptionProviderLabel } from '../../../../services/agentHost/browser/subscriptionAccountsService.js';
 import { SubscriptionAccountsFlows } from './subscriptionAccountsFlows.js';
+import { formatAccountHistorySummary, formatPoolHistorySummary, getAccountUsageSeries, getPoolUsageHistory, getUsageHistoryRange, renderUsageHistoryChart } from './subscriptionUsageHistoryChart.js';
 
 const $ = DOM.$;
 
@@ -89,6 +96,8 @@ export class SubscriptionUsageEditor extends EditorPane {
 	private _content: HTMLElement | undefined;
 	private _scrollable: DomScrollableElement | undefined;
 	private _firstFocusable: Button | undefined;
+	/** The usage history samples, by account. */
+	private _history = new Map<string, ISubscriptionUsageSample[]>();
 
 	constructor(
 		group: IEditorGroup,
@@ -98,6 +107,8 @@ export class SubscriptionUsageEditor extends EditorPane {
 		@IInstantiationService instantiationService: IInstantiationService,
 		@ISubscriptionAccountsService private readonly _subscriptionAccountsService: ISubscriptionAccountsService,
 		@IHoverService private readonly _hoverService: IHoverService,
+		@IFileService private readonly _fileService: IFileService,
+		@IEnvironmentService private readonly _environmentService: IEnvironmentService,
 	) {
 		super(SubscriptionUsageEditor.ID, group, telemetryService, themeService, storageService);
 		this._flows = instantiationService.createInstance(SubscriptionAccountsFlows);
@@ -117,15 +128,38 @@ export class SubscriptionUsageEditor extends EditorPane {
 			const autoSwitch = this._subscriptionAccountsService.autoSwitch.read(reader);
 			this._render(accounts, autoSwitch);
 		}));
-		// Keep "resets in ..." current.
+		// Keep "resets in ..." and the history current.
 		this._register(DOM.disposableWindowInterval(DOM.getWindow(this._container), () => {
-			this._render(this._subscriptionAccountsService.accounts.get(), this._subscriptionAccountsService.autoSwitch.get());
+			void this._loadHistory();
 		}, 60_000));
 	}
 
 	override async setInput(input: SubscriptionUsageEditorInput, options: IEditorOptions | undefined, context: IEditorOpenContext, token: CancellationToken): Promise<void> {
 		await super.setInput(input, options, context, token);
 		this._subscriptionAccountsService.refreshUsage();
+		void this._loadHistory();
+	}
+
+	/** Reads the usage history the agent host records and renders the page again. */
+	private async _loadHistory(): Promise<void> {
+		const resource = joinPath(this._environmentService.userRoamingDataHome, 'globalStorage', SUBSCRIPTION_USAGE_HISTORY_FILE);
+		let samples: ISubscriptionUsageSample[] = [];
+		try {
+			samples = parseUsageHistory((await this._fileService.readFile(resource)).value.toString());
+		} catch {
+			// No history yet.
+		}
+		const history = new Map<string, ISubscriptionUsageSample[]>();
+		for (const sample of samples.sort((a, b) => a.t - b.t)) {
+			let own = history.get(sample.a);
+			if (!own) {
+				own = [];
+				history.set(sample.a, own);
+			}
+			own.push(sample);
+		}
+		this._history = history;
+		this._render(this._subscriptionAccountsService.accounts.get(), this._subscriptionAccountsService.autoSwitch.get());
 	}
 
 	override layout(dimension: DOM.Dimension): void {
@@ -218,6 +252,11 @@ export class SubscriptionUsageEditor extends EditorPane {
 			DOM.append(facts, $('span', undefined, localize('subscriptionUsage.firstReset', "First reset in {0}", formatShortDuration(pool.earliestResetAt - now))));
 		}
 
+		// The pool over the past weeks: is it big enough?
+		if (accounts.length > 1) {
+			this._renderPoolHistory(section, providerLabel, accounts, now);
+		}
+
 		// One row per account, in the order they are tried.
 		const list = DOM.append(section, $('ol.subscription-usage-accounts'));
 		accounts.forEach((account, index) => this._renderAccount(list, account, index, accounts.length, now));
@@ -250,6 +289,7 @@ export class SubscriptionUsageEditor extends EditorPane {
 		const actions = this._renderDisposables.add(new ActionBar(DOM.append(row, $('.subscription-usage-account-actions')), {
 			ariaLabel: localize('subscriptionUsage.accountActions', "Actions for {0}", account.label),
 		}));
+		this._renderAccountHistory(row, account, now);
 		const canSignIn = account.kind !== 'default' && account.status !== 'signedIn' && account.status !== 'limited' && account.status !== 'signingIn';
 		row.classList.toggle('needs-sign-in', canSignIn);
 		const editable = account.kind !== 'default';
@@ -263,6 +303,26 @@ export class SubscriptionUsageEditor extends EditorPane {
 				toAction({ id: 'remove', label: localize('subscriptionUsage.remove', "Remove"), class: ThemeIcon.asClassName(Codicon.trash), run: () => this._flows.remove(account) }),
 			] : []),
 		], { icon: true, label: false });
+	}
+
+	private _renderAccountHistory(row: HTMLElement, account: ISubscriptionAccount, now: number): void {
+		const samples = this._history.get(account.id) ?? [];
+		const { start, buckets } = getUsageHistoryRange(now);
+		const history = DOM.append(row, $('.subscription-usage-history'));
+		DOM.append(history, $('.subscription-usage-history-summary', undefined, formatAccountHistorySummary(samples, start)));
+		const labels = new Map<string, string>((account.usage ?? []).map(window => [window.kind, window.label]));
+		const series = getAccountUsageSeries(samples, start, buckets, labels);
+		this._renderDisposables.add(renderUsageHistoryChart(history, series, start, localize('subscriptionUsage.accountHistory', "Usage of {0} over the past weeks", account.label)));
+	}
+
+	private _renderPoolHistory(section: HTMLElement, providerLabel: string, accounts: readonly ISubscriptionAccount[], now: number): void {
+		const { start, buckets } = getUsageHistoryRange(now);
+		const samplesByAccount = new Map(accounts.map(account => [account.id, this._history.get(account.id) ?? []] as const));
+		const pool = getPoolUsageHistory(samplesByAccount, start, buckets);
+		const history = DOM.append(section, $('.subscription-usage-history.pool'));
+		DOM.append(history, $('.subscription-usage-history-summary', undefined, formatPoolHistorySummary(samplesByAccount, start, pool.exhaustedBuckets)));
+		const label = localize('subscriptionUsage.poolHistoryLine', "Tightest limit, average");
+		this._renderDisposables.add(renderUsageHistoryChart(history, [{ label, values: pool.values }], start, localize('subscriptionUsage.poolHistory', "Usage of the {0} pool over the past weeks", providerLabel)));
 	}
 
 	private _renderStatus(parent: HTMLElement, account: ISubscriptionAccount, now: number): void {

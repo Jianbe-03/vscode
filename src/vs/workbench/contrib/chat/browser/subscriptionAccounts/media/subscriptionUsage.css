@@ -361,3 +361,112 @@
 	align-items: stretch;
 	gap: var(--vscode-spacing-size120);
 }
+
+/* Usage history: a calm chart per pool and account, spanning the row. */
+
+.subscription-usage-history {
+	grid-column: 1 / -1;
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size60);
+	min-width: 0;
+}
+
+.subscription-usage-history.pool {
+	padding: 0 var(--vscode-spacing-size160);
+}
+
+.subscription-usage-history-summary {
+	font-size: var(--vscode-fontSize-body2, 12px);
+	color: var(--vscode-foreground);
+}
+
+.subscription-usage-history-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size120);
+	font-size: var(--vscode-fontSize-body2, 12px);
+	color: var(--vscode-descriptionForeground);
+}
+
+.subscription-usage-history-legend-entry {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size40);
+}
+
+.subscription-usage-history-swatch {
+	width: 10px;
+	height: 2px;
+	border-radius: 1px;
+	background-color: currentColor;
+}
+
+.subscription-usage-history-svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	overflow: visible;
+}
+
+.subscription-usage-history-svg .grid-line {
+	stroke: var(--vscode-widget-border, var(--vscode-panel-border));
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.subscription-usage-history-svg .limit-line {
+	stroke: var(--vscode-charts-red);
+	stroke-width: 1;
+	stroke-dasharray: 4 3;
+	vector-effect: non-scaling-stroke;
+}
+
+.subscription-usage-history-svg .guide-line {
+	stroke: var(--vscode-descriptionForeground);
+	stroke-width: 1;
+	vector-effect: non-scaling-stroke;
+}
+
+.subscription-usage-history-svg .axis-label {
+	fill: var(--vscode-descriptionForeground);
+	font-size: 9px;
+}
+
+.subscription-usage-history-svg .series-line {
+	fill: none;
+	stroke-width: 2;
+	stroke-linejoin: round;
+	stroke-linecap: round;
+}
+
+.subscription-usage-history-svg .series-line.series-1,
+.subscription-usage-history-legend-entry.series-1 .subscription-usage-history-swatch {
+	stroke: var(--vscode-charts-blue);
+	background-color: var(--vscode-charts-blue);
+}
+
+.subscription-usage-history-svg .series-line.series-2,
+.subscription-usage-history-legend-entry.series-2 .subscription-usage-history-swatch {
+	stroke: var(--vscode-charts-orange);
+	background-color: var(--vscode-charts-orange);
+}
+
+.subscription-usage-history-svg .series-line.series-3,
+.subscription-usage-history-legend-entry.series-3 .subscription-usage-history-swatch {
+	stroke: var(--vscode-charts-purple);
+	background-color: var(--vscode-charts-purple);
+}
+
+.subscription-usage-history-svg .series-line.series-4,
+.subscription-usage-history-legend-entry.series-4 .subscription-usage-history-swatch {
+	stroke: var(--vscode-charts-green);
+	background-color: var(--vscode-charts-green);
+}
+
+.subscription-usage-history-readout,
+.subscription-usage-history-empty {
+	font-size: var(--vscode-fontSize-body2, 12px);
+	color: var(--vscode-descriptionForeground);
+	min-height: 1.4em;
+}

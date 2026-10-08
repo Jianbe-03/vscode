@@ -14,6 +14,8 @@ import type { IRootConfigChangedAction } from '../../../../../../platform/agentH
 import { ADD_CLAUDE_ACCOUNT_COMMAND_ID, SWITCH_SUBSCRIPTION_ACCOUNT_COMMAND_ID, getSubscriptionLimitErrorDetails, getSubscriptionSwitchData, getSubscriptionWaitData, readSubscriptionLimitErrorMeta } from '../../../browser/subscriptionAccounts/subscriptionAccountsLimit.js';
 import { checkResetWaitAccount, formatResetWaitMessage, getResetWaitEnd, waitForSubscriptionReset, type IResetWaitClock } from '../../../browser/subscriptionAccounts/subscriptionAccountsResetWait.js';
 import { getNewUsageWarnings, pruneShownUsageWarnings } from '../../../browser/subscriptionAccounts/subscriptionUsageWarnings.js';
+import { formatAccountHistorySummary, formatPoolHistorySummary, getAccountUsageSeries, getPoolUsageHistory, getUsageHistoryRange } from '../../../browser/subscriptionAccounts/subscriptionUsageHistoryChart.js';
+import type { ISubscriptionUsageSample } from '../../../../../../platform/agentHost/common/meta/subscriptionUsageHistory.js';
 
 suite('SubscriptionAccountsLimit', () => {
 	const disposables = ensureNoDisposablesAreLeakedInTestSuite();
@@ -155,5 +157,36 @@ suite('SubscriptionAccountsLimit', () => {
 			{ kind: 'unavailable' },
 		]);
 		assert.ok(formatResetWaitMessage({ provider: 'codex', accountId: 'a', accountLabel: 'Home', resetsAt: now + hour }, undefined, now).startsWith('Waiting for the Home account\'s limit to reset at '));
+	});
+
+	test('charts the usage history per hour and sums up how often the accounts hit their limit', () => {
+		const { start, buckets } = getUsageHistoryRange(now);
+		const sample = (account: string, hoursAgo: number, fiveHour: number, weekly: number): ISubscriptionUsageSample => ({ t: now - hoursAgo * hour, a: account, p: 'claude', w: [['five_hour', fiveHour], ['seven_day', weekly]], ...(fiveHour >= 100 ? { l: 1 as const } : {}) });
+		const work = [sample('work', 3, 50, 20), sample('work', 2.9, 70, 21), sample('work', 2, 100, 25), sample('work', 1, 10, 26), sample('work', 0, 100, 30)];
+		const home = [sample('home', 2, 100, 60), sample('home', 0, 40, 61)];
+		const series = getAccountUsageSeries(work, start, buckets, new Map([['five_hour', '5-hour']]));
+		const pool = getPoolUsageHistory(new Map([['work', work], ['home', home]]), start, buckets);
+		const last = (values: readonly (number | undefined)[]) => values.slice(-4);
+		assert.deepStrictEqual({
+			buckets,
+			series: series.map(line => ({ label: line.label, last: last(line.values) })),
+			pool: last(pool.values),
+			exhausted: pool.exhaustedBuckets,
+			summaries: [formatAccountHistorySummary(work, start), formatAccountHistorySummary(home, start), formatAccountHistorySummary([], start), formatPoolHistorySummary(new Map([['work', work], ['home', home]]), start, pool.exhaustedBuckets)],
+		}, {
+			buckets: 4 * 7 * 24,
+			series: [
+				{ label: '5-hour', last: [70, 100, 10, 100] },
+				{ label: 'seven_day', last: [21, 25, 26, 30] },
+			],
+			pool: [70, 100, 26, 81],
+			exhausted: 1,
+			summaries: [
+				'Hit its limit 2 times in 4 weeks',
+				'Hit its limit once in 4 weeks',
+				'Never hit its limit in 4 weeks',
+				'Accounts hit their limit 3 times in 4 weeks; all were used up at once for about an hour',
+			],
+		});
 	});
 });
