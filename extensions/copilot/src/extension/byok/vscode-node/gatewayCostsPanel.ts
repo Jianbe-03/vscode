@@ -7,17 +7,26 @@ import * as l10n from '@vscode/l10n';
 import { commands, Uri, ViewColumn, WebviewPanel, window, workspace } from 'vscode';
 import { formatIssue, getIssueUrl } from '../../../platform/endpoint/common/gatewayTracking';
 import { IGatewayCostEntry, IGatewayTrackingService } from '../../../platform/endpoint/common/gatewayTrackingService';
+import { IntervalTimer, RunOnceScheduler } from '../../../util/vs/base/common/async';
 import { Disposable, DisposableStore } from '../../../util/vs/base/common/lifecycle';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { filterCostRows, ICostDataset, ICostFilters, ICostQueryOptions, ICostRow, prepareCostDataset, runCostQuery } from '../common/gatewayCostsAnalysis';
 import { ADVANCED_STYLES, escapeHtml, getAdvancedMarkup, getAdvancedScript, getAdvancedStrings } from './gatewayCostsAdvancedView';
+import { GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID, getSubscriptionsMarkup, ISubscriptionAccountsSnapshot, getSubscriptionsStrings, REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SUBSCRIPTIONS_SCRIPT, SUBSCRIPTIONS_STYLES, toSubscriptionAccountsSnapshot } from './gatewayCostsSubscriptionsView';
 
 export const SHOW_GATEWAY_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
+
+/** How often the Subscriptions section reads the accounts again while the page is visible. */
+const SUBSCRIPTIONS_POLL_INTERVAL = 30_000;
+/** Usage readings arrive a little after a refresh request. */
+const SUBSCRIPTIONS_REFRESH_DELAY = 3_000;
 
 type PanelMessage =
 	| { readonly type: 'ready' }
 	| { readonly type: 'exportCsv' }
 	| { readonly type: 'clear' }
+	| { readonly type: 'refreshSubscriptions' }
+	| { readonly type: 'openSubscriptionUsage' }
 	| { readonly type: 'query'; readonly seq: number; readonly filters: ICostFilters; readonly options: ICostQueryOptions }
 	| { readonly type: 'exportFiltered'; readonly format: 'csv' | 'json'; readonly filters: ICostFilters };
 
@@ -32,6 +41,7 @@ export class GatewayCostsPanel extends Disposable {
 	private readonly _panelDisposables = this._register(new DisposableStore());
 	/** The ledger prepared for queries; reset whenever the ledger changes. */
 	private _dataset: ICostDataset | undefined;
+	private readonly _subscriptionsRefresh = this._register(new RunOnceScheduler(() => this._postSubscriptions(), SUBSCRIPTIONS_REFRESH_DELAY));
 
 	constructor(
 		@IGatewayTrackingService private readonly _trackingService: IGatewayTrackingService,
@@ -53,6 +63,22 @@ export class GatewayCostsPanel extends Disposable {
 			this._dataset = undefined;
 			this._postEntries();
 		}));
+		// The Subscriptions section reads the accounts from the workbench while the page is visible.
+		const subscriptionsPoll = this._panelDisposables.add(new IntervalTimer());
+		const updateSubscriptionsPoll = () => {
+			if (panel.visible) {
+				subscriptionsPoll.cancelAndSet(() => this._postSubscriptions(), SUBSCRIPTIONS_POLL_INTERVAL);
+			} else {
+				subscriptionsPoll.cancel();
+			}
+		};
+		updateSubscriptionsPoll();
+		this._panelDisposables.add(panel.onDidChangeViewState(() => {
+			if (panel.visible) {
+				void this._postSubscriptions();
+			}
+			updateSubscriptionsPoll();
+		}));
 		this._panelDisposables.add(panel.onDidDispose(() => {
 			this._panel = undefined;
 			this._dataset = undefined;
@@ -64,6 +90,18 @@ export class GatewayCostsPanel extends Disposable {
 		switch (message.type) {
 			case 'ready':
 				this._postEntries();
+				void this._postSubscriptions();
+				break;
+			case 'refreshSubscriptions':
+				try {
+					await commands.executeCommand(REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID);
+				} catch {
+					// No subscription accounts in this window; the section already says so.
+				}
+				this._subscriptionsRefresh.schedule();
+				break;
+			case 'openSubscriptionUsage':
+				await commands.executeCommand(SHOW_SUBSCRIPTION_USAGE_COMMAND_ID);
 				break;
 			case 'exportCsv':
 				await this._exportCsv();
@@ -85,6 +123,16 @@ export class GatewayCostsPanel extends Disposable {
 				break;
 			}
 		}
+	}
+
+	private async _postSubscriptions(): Promise<void> {
+		let state: ISubscriptionAccountsSnapshot | undefined;
+		try {
+			state = toSubscriptionAccountsSnapshot(await commands.executeCommand<unknown>(GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID));
+		} catch {
+			state = undefined;
+		}
+		void this._panel?.webview.postMessage({ type: 'subscriptions', state });
 	}
 
 	private _postEntries(): void {
@@ -159,6 +207,7 @@ export class GatewayCostsPanel extends Disposable {
 			viaPrompt: l10n.t('from prompt'),
 			viaAgent: l10n.t('set by agent'),
 			...getAdvancedStrings(),
+			...getSubscriptionsStrings(),
 		};
 		return `<!DOCTYPE html>
 <html lang="en">
@@ -197,11 +246,13 @@ export class GatewayCostsPanel extends Disposable {
 	.models { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
 	.empty { color: var(--vscode-descriptionForeground); padding: 40px 0; text-align: center; }
 ${ADVANCED_STYLES}
+${SUBSCRIPTIONS_STYLES}
 </style>
 </head>
 <body>
 <h1>${escapeHtml(strings.title)}</h1>
 <div class="subtitle">${escapeHtml(strings.subtitle)}</div>
+${getSubscriptionsMarkup(strings)}
 <div class="tabs" role="tablist" aria-label="${escapeHtml(strings.tabsLabel)}">
 	<button type="button" class="tab" role="tab" id="tab-overview" data-tab="overview" aria-controls="overview" aria-selected="true">${escapeHtml(strings.tabOverview)}</button>
 	<button type="button" class="tab" role="tab" id="tab-advanced" data-tab="advanced" aria-controls="advanced" aria-selected="false" tabindex="-1">${escapeHtml(strings.tabAdvanced)}</button>
@@ -293,6 +344,9 @@ vscode.postMessage({ type: 'ready' });
 </script>
 <script nonce="${nonce}">
 ${getAdvancedScript()}
+</script>
+<script nonce="${nonce}">
+${SUBSCRIPTIONS_SCRIPT}
 </script>
 </body>
 </html>`;
