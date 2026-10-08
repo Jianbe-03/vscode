@@ -471,6 +471,7 @@ import './contrib/chat/browser/chat.contribution.js';
 import './contrib/chat/browser/btwSlashCommand.contribution.js';
 import './contrib/chat/browser/requestOriginProvider.contribution.js';
 import './contrib/chat/browser/sideChatProvider.contribution.js';
+import './contrib/chat/browser/chatGatewayCost.contribution.js'; // CreaEditor: the gateway cost counter in the session title bar.
 import './contrib/providers/agentHost/browser/exportDebugLogsAction.js';
 import './contrib/providers/agentHost/browser/agentHostSessionConfigPicker.js';
 import './contrib/providers/agentHost/browser/agentHostForkActions.js';
