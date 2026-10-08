@@ -44,6 +44,14 @@ import { SUBSCRIPTION_USAGE_HISTORY_FILE } from '../../common/meta/subscriptionU
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { SubscriptionUsageHistory } from './subscriptionUsageHistory.js';
 
+/**
+ * Development only: a JSON file with an array of `ISubscriptionAccount` that is published next to the
+ * real accounts, re-read every two minutes and on every publish, so the warnings, the usage page and
+ * the model picker list can be tried without signing in. No provider owns these accounts, so requests
+ * for them are not handled.
+ */
+const FAKE_ACCOUNTS_ENV_VAR = 'CREAEDITOR_FAKE_SUBSCRIPTION_ACCOUNTS';
+
 /** How often the service asks every provider to read its accounts' usage. */
 const USAGE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 /** How often a provider with an account past the usage warning threshold is read. */
@@ -213,7 +221,7 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 
 	publish(): void {
 		const state: ISubscriptionAccountsState = {
-			accounts: [...this._providers.values()].flatMap(provider => provider.getAccounts()),
+			accounts: [...[...this._providers.values()].flatMap(provider => provider.getAccounts()), ...this._readFakeAccounts()],
 		};
 		const serialized = JSON.stringify(state);
 		if (serialized === this._lastPublished) {
@@ -254,6 +262,9 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 				}
 				return target?.refreshUsage({ explicit: true });
 			}));
+			if (process.env[FAKE_ACCOUNTS_ENV_VAR]) {
+				this.publish();
+			}
 			return;
 		}
 		await provider?.handleRequest(request);
@@ -269,7 +280,24 @@ export class SubscriptionAccountsService extends Disposable implements ISubscrip
 		return [...this._providers.values()].find(provider => provider.getAccounts().some(account => account.id === request.accountId));
 	}
 
+	private _readFakeAccounts(): readonly ISubscriptionAccount[] {
+		const path = process.env[FAKE_ACCOUNTS_ENV_VAR];
+		if (!path) {
+			return [];
+		}
+		try {
+			const value: unknown = JSON.parse(fs.readFileSync(path, 'utf8'));
+			return Array.isArray(value) ? value.filter((account): account is ISubscriptionAccount => !!account && typeof account.id === 'string' && (account.provider === 'claude' || account.provider === 'codex')) : [];
+		} catch (error) {
+			this._logService.warn(`[SubscriptionAccounts] Could not read the fake accounts in ${path}`, error);
+			return [];
+		}
+	}
+
 	private _refreshAllUsage(): void {
+		if (process.env[FAKE_ACCOUNTS_ENV_VAR]) {
+			this.publish();
+		}
 		const now = Date.now();
 		const threshold = this.getWarningThreshold();
 		for (const provider of this._providers.values()) {
