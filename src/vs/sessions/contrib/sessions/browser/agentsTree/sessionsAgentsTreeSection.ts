@@ -18,17 +18,18 @@ import { SessionsAgentsTreeControl } from './sessionsAgentsTreeView.js';
 const $ = DOM.$;
 
 const COLLAPSED_STORAGE_KEY = 'sessions.agentsTree.collapsed';
+const OPEN_HEIGHT_STORAGE_KEY = 'sessions.agentsTree.openHeight';
 
 /** Height of the section header, the same as a section of the Sessions list. */
 const HEADER_HEIGHT = 26;
 
-/** The tree gets this share of the Sessions part when open, within the bounds below. */
-const OPEN_HEIGHT_RATIO = 0.5;
-const OPEN_MIN_HEIGHT = 120;
+const DEFAULT_OPEN_HEIGHT = 280;
+const MIN_OPEN_HEIGHT = 120;
 
 /**
- * A section of the Sessions sidebar with a header like the Chats section. Clicking the header folds
- * the Agents tree open or closed; the state is remembered.
+ * A pane of the Sessions sidebar with a header like the Chats section. Clicking the header folds
+ * the Agents tree open or closed; the host lets the user drag the open pane to another height.
+ * Both are remembered.
  */
 export class SessionsAgentsTreeSection extends Disposable {
 
@@ -38,10 +39,11 @@ export class SessionsAgentsTreeSection extends Disposable {
 	private readonly _treeContainer: HTMLElement;
 	private readonly _control: SessionsAgentsTreeControl;
 	private _collapsed: boolean;
+	private _openHeight: number;
 	private _hostVisible = true;
 
 	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
-	/** Fires when the section folds open or closed, so the host lays it out again. */
+	/** Fires when the section folds open or closed, so the host resizes it. */
 	readonly onDidChangeHeight: Event<void> = this._onDidChangeHeight.event;
 
 	constructor(
@@ -51,6 +53,7 @@ export class SessionsAgentsTreeSection extends Disposable {
 	) {
 		super();
 		this._collapsed = this._storageService.getBoolean(COLLAPSED_STORAGE_KEY, StorageScope.PROFILE, true);
+		this._openHeight = Math.max(MIN_OPEN_HEIGHT, this._storageService.getNumber(OPEN_HEIGHT_STORAGE_KEY, StorageScope.PROFILE, DEFAULT_OPEN_HEIGHT));
 
 		this.element = DOM.append(parent, $('.agent-sessions-agents-tree-section'));
 		const header = this._header = DOM.append(this.element, $('.session-section.agents-tree-section-header'));
@@ -82,6 +85,28 @@ export class SessionsAgentsTreeSection extends Disposable {
 		return this._collapsed;
 	}
 
+	/** Height of the folded section: just its header. */
+	get collapsedHeight(): number {
+		return HEADER_HEIGHT;
+	}
+
+	get minimumOpenHeight(): number {
+		return MIN_OPEN_HEIGHT;
+	}
+
+	/** Height of the open section, as the user last dragged it. */
+	get openHeight(): number {
+		return this._openHeight;
+	}
+
+	set openHeight(height: number) {
+		height = Math.max(MIN_OPEN_HEIGHT, Math.round(height));
+		if (height !== this._openHeight) {
+			this._openHeight = height;
+			this._storageService.store(OPEN_HEIGHT_STORAGE_KEY, height, StorageScope.PROFILE, StorageTarget.USER);
+		}
+	}
+
 	toggle(): void {
 		this.setCollapsed(!this._collapsed);
 	}
@@ -111,16 +136,9 @@ export class SessionsAgentsTreeSection extends Disposable {
 		this._control.setVisible(visible && !this._collapsed);
 	}
 
-	/**
-	 * Sizes the section within the height of the Sessions part and returns the height it takes.
-	 */
-	layout(availableHeight: number): number {
-		const height = this._collapsed
-			? HEADER_HEIGHT
-			: Math.min(availableHeight, Math.max(OPEN_MIN_HEIGHT, Math.round(availableHeight * OPEN_HEIGHT_RATIO)));
+	layout(height: number): void {
 		this.element.style.height = `${height}px`;
 		this._control.layout(Math.max(0, height - HEADER_HEIGHT));
-		return height;
 	}
 
 	private _update(): void {

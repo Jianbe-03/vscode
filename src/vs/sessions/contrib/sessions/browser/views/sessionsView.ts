@@ -62,6 +62,8 @@ const SORTING_STORAGE_KEY = 'sessionsViewPane.sorting';
 const COMPACT_STORAGE_KEY = 'sessionsViewPane.compact';
 const CUSTOMIZATIONS_MIN_HEIGHT = 129;
 const SESSIONS_SECTION_MIN_HEIGHT = 120;
+/** CreaEditor: the Agents pane sits right below the Sessions list. */
+const AGENTS_TREE_PANE_INDEX = 1;
 const SESSIONS_HEADER_ELLIPSIS_MIN_WIDTH = 8;
 export type CustomizationsPresentation = 'hidden' | 'control' | 'treatment';
 
@@ -362,14 +364,6 @@ export class SessionsView extends ViewPane {
 			}
 		}));
 
-		// CreaEditor: the Agents section folds open below the Sessions list to show the Agents tree.
-		if (!phoneLayout) {
-			const agentsTreeSection = this.agentsTreeSection = this._register(this.instantiationService.createInstance(SessionsAgentsTreeSection, sessionsContent));
-			agentsTreeSection.setHostVisible(this.isBodyVisible());
-			this._register(this.onDidChangeBodyVisibility(visible => agentsTreeSection.setHostVisible(visible)));
-			this._register(agentsTreeSection.onDidChangeHeight(() => this.layoutSidebarSplitView()));
-		}
-
 		// Mobile filter chips (phone layout only) — created after sessionsControl
 		// so we can wire it as the filter host.
 		if (filterChipsContainer) {
@@ -406,12 +400,15 @@ export class SessionsView extends ViewPane {
 			onDidChange: Event.None,
 			layout: height => {
 				sessionsSection.style.height = `${height}px`;
-				this.agentsTreeSection?.layout(height);
 				this.sessionsControl?.layout(this.sessionsControlContainer?.offsetHeight ?? 0, this.currentBodyWidth);
 			},
 		};
 
 		this.sidebarSplitView.addView(sessionsPane, Sizing.Distribute, 0, true);
+		// CreaEditor: the Agents pane below the Sessions list; it folds open to show the Agents tree and its sash resizes it.
+		if (!phoneLayout) {
+			this.addAgentsTreePane(this.sidebarSplitView, this.sidebarSplitViewContainer);
+		}
 		const aiVisibilityChanged = observableSignalFromEvent(this, this.scopedContextKeyService.onDidChangeContext);
 		this._register(autorun(reader => {
 			aiVisibilityChanged.read(reader);
@@ -500,11 +497,40 @@ export class SessionsView extends ViewPane {
 		this.layoutSidebarSplitView();
 	}
 
+	private addAgentsTreePane(splitView: SplitView, container: HTMLElement): void {
+		const section = this.agentsTreeSection = this._register(this.instantiationService.createInstance(SessionsAgentsTreeSection, container));
+		section.setHostVisible(this.isBodyVisible());
+		this._register(this.onDidChangeBodyVisibility(visible => section.setHostVisible(visible)));
+		const pane: IView = {
+			element: section.element,
+			get minimumSize() { return section.collapsed ? section.collapsedHeight : section.minimumOpenHeight; },
+			get maximumSize() { return section.collapsed ? section.collapsedHeight : Number.POSITIVE_INFINITY; },
+			onDidChange: Event.map(section.onDidChangeHeight, () => undefined),
+			layout: height => section.layout(height),
+		};
+		splitView.addView(pane, section.collapsed ? section.collapsedHeight : section.openHeight, AGENTS_TREE_PANE_INDEX, true);
+		this._register(section.onDidChangeHeight(() => {
+			splitView.resizeView(AGENTS_TREE_PANE_INDEX, section.collapsed ? section.collapsedHeight : section.openHeight);
+			this.layoutSidebarSplitView();
+		}));
+		// Remember the height the user drags the open pane to.
+		this._register(splitView.onDidSashChange(() => {
+			if (!section.collapsed) {
+				section.openHeight = splitView.getViewSize(AGENTS_TREE_PANE_INDEX);
+			}
+		}));
+	}
+
+	/** CreaEditor: the Customizations pane comes after the Agents pane when there is one. */
+	private get customizationsPaneIndex(): number {
+		return this.agentsTreeSection ? AGENTS_TREE_PANE_INDEX + 1 : 1;
+	}
+
 	private removeCustomizationsPane(): void {
 		if (!this.sidebarSplitView || !this._customizationsWidget) {
 			return;
 		}
-		this.sidebarSplitView.removeView(1, Sizing.Distribute);
+		this.sidebarSplitView.removeView(this.customizationsPaneIndex, Sizing.Distribute);
 		this._customizationsWidget = undefined;
 		this.customizationsPaneDisposables.clear();
 		this.didInitializePaneSizes = false;
@@ -543,7 +569,7 @@ export class SessionsView extends ViewPane {
 				customizationsWidget.layout(height, this.currentBodyWidth);
 			},
 		};
-		this.sidebarSplitView.addView(customizationsPane, this.getCustomizationsPaneHeight(), 1, true);
+		this.sidebarSplitView.addView(customizationsPane, this.getCustomizationsPaneHeight(), this.customizationsPaneIndex, true);
 
 		let savedCustomizationsPaneHeight = this.getCustomizationsPaneHeight();
 		store.add(customizationsWidget.onDidToggleCollapsed(collapsed => {
@@ -551,13 +577,13 @@ export class SessionsView extends ViewPane {
 				return;
 			}
 			if (collapsed) {
-				const currentSize = this.sidebarSplitView.getViewSize(1);
+				const currentSize = this.sidebarSplitView.getViewSize(this.customizationsPaneIndex);
 				if (currentSize > customizationsWidget.collapsedHeight) {
 					savedCustomizationsPaneHeight = currentSize;
 				}
-				this.sidebarSplitView.resizeView(1, customizationsWidget.collapsedHeight);
+				this.sidebarSplitView.resizeView(this.customizationsPaneIndex, customizationsWidget.collapsedHeight);
 			} else {
-				this.sidebarSplitView.resizeView(1, savedCustomizationsPaneHeight);
+				this.sidebarSplitView.resizeView(this.customizationsPaneIndex, savedCustomizationsPaneHeight);
 			}
 			this.layoutSidebarSplitView();
 		}));
@@ -807,7 +833,10 @@ export class SessionsView extends ViewPane {
 		if (!this.didInitializePaneSizes) {
 			this.didInitializePaneSizes = true;
 			if (this._customizationsWidget) {
-				this.sidebarSplitView.resizeView(1, this.getCustomizationsPaneHeight());
+				this.sidebarSplitView.resizeView(this.customizationsPaneIndex, this.getCustomizationsPaneHeight());
+			}
+			if (this.agentsTreeSection) {
+				this.sidebarSplitView.resizeView(AGENTS_TREE_PANE_INDEX, this.agentsTreeSection.collapsed ? this.agentsTreeSection.collapsedHeight : this.agentsTreeSection.openHeight);
 			}
 		}
 	}
