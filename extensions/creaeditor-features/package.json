@@ -55,6 +55,18 @@
             ]
           },
           {
+            "id": "gatewayKeys",
+            "title": "%step.gatewayKeys.title%",
+            "description": "%step.gatewayKeys.description%",
+            "media": {
+              "image": "media/gateway-keys.svg",
+              "altText": "%step.gatewayKeys.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.addOpenRouterModel"
+            ]
+          },
+          {
             "id": "agentsWindow",
             "title": "%step.agentsWindow.title%",
             "description": "%step.agentsWindow.description%",
@@ -119,8 +131,21 @@
             "title": "%step.subscriptionAccounts.title%",
             "description": "%step.subscriptionAccounts.description%",
             "media": {
-              "image": "media/subscription-accounts.svg",
+              "image": "media/account-switch.svg",
               "altText": "%step.subscriptionAccounts.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.addClaudeAccount",
+              "onCommand:workbench.action.chat.addCodexAccount"
+            ]
+          },
+          {
+            "id": "subscriptionUsage",
+            "title": "%step.subscriptionUsage.title%",
+            "description": "%step.subscriptionUsage.description%",
+            "media": {
+              "image": "media/subscription-accounts.svg",
+              "altText": "%step.subscriptionUsage.title%"
             },
             "completionEvents": [
               "onCommand:workbench.action.chat.showSubscriptionUsage"
