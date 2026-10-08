@@ -785,3 +785,169 @@ export function getChangedChats(previous: ReadonlyMap<string, ICostAggregate>, n
 	}
 	return changed;
 }
+
+/** What a budget limits: the requests of a key (provider group), an issue or a repository. */
+export type CostBudgetScope = 'key' | 'issue' | 'repo';
+
+export type CostBudgetPeriod = 'day' | 'week' | 'month';
+
+/** The warning thresholds of a budget without its own, in percent of the amount. */
+export const DEFAULT_BUDGET_WARN_AT: readonly number[] = [80, 100];
+
+/** A user-defined budget, e.g. "warn at $50 per month on the Personal key". */
+export interface ICostBudget {
+	readonly id: string;
+	readonly scope: CostBudgetScope;
+	/** Key (provider group) name, issue label as the ledger shows it (`owner/repo#42`, `PROJ-7`) or `owner/repo`. */
+	readonly value: string;
+	/** USD per period. */
+	readonly amount: number;
+	readonly period: CostBudgetPeriod;
+	/** Percentages of the amount that raise an alert, ascending. */
+	readonly warnAt: readonly number[];
+	/** Refuse the requests of the scope once the amount is spent. */
+	readonly hardStop: boolean;
+}
+
+/** The spend of a budget in its current period. */
+export interface ICostBudgetStatus {
+	readonly budget: ICostBudget;
+	readonly spent: number;
+	/** Spent share of the amount, 0 and up (above 1 when overspent). */
+	readonly share: number;
+	/** Epoch milliseconds of the period, `to` exclusive. */
+	readonly from: number;
+	readonly to: number;
+	/** The thresholds of {@link ICostBudget.warnAt} that are reached. */
+	readonly reached: readonly number[];
+	/** Whether the whole amount is spent. */
+	readonly exhausted: boolean;
+}
+
+/** An alert to raise for a budget: one per threshold per period, identified by {@link key}. */
+export interface ICostBudgetAlert {
+	readonly key: string;
+	readonly status: ICostBudgetStatus;
+	readonly threshold: number;
+}
+
+/** What a request is for, as the ledger would record it. */
+export interface ICostBudgetRequest {
+	readonly providerGroup?: string;
+	/** Issue label as {@link formatIssue} makes it. */
+	readonly issue?: string;
+	readonly repo?: string;
+}
+
+const BUDGET_SCOPES: readonly CostBudgetScope[] = ['key', 'issue', 'repo'];
+const BUDGET_PERIODS: readonly CostBudgetPeriod[] = ['day', 'week', 'month'];
+
+/**
+ * Reads the budgets from the `creaeditor.aiCosts.budgets` setting. Entries that are not valid budgets
+ * are left out; a budget without an id gets one from its scope, value and period.
+ */
+export function parseCostBudgets(value: unknown): ICostBudget[] {
+	if (!Array.isArray(value)) {
+		return [];
+	}
+	const result: ICostBudget[] = [];
+	const ids = new Set<string>();
+	for (const item of value) {
+		if (!item || typeof item !== 'object') {
+			continue;
+		}
+		const raw = item as Record<string, unknown>;
+		const scope = BUDGET_SCOPES.find(scope => scope === raw.scope);
+		const period = BUDGET_PERIODS.find(period => period === raw.period) ?? 'month';
+		const amount = typeof raw.amount === 'number' && Number.isFinite(raw.amount) && raw.amount > 0 ? raw.amount : undefined;
+		const budgetValue = typeof raw.value === 'string' ? raw.value.trim() : '';
+		if (!scope || amount === undefined || !budgetValue) {
+			continue;
+		}
+		const warnAt = Array.isArray(raw.warnAt)
+			? [...new Set(raw.warnAt.filter((percent): percent is number => typeof percent === 'number' && Number.isFinite(percent) && percent > 0))].sort((a, b) => a - b)
+			: [...DEFAULT_BUDGET_WARN_AT];
+		let id = typeof raw.id === 'string' && raw.id ? raw.id : `${scope}:${budgetValue}:${period}`;
+		while (ids.has(id)) {
+			id += '+';
+		}
+		ids.add(id);
+		result.push({ id, scope, value: budgetValue, amount, period, warnAt, hardStop: raw.hardStop === true });
+	}
+	return result;
+}
+
+/** The current day, week (from Monday) or month of a budget in local time, `to` exclusive. */
+export function getBudgetPeriodRange(period: CostBudgetPeriod, now: number): { readonly from: number; readonly to: number } {
+	const start = bucketStart(now, period);
+	return { from: start.getTime(), to: nextBucket(start, period).getTime() };
+}
+
+function budgetMatchesEntry(budget: ICostBudget, entry: IGatewayCostEntry): boolean {
+	return budgetMatchesRequest(budget, { providerGroup: entry.providerGroup, issue: formatIssue(entry.issue, entry.repo), repo: entry.repo });
+}
+
+/** Whether a request falls in the scope of a budget. */
+export function budgetMatchesRequest(budget: ICostBudget, request: ICostBudgetRequest): boolean {
+	switch (budget.scope) {
+		case 'key': return request.providerGroup === budget.value;
+		case 'issue': return request.issue === budget.value;
+		case 'repo': return request.repo === budget.value;
+	}
+}
+
+/** The spend of every budget in its current period, from the ledger. */
+export function computeBudgetStatuses(budgets: readonly ICostBudget[], entries: readonly IGatewayCostEntry[], now: number): ICostBudgetStatus[] {
+	return budgets.map(budget => {
+		const { from, to } = getBudgetPeriodRange(budget.period, now);
+		let spent = 0;
+		for (const entry of entries) {
+			if (entry.time >= from && entry.time < to && entry.cost !== undefined && budgetMatchesEntry(budget, entry)) {
+				spent += entry.cost;
+			}
+		}
+		const share = spent / budget.amount;
+		return { budget, spent, share, from, to, reached: budget.warnAt.filter(percent => share * 100 >= percent), exhausted: spent >= budget.amount };
+	});
+}
+
+/**
+ * The alerts that were not raised yet. Only the highest reached threshold of a budget is raised, so a
+ * budget that jumps from 70% to 105% says "used up" once instead of also "80% used".
+ * @param raised keys of the alerts raised before, see {@link ICostBudgetAlert.key}
+ */
+export function getNewBudgetAlerts(statuses: readonly ICostBudgetStatus[], raised: ReadonlySet<string>): ICostBudgetAlert[] {
+	const alerts: ICostBudgetAlert[] = [];
+	for (const status of statuses) {
+		const keys = status.reached.map(threshold => ({ threshold, key: getBudgetAlertKey(status, threshold) }));
+		const highest = keys.at(-1);
+		if (highest && !raised.has(highest.key)) {
+			alerts.push({ key: highest.key, status, threshold: highest.threshold });
+		}
+	}
+	return alerts;
+}
+
+/** The key of the alert of a threshold of a budget in the current period. Lower thresholds of the period count as raised too. */
+export function getBudgetAlertKeys(status: ICostBudgetStatus): string[] {
+	return status.reached.map(threshold => getBudgetAlertKey(status, threshold));
+}
+
+function getBudgetAlertKey(status: ICostBudgetStatus, threshold: number): string {
+	const { budget } = status;
+	return `${budget.id}|${budget.amount}|${status.from}|${threshold}`;
+}
+
+/**
+ * The used up budget with a hard stop that refuses a request, if any; the one used up the furthest
+ * when several are. Only budgets with a hard stop are looked at, so this is cheap without them.
+ */
+export function findHardStopBudget(budgets: readonly ICostBudget[], entries: readonly IGatewayCostEntry[], request: ICostBudgetRequest, now: number): ICostBudgetStatus | undefined {
+	const relevant = budgets.filter(budget => budget.hardStop && budgetMatchesRequest(budget, request));
+	if (!relevant.length) {
+		return undefined;
+	}
+	return computeBudgetStatuses(relevant, entries, now)
+		.filter(status => status.exhausted)
+		.sort((a, b) => b.share - a.share)[0];
+}

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { IGatewayCostEntry } from '../../../../platform/endpoint/common/gatewayTrackingService';
-import { chooseCostBucket, computeChatCosts, computeCostBreakdown, computeCostChange, computeCostComparison, computeCostKpis, computeCostPivot, computeCostTimeline, filterCostRows, getChangedChats, ICostQueryOptions, OTHER_VALUE, percentile, prepareCostDataset, resolveCostRange, resolvePreviousCostRange, runCostQuery, sortCostRows } from '../gatewayCostsAnalysis';
+import { chooseCostBucket, computeBudgetStatuses, computeChatCosts, computeCostBreakdown, computeCostChange, computeCostComparison, computeCostKpis, computeCostPivot, computeCostTimeline, filterCostRows, findHardStopBudget, getBudgetAlertKeys, getBudgetPeriodRange, getChangedChats, getNewBudgetAlerts, ICostQueryOptions, OTHER_VALUE, parseCostBudgets, percentile, prepareCostDataset, resolveCostRange, resolvePreviousCostRange, runCostQuery, sortCostRows } from '../gatewayCostsAnalysis';
 
 /** Wednesday 15 October 2025, 12:00 local time. */
 const NOW = new Date(2025, 9, 15, 12).getTime();
@@ -286,5 +286,83 @@ describe('cost per chat', () => {
 			changed: ['chat1', 'new', 'old'],
 			unchanged: [],
 		});
+	});
+});
+
+describe('budgets', () => {
+	const budgets = parseCostBudgets([
+		{ scope: 'key', value: 'Team', amount: 1, period: 'month', hardStop: true },
+		{ scope: 'repo', value: 'acme/web', amount: 0.5, period: 'week', warnAt: [100, 50, 50] },
+		{ scope: 'issue', value: 'acme/web#42', amount: 10, period: 'day' },
+		{ scope: 'key', value: 'Private', amount: 5 },
+		{ scope: 'model', value: 'x', amount: 1 },
+		{ scope: 'key', value: '', amount: 1 },
+		{ scope: 'key', value: 'Team', amount: -1 },
+		'nonsense',
+	]);
+
+	it('reads valid budgets from the setting', () => {
+		expect(budgets.map(b => [b.id, b.scope, b.value, b.amount, b.period, b.warnAt, b.hardStop])).toEqual([
+			['key:Team:month', 'key', 'Team', 1, 'month', [80, 100], true],
+			['repo:acme/web:week', 'repo', 'acme/web', 0.5, 'week', [50, 100], false],
+			['issue:acme/web#42:day', 'issue', 'acme/web#42', 10, 'day', [80, 100], false],
+			['key:Private:month', 'key', 'Private', 5, 'month', [80, 100], false],
+		]);
+		expect(parseCostBudgets(undefined)).toEqual([]);
+	});
+
+	it('resolves the current period in local time', () => {
+		const range = (period: Parameters<typeof getBudgetPeriodRange>[0]) => {
+			const { from, to } = getBudgetPeriodRange(period, NOW);
+			return [new Date(from).toDateString(), new Date(to).toDateString()];
+		};
+		expect([range('day'), range('week'), range('month')]).toEqual([
+			['Wed Oct 15 2025', 'Thu Oct 16 2025'],
+			['Mon Oct 13 2025', 'Mon Oct 20 2025'],
+			['Wed Oct 01 2025', 'Sat Nov 01 2025'],
+		]);
+	});
+
+	it('computes the spend of every budget in its period', () => {
+		const statuses = computeBudgetStatuses(budgets, ENTRIES, NOW);
+		expect(statuses.map(s => [s.budget.id, s.spent, s.reached, s.exhausted])).toEqual([
+			// The September request is outside this month.
+			['key:Team:month', 0.75, [], false],
+			['repo:acme/web:week', 0.75, [50, 100], true],
+			['issue:acme/web#42:day', 0, [], false],
+			['key:Private:month', 2, [], false],
+		]);
+	});
+
+	it('raises the highest reached threshold once per period', () => {
+		const statuses = computeBudgetStatuses(budgets, ENTRIES, NOW);
+		const first = getNewBudgetAlerts(statuses, new Set());
+		expect(first.map(a => [a.status.budget.id, a.threshold])).toEqual([['repo:acme/web:week', 100]]);
+		const raised = new Set(statuses.flatMap(getBudgetAlertKeys));
+		expect(getNewBudgetAlerts(statuses, raised)).toEqual([]);
+		// A raised amount starts over.
+		const raisedBudget = parseCostBudgets([{ scope: 'repo', value: 'acme/web', amount: 0.9, period: 'week' }]);
+		expect(getNewBudgetAlerts(computeBudgetStatuses(raisedBudget, ENTRIES, NOW), raised).map(a => a.threshold)).toEqual([80]);
+		const nextWeek = NOW + 7 * 24 * 60 * 60 * 1000;
+		expect(getNewBudgetAlerts(computeBudgetStatuses(budgets, [...ENTRIES, entry(nextWeek, { cost: 0.3, repo: 'acme/web' })], nextWeek), raised).map(a => [a.status.budget.id, a.threshold])).toEqual([['repo:acme/web:week', 50]]);
+	});
+
+	it('refuses requests in the scope of a used up budget with a hard stop', () => {
+		const hardStop = parseCostBudgets([
+			{ scope: 'key', value: 'Team', amount: 0.75, hardStop: true },
+			{ scope: 'repo', value: 'acme/web', amount: 0.1, period: 'day', hardStop: true },
+			{ scope: 'key', value: 'Private', amount: 1 },
+		]);
+		const decide = (request: Parameters<typeof findHardStopBudget>[2]) => findHardStopBudget(hardStop, ENTRIES, request, NOW)?.budget.id;
+		expect({
+			teamKey: decide({ providerGroup: 'Team' }),
+			// Private is used up but only warns.
+			privateKey: decide({ providerGroup: 'Private' }),
+			// Nothing was spent in acme/web today.
+			repoToday: decide({ providerGroup: 'Other', repo: 'acme/web' }),
+			otherKey: decide({ providerGroup: 'Other' }),
+		}).toEqual({ teamKey: 'key:Team:month', privateKey: undefined, repoToday: undefined, otherKey: undefined });
+		const later = at(10, 15, 11);
+		expect(findHardStopBudget(hardStop, [...ENTRIES, entry(later, { cost: 0.2, repo: 'acme/web', providerGroup: 'Other' })], { providerGroup: 'Other', repo: 'acme/web' }, NOW)?.budget.id).toBe('repo:acme/web:day');
 	});
 });
