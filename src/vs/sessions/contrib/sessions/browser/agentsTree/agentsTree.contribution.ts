@@ -3,7 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: the Toggle Agents Tree, Open AI Costs, Subscription Usage and Stop All Chats buttons in the Sessions header of the Agents window.
+// CreaEditor: the Toggle Agents Tree, Show AI Costs, Show Subscription Usage and Stop All Chats buttons in the Sessions header of the Agents window.
 // The Agents tree itself is a section of the Sessions view, see `SessionsAgentsTreeSection`.
 
 import { Codicon } from '../../../../../base/common/codicons.js';
@@ -16,20 +16,15 @@ import { registerIcon } from '../../../../../platform/theme/common/iconRegistry.
 import { IsSessionsWindowContext } from '../../../../../workbench/common/contextkeys.js';
 import { CHAT_CATEGORY } from '../../../../../workbench/contrib/chat/browser/actions/chatActions.js';
 import { ChatHasRunningChatsContext, STOP_ALL_CHATS_COMMAND_ID, stopAllChatsIcon } from '../../../../../workbench/contrib/chat/browser/actions/chatStopAllActions.js';
+import { SHOW_AI_COSTS_ACTION_ID } from '../../../../../workbench/contrib/chat/browser/gatewayCost/chatGatewayCost.js';
 import { SHOW_SUBSCRIPTION_USAGE_COMMAND_ID } from '../../../../../workbench/contrib/chat/browser/subscriptionAccounts/subscriptionAccountsLimit.js';
 import { ChatContextKeys } from '../../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { IViewsService } from '../../../../../workbench/services/views/common/viewsService.js';
 import { Menus } from '../../../../browser/menus.js';
 import { SessionsView, SessionsViewId } from '../views/sessionsView.js';
 
-/** Command of the Copilot extension that opens the AI Costs page (cost per issue and chat). */
-const SHOW_AI_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
-
-/** Maximizes the editor area of the Agents window over the chat (see the sessions editor contribution). */
-const MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID = 'workbench.action.agentSessions.maximizeMainEditorPart';
-
-const aiCostsIcon = registerIcon('sessions-ai-costs-icon', Codicon.creditCard, localize('sessionsAiCostsIcon', "Icon of the Open AI Costs action in the Agents window."));
-const subscriptionUsageIcon = registerIcon('sessions-subscription-usage-icon', Codicon.pulse, localize('sessionsSubscriptionUsageIcon', "Icon of the Subscription Usage action in the Agents window."));
+const aiCostsIcon = registerIcon('sessions-ai-costs-icon', Codicon.creditCard, localize('sessionsAiCostsIcon', "Icon of the Show AI Costs action in the Agents window."));
+const subscriptionUsageIcon = registerIcon('sessions-subscription-usage-icon', Codicon.pulse, localize('sessionsSubscriptionUsageIcon', "Icon of the Show Subscription Usage action in the Agents window."));
 const agentsTreeIcon = registerIcon('sessions-agents-tree-view-icon', Codicon.typeHierarchySub, localize('sessionsAgentsTreeViewIcon', "Icon of the Toggle Agents Tree action in the Agents window."));
 
 class ToggleSessionsAgentsTreeAction extends Action2 {
@@ -56,28 +51,26 @@ class ToggleSessionsAgentsTreeAction extends Action2 {
 registerAction2(ToggleSessionsAgentsTreeAction);
 
 /**
- * Opens the AI Costs page of the Copilot extension. The extension runs in the Agents window too,
- * so the page opens as a webview editor, maximized over the chat.
+ * Opens the AI Costs page of the Copilot extension, maximized over the chat. In the Command Palette
+ * it is "Chat: Show AI Costs", which works in every window.
  */
 class OpenAiCostsAction extends Action2 {
 	constructor() {
 		super({
 			id: 'sessions.action.openAiCosts',
-			title: localize2('sessions.openAiCosts', "Open AI Costs"),
+			title: localize2('sessions.openAiCosts', "Show AI Costs"),
+			tooltip: localize2('sessions.openAiCostsTooltip', "Show AI Costs per Issue, Chat and Key"),
 			category: CHAT_CATEGORY,
 			icon: aiCostsIcon,
 			precondition: IsSessionsWindowContext,
 			menu: [
-				{ id: MenuId.CommandPalette, when: IsSessionsWindowContext },
 				{ id: Menus.SidebarSessionsHeader, group: 'navigation', order: 40 },
 			],
 		});
 	}
 
 	override async run(accessor: ServicesAccessor): Promise<void> {
-		const commandService = accessor.get(ICommandService);
-		await commandService.executeCommand(SHOW_AI_COSTS_COMMAND_ID);
-		await commandService.executeCommand(MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID);
+		await accessor.get(ICommandService).executeCommand(SHOW_AI_COSTS_ACTION_ID);
 	}
 }
 registerAction2(OpenAiCostsAction);
@@ -86,7 +79,8 @@ class OpenSubscriptionUsageAction extends Action2 {
 	constructor() {
 		super({
 			id: 'sessions.action.openSubscriptionUsage',
-			title: localize2('sessions.openSubscriptionUsage', "Subscription Usage"),
+			title: localize2('sessions.openSubscriptionUsage', "Show Subscription Usage"),
+			tooltip: localize2('sessions.openSubscriptionUsageTooltip', "Show What Is Left of Your Claude and Codex Accounts"),
 			category: CHAT_CATEGORY,
 			icon: subscriptionUsageIcon,
 			precondition: IsSessionsWindowContext,
@@ -109,6 +103,7 @@ MenuRegistry.appendMenuItem(Menus.SidebarSessionsHeader, {
 	command: {
 		id: STOP_ALL_CHATS_COMMAND_ID,
 		title: localize2('sessions.stopAllChats', "Stop All Chats"),
+		tooltip: localize2('sessions.stopAllChatsTooltip', "Stop All Running Chats in Every Window"),
 		icon: stopAllChatsIcon,
 		precondition: ChatHasRunningChatsContext,
 	},

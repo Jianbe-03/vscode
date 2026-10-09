@@ -29,6 +29,7 @@ import { isChatViewTitleActionContext } from '../../common/actions/chatActions.j
 import { LocalChatSessionUri } from '../../common/model/chatUri.js';
 import { IChatWidgetService } from '../chat.js';
 import { ChatEditorInput } from '../widgetHosts/editor/chatEditorInput.js';
+import { CHAT_CATEGORY } from '../actions/chatActions.js';
 
 /** Command of the Copilot extension returning the cost per chat for a list of chat ids. */
 const GET_CHAT_COSTS_COMMAND_ID = 'creaeditor.aiCosts.getChatCosts';
@@ -41,6 +42,8 @@ const MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID = 'workbench.action.agentSessions.max
 
 /** The action behind the counter; its menu items get a {@link ChatGatewayCostActionViewItem}. */
 export const SHOW_CHAT_GATEWAY_COST_ACTION_ID = 'workbench.action.chat.showGatewayCost';
+/** Opens the AI Costs page in any window: in the Agents window it covers the chat. */
+export const SHOW_AI_COSTS_ACTION_ID = 'workbench.action.chat.showAiCosts';
 
 /** Gateway cost of a chat, the requests of its subagents included. */
 export interface IChatGatewayCost {
@@ -254,6 +257,31 @@ registerAction2(class ShowChatGatewayCostAction extends Action2 {
 		const contextResource = (context as { sessionResource?: unknown } | undefined)?.sessionResource;
 		const sessionResource = URI.isUri(contextResource) ? contextResource : accessor.get(IChatWidgetService).lastFocusedWidget?.viewModel?.sessionResource;
 		await commandService.executeCommand(SHOW_AI_COSTS_COMMAND_ID, sessionResource ? { chatId: getChatCostId(sessionResource) } : undefined);
+		if (isSessionsWindow) {
+			await commandService.executeCommand(MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID);
+		}
+	}
+});
+
+/**
+ * "Chat: Show AI Costs" in the Command Palette of both windows (the command of the Copilot extension
+ * itself stays out of it): opens the AI Costs page, and in the Agents window maximizes it over the chat.
+ */
+registerAction2(class ShowAiCostsAction extends Action2 {
+	constructor() {
+		super({
+			id: SHOW_AI_COSTS_ACTION_ID,
+			title: localize2('showAiCosts', "Show AI Costs"),
+			category: CHAT_CATEGORY,
+			icon: Codicon.creditCard,
+			f1: true,
+		});
+	}
+
+	override async run(accessor: ServicesAccessor): Promise<void> {
+		const commandService = accessor.get(ICommandService);
+		const isSessionsWindow = accessor.get(IWorkbenchEnvironmentService).isSessionsWindow;
+		await commandService.executeCommand(SHOW_AI_COSTS_COMMAND_ID);
 		if (isSessionsWindow) {
 			await commandService.executeCommand(MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID);
 		}

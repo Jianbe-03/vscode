@@ -4099,14 +4099,14 @@
       },
       {
         "command": "creaeditor.showAiCosts",
-        "title": "Show AI Costs per Issue and Chat",
-        "category": "CreaEditor",
+        "title": "%creaeditor.command.showAiCosts%",
+        "category": "Chat",
         "icon": "$(credit-card)"
       },
       {
         "command": "creaeditor.aiCosts.addBudget",
         "title": "%creaeditor.command.addAiBudget%",
-        "category": "CreaEditor"
+        "category": "Chat"
       }
     ],
     "configuration": [
@@ -6555,6 +6555,10 @@
         }
       ],
       "commandPalette": [
+        {
+          "command": "creaeditor.showAiCosts",
+          "when": "false"
+        },
         {
           "command": "github.copilot.cli.openInCopilotCLI",
           "when": "false"
