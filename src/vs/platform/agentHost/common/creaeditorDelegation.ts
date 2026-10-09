@@ -1,0 +1,354 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+// CreaEditor: Delegate to Server moves a chat from this machine to a CreaEditor Server: its code (a git
+// bundle), its conversation (the agent's own session files, so it resumes as the same session) and the
+// accounts it needs (encrypted for the server). The chat then runs on the server in its own worktree;
+// its results come back as a local branch (Bring Back Changes) or a pull request the server opens.
+//
+// Transport: the server's Remote Access HTTP API, authenticated with this device's key (`Authorization:
+// Bearer <deviceKey>`), under `CREAEDITOR_DELEGATION_API_PREFIX`. Bundles go up in chunks so progress is
+// visible and a dropped connection resumes where it stopped. See `node/creaeditorDelegation/README.md`.
+
+import { Event } from '../../../base/common/event.js';
+import { createDecorator } from '../../instantiation/common/instantiation.js';
+
+export const CREAEDITOR_DELEGATION_CHANNEL_NAME = 'creaeditorDelegation';
+
+/** The HTTP API of a CreaEditor Server for delegated chats. */
+export const CREAEDITOR_DELEGATION_API_PREFIX = '/api/delegation/';
+
+/** Branches of delegated chats on the server: `creaeditor/delegated/<shortId>`. */
+export const CREAEDITOR_DELEGATION_BRANCH_PREFIX = 'creaeditor/delegated/';
+
+/** The ref names inside a delegation bundle (under a temporary namespace). */
+export const CREAEDITOR_DELEGATION_BUNDLE_HEAD_REF = 'head';
+export const CREAEDITOR_DELEGATION_BUNDLE_SNAPSHOT_REF = 'snapshot';
+
+/** Upload chunk size. */
+export const CREAEDITOR_DELEGATION_CHUNK_BYTES = 4 * 1024 * 1024;
+
+/** The default largest code upload, in MB (setting {@link DelegationMaxUploadSettingId}). */
+export const CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB = 500;
+export const DelegationMaxUploadSettingId = 'creaeditor.delegation.maxUploadMB';
+
+/** Untracked files that match one of these stay on this machine unless the user includes them. */
+export const CREAEDITOR_DELEGATION_SECRET_FILE_GLOBS: readonly string[] = [
+	'**/.env',
+	'**/.env.*',
+	'**/*.pem',
+	'**/*.key',
+	'**/*.p12',
+	'**/*.pfx',
+	'**/id_rsa*',
+	'**/id_ed25519*',
+	'**/id_ecdsa*',
+	'**/.netrc',
+	'**/.npmrc',
+	'**/.pypirc',
+	'**/credentials.json',
+	'**/secrets.json',
+];
+
+/** The command that starts Delegate to Server (from the chat panel's Continue Chat in... and the Agents window). */
+export const CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID = 'creaeditor.delegation.delegateToServer';
+/** Bring Back Changes of a delegated chat. */
+export const CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID = 'creaeditor.delegation.bringBackChanges';
+/** Open PR from the Server for a delegated chat. */
+export const CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID = 'creaeditor.delegation.openPullRequestFromServer';
+/** Set GitHub Token on Server. */
+export const CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID = 'creaeditor.delegation.setServerGitHubToken';
+
+export const enum DelegationErrorCode {
+	NotARepository = 'notARepository',
+	NoCommits = 'noCommits',
+	TooLarge = 'tooLarge',
+	InvalidRequest = 'invalidRequest',
+	MissingHistory = 'missingHistory',
+	NotFound = 'notFound',
+	BranchCheckedOut = 'branchCheckedOut',
+	NotGitHub = 'notGitHub',
+	PushFailed = 'pushFailed',
+	PullRequestFailed = 'pullRequestFailed',
+	GhMissing = 'ghMissing',
+	NoGitHubToken = 'noGitHubToken',
+	Unauthorized = 'unauthorized',
+	Offline = 'offline',
+	NotSupported = 'notSupported',
+	Unexpected = 'unexpected',
+}
+
+/** How the results of a delegated chat come back. */
+export const enum DelegationResultsMode {
+	/** The laptop fetches the server's branch into `creaeditor/from-<server>/<shortId>`. */
+	BringBack = 'bringBack',
+	/** The server pushes its branch and opens a pull request with its own GitHub token. */
+	PullRequest = 'pullRequest',
+}
+
+/** Which agent's session files are sent so the chat resumes as the same session. */
+export const enum DelegationAgentKind {
+	Claude = 'claude',
+	Codex = 'codex',
+	CopilotCli = 'copilotcli',
+	/** No session files: the conversation goes along as a transcript attachment. */
+	Transcript = 'transcript',
+}
+
+/** A session file of an agent, sent to the server. */
+export interface IDelegationSessionFile {
+	/** Path relative to the agent's own folder on the server (validated there: no `..`, no absolute paths). */
+	readonly relativePath: string;
+	/** Base64 content (already rewritten for the server's folder where needed). */
+	readonly content: string;
+}
+
+/** The accounts and keys a delegated chat needs; sent encrypted (see `delegationCrypto.ts`). */
+export interface IDelegationAccountsPayload {
+	/** Claude setup-token accounts (`CLAUDE_CODE_OAUTH_TOKEN`), added on the server as token accounts. */
+	readonly claudeTokens?: readonly { readonly accountId: string; readonly label: string; readonly token: string }[];
+	/** The OpenRouter/LiteLLM key of the chat's model; the chat on the server only uses this key. */
+	readonly gatewayKey?: { readonly providerId: string; readonly label: string; readonly baseUrl?: string; readonly key: string };
+}
+
+/** An encrypted payload (X25519 + HKDF-SHA256 + AES-256-GCM, see `node/creaeditorDelegation/delegationCrypto.ts`). */
+export interface IDelegationEnvelope {
+	readonly version: 1;
+	/** The sender's ephemeral X25519 public key (SPKI DER, base64). */
+	readonly ephemeralPublicKey: string;
+	readonly iv: string;
+	readonly tag: string;
+	readonly data: string;
+}
+
+/**
+ * The AHP `authenticate` resource that carries the encrypted {@link IDelegationAccountsPayload} of a
+ * delegated chat to the server's agent host: `creaeditor-delegation-accounts:<delegationId>`, with the
+ * JSON {@link IDelegationEnvelope} as the token. Only the server's agent host can open it.
+ */
+export const CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX = 'creaeditor-delegation-accounts:';
+
+/** The name of the server's X25519 key pair (JSON) in its file secret store. */
+export const CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME = 'delegation-key-pair';
+
+/** The name of the server's GitHub token in its file secret store. */
+export const CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME = 'github-token';
+
+// --- HTTP API (paths relative to CREAEDITOR_DELEGATION_API_PREFIX) ---
+
+/** `GET key` */
+export interface IDelegationServerKeyResponse {
+	/** X25519 public key (SPKI DER, base64) to encrypt accounts for this server. */
+	readonly publicKey: string;
+	/** Whether a GitHub token is set on the server (for Open PR from the Server). */
+	readonly hasGitHubToken: boolean;
+	/** Whether `gh` is installed on the server. */
+	readonly hasGh: boolean;
+	/** The server's data folder layout: where worktrees go (to show the user). */
+	readonly worktreesDir: string;
+	/** The home folder of the agent host's user, where agents keep their sessions. */
+	readonly agentHome: string;
+}
+
+/** `GET repos/<repoId>/known` */
+export interface IDelegationKnownCommitsResponse {
+	readonly commits: readonly string[];
+}
+
+/** `PUT uploads/<uploadId>?offset=<n>` body: raw bytes. Answer: */
+export interface IDelegationUploadResponse {
+	/** Bytes the server has of this upload; the next chunk starts here. */
+	readonly received: number;
+}
+
+/** `POST delegations` */
+export interface IDelegationCreateRequest {
+	readonly delegationId: string;
+	readonly shortId: string;
+	readonly repoId: string;
+	readonly head: string;
+	readonly snapshot: string;
+	/** The finished upload with the bundle; absent when the server had everything. */
+	readonly uploadId?: string;
+	readonly remoteUrl?: string;
+	readonly defaultBranch?: string;
+	readonly subPath: string;
+	/** The laptop's branch, for the pull request title. */
+	readonly sourceBranch?: string;
+	readonly title: string;
+	readonly resultsMode: DelegationResultsMode;
+	readonly agent: DelegationAgentKind;
+	/** The name of the laptop (shown on the server). */
+	readonly sourceName: string;
+}
+
+/**
+ * `POST delegations/<id>/session`: the agent's session files, already placed and rewritten for the
+ * worktree (see `delegationSessionFiles.ts`). The server installs them so the agent resumes `sessionId`.
+ */
+export interface IDelegationSessionRequest {
+	readonly agent: DelegationAgentKind;
+	readonly sessionId: string;
+	readonly files: readonly IDelegationSessionFile[];
+}
+
+/** What the server keeps about a delegated chat; answered by `POST delegations` and `GET delegations/<id>`. */
+export interface IDelegationRecord {
+	readonly delegationId: string;
+	readonly shortId: string;
+	readonly repoId: string;
+	readonly branch: string;
+	readonly worktree: string;
+	readonly workingDirectory: string;
+	readonly baseCommit: string;
+	readonly resultsMode: DelegationResultsMode;
+	readonly agent: DelegationAgentKind;
+	/** The session files were installed, so the agent resumes this id on the server. */
+	readonly resumeSessionId?: string;
+	readonly remoteUrl?: string;
+	readonly defaultBranch?: string;
+	readonly title: string;
+	readonly sourceName: string;
+	readonly createdAt: number;
+	readonly pullRequestUrl?: string;
+}
+
+/** `POST delegations/<id>/results` `{ knownCommits }`: the result bundle, if any, is then downloaded from `GET downloads/<downloadId>`. */
+export interface IDelegationResultsResponse {
+	readonly commit: string;
+	readonly downloadId?: string;
+	readonly bytes: number;
+	readonly includesUncommitted: boolean;
+}
+
+/** `POST delegations/<id>/pull-request` `{ title?, body? }` */
+export interface IDelegationPullRequestResponse {
+	readonly url: string;
+}
+
+/** `PUT github-token` `{ token }` (empty removes it). */
+export interface IDelegationGitHubTokenRequest {
+	readonly token: string;
+}
+
+/** An error answer: `{ error: <code>, message }`. */
+export interface IDelegationErrorResponse {
+	readonly error: DelegationErrorCode;
+	readonly message: string;
+}
+
+// --- The laptop side (main process service, used by windows over IPC) ---
+
+/** A server to delegate to, with this device's key (from the CreaEditor Servers list). */
+export interface IDelegationServerTarget {
+	readonly serverId: string;
+	readonly name: string;
+	/** `http(s)://host[:port]` */
+	readonly serverUrl: string;
+	readonly deviceKey: string;
+}
+
+export interface IDelegateRequest {
+	readonly server: IDelegationServerTarget;
+	/** The chat's folder on this machine. */
+	readonly folder: string;
+	readonly title: string;
+	readonly resultsMode: DelegationResultsMode;
+	readonly includeSecretFiles: boolean;
+	readonly maxUploadBytes: number;
+	readonly agent: DelegationAgentKind;
+	/** The agent's session id here (Claude SDK session id, Codex thread id, Copilot CLI session id). */
+	readonly agentSessionId?: string;
+	/** The accounts to send; sealed for the server, answered as {@link IDelegateResult.accountsEnvelope}. */
+	readonly accounts?: IDelegationAccountsPayload;
+	/** Name of this machine, shown on the server. */
+	readonly sourceName: string;
+}
+
+export interface IDelegateResult {
+	readonly record: IDelegationRecord;
+	readonly bytesSent: number;
+	readonly incremental: boolean;
+	readonly hasLocalChanges: boolean;
+	readonly skippedSecretFiles: readonly string[];
+	/** Session files were sent: the agent resumes the same session. False: use the transcript fallback. */
+	readonly sessionFilesSent: boolean;
+	/** The accounts, encrypted for the server's agent host (see {@link CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}). */
+	readonly accountsEnvelope?: IDelegationEnvelope;
+}
+
+export const enum DelegationProgressStage {
+	Packing = 'packing',
+	Uploading = 'uploading',
+	Preparing = 'preparing',
+	Downloading = 'downloading',
+	Importing = 'importing',
+	Done = 'done',
+}
+
+export interface IDelegationProgress {
+	/** The operation this progress belongs to (as passed by the caller). */
+	readonly operationId: string;
+	readonly stage: DelegationProgressStage;
+	readonly bytesDone?: number;
+	readonly bytesTotal?: number;
+}
+
+/** Thrown to windows as `Error` with `name` {@link DELEGATION_ERROR_NAME} and the code in front of the message. */
+export const DELEGATION_ERROR_NAME = 'CreaEditorDelegationError';
+
+export interface IBringBackRequest {
+	readonly server: IDelegationServerTarget;
+	readonly delegationId: string;
+	/** The local repository folder. */
+	readonly folder: string;
+	/** The commit the chat started from (it is on this machine). */
+	readonly baseCommit: string;
+	readonly branch: string;
+}
+
+export interface IBringBackResult {
+	readonly branch: string;
+	readonly commit: string;
+	readonly includesUncommitted: boolean;
+	/** Nothing new since the chat started. */
+	readonly unchanged: boolean;
+}
+
+export const ICreaEditorDelegationService = createDecorator<ICreaEditorDelegationService>('creaeditorDelegationService');
+
+/** Delegate to Server on this machine; runs in the main process (git, files, HTTP to the server). */
+export interface ICreaEditorDelegationService {
+	readonly _serviceBrand: undefined;
+
+	readonly onDidProgress: Event<IDelegationProgress>;
+
+	/** Information about the repository of `folder` and the secret-looking untracked files that would stay here. */
+	inspectFolder(folder: string): Promise<{ readonly repoRoot: string; readonly branch?: string; readonly remoteUrl?: string; readonly skippedSecretFiles: readonly string[] }>;
+
+	/** Reads the server's public key and capabilities. */
+	getServerInfo(server: IDelegationServerTarget): Promise<IDelegationServerKeyResponse>;
+
+	/** Sends the code, the session and the accounts; the server prepares the worktree. */
+	delegate(operationId: string, request: IDelegateRequest): Promise<IDelegateResult>;
+
+	/** Reads the server's record of a delegated chat. */
+	getDelegation(server: IDelegationServerTarget, delegationId: string): Promise<IDelegationRecord>;
+
+	/** Fetches the delegated chat's work into a local branch. */
+	bringBackChanges(operationId: string, request: IBringBackRequest): Promise<IBringBackResult>;
+
+	/** Asks the server to push the branch and open a pull request. */
+	openPullRequest(server: IDelegationServerTarget, delegationId: string): Promise<string>;
+
+	/** Sets (or with an empty token removes) the server's GitHub token. */
+	setServerGitHubToken(server: IDelegationServerTarget, token: string): Promise<void>;
+
+	/** Checks out, or merges into the current branch, a branch brought back (refuses when there are local changes). */
+	applyBroughtBackBranch(folder: string, branch: string, how: 'checkout' | 'merge'): Promise<void>;
+
+	/** Files changed between the current HEAD and `branch`, for Compare. */
+	listBranchChanges(folder: string, branch: string): Promise<readonly { readonly path: string; readonly status: 'A' | 'M' | 'D' }[]>;
+}
