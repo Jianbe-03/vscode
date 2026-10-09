@@ -9,9 +9,12 @@ Moves a chat from this machine to a CreaEditor Server: its code, its conversatio
 | `../../common/creaeditorDelegation.ts` | both | Types, constants, the HTTP API shapes, `ICreaEditorDelegationService` |
 | `delegationPack.ts` | laptop | `packWorkspace`: one git bundle with `head` and a `snapshot` commit (uncommitted + untracked, not ignored; secret-looking files only on request), incremental with `^<known>` |
 | `delegationWorktrees.ts` | server | Bare repo per repository, worktree per chat, result bundles, `importResultBundle` (laptop), `openPullRequestFromServer` |
-| `delegationSessionFiles.ts` | both | Claude SDK transcript export (rewritten to the worktree path) and install |
+| `delegationSessionFiles.ts` | both | Session export (rewritten to the worktree path) and install: Claude SDK transcript, Codex rollout, Copilot CLI session folder |
 | `delegationCrypto.ts` | both | X25519 + HKDF-SHA256 + AES-256-GCM envelope for the accounts, bound to the delegation id |
-| `delegationAccounts.ts` | server agent host | Opens the envelope (`authenticate` resource `creaeditor-delegation-accounts:<id>`) with the key pair of the code receiver |
+| `delegationAccounts.ts` | server agent host | Opens the envelope (`authenticate` resource `creaeditor-delegation-accounts:<id>`) with the key pair of the code receiver; the Claude agent adds its setup-tokens, the Copilot agent keeps its gateway key and work context, and every agent lists the arrived session files |
+| `../shared/serverGatewayKeys.ts` | server agent host | Delegated OpenRouter/LiteLLM keys (by `<vendor>/<group>`) and work contexts (by worktree), encrypted |
+| `../shared/gatewayDirectConnection.ts` | server agent host | The BYOK bridge connection of a server: calls `/chat/completions` with the delegated key, checks hard-stop budgets, records costs |
+| `../shared/gatewayCostLedger.ts` | server agent host | Appends to `<costs>/creaeditor-gateway-costs.jsonl` |
 | `delegationClient.ts` | laptop | HTTP client (retries, chunked resumable upload), `delegateChat`, `bringBackChanges` |
 | `delegationProcess.ts` | both | The `git`/`gh` runner (replaced in tests) |
 | `../../electron-main/creaeditorDelegationMainService.ts` | laptop | The main-process service windows call over IPC |
@@ -20,7 +23,7 @@ Moves a chat from this machine to a CreaEditor Server: its code, its conversatio
 
 ## Transport
 
-The server's Remote Access HTTP API with this device's key (`Authorization: Bearer <deviceKey>`), under `/api/delegation/`. Not AHP: bundles can be hundreds of MB, and AHP's JSON text frames would base64 them through the chat connection. HTTP gives chunked, resumable uploads with progress, and the code receiver runs in the server's front process next to its data folder. The accounts go over AHP (`authenticate`) because the agent host keeps them; they are sealed so only the server's agent host opens them.
+The server's Remote Access HTTP API with this device's key (`Authorization: Bearer <deviceKey>`), under `/api/delegation/`. Not AHP: bundles can be hundreds of MB, and AHP's JSON text frames would base64 them through the chat connection. HTTP gives chunked, resumable uploads with progress, and the code receiver runs in the server's front process next to its data folder. The accounts go over AHP (`authenticate`) because the agent host keeps them; they are sealed so only the server's agent host opens them. The envelope is always sent: it also carries the chat's work context (worktree, repository, branch, title) and tells the agents that session files arrived.
 
 | Route | Answer |
 |---|---|
@@ -30,7 +33,7 @@ The server's Remote Access HTTP API with this device's key (`Authorization: Bear
 | `GET uploads/<id>` | `{ received }` (resume) |
 | `POST delegations` | Unpacks the upload, creates the worktree, answers the record |
 | `GET delegations/<id>` | The record |
-| `POST delegations/<id>/session` | Installs Claude session files; the record gets `resumeSessionId` |
+| `POST delegations/<id>/session` | Installs session files (Claude `projects/...` in the Claude config folder, Codex `sessions/...` in `CODEX_HOME`, Copilot CLI `session-state/<id>/...` in the Copilot home); the record gets `resumeSessionId` |
 | `POST delegations/<id>/results` `{ knownCommits }` | `{ commit, downloadId?, bytes, includesUncommitted }` |
 | `GET downloads/<id>` | The result bundle (removed after download) |
 | `POST delegations/<id>/pull-request` | `{ url }` |

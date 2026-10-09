@@ -4,10 +4,11 @@
  *--------------------------------------------------------------------------------------------*/
 
 // CreaEditor: Delegate to Server in the Agents window. A chat of this machine moves to a CreaEditor
-// Server: its code (a git bundle, only what the server lacks), its conversation (Claude: the SDK
-// session, so it resumes as the same session; other agents: a transcript) and its Claude setup-token
-// accounts (sealed for the server). The local chat is archived and marked "continues on <server>";
-// its results come back with Bring Back Changes or Open PR from the Server.
+// Server: its code (a git bundle, only what the server lacks), its conversation (the agent's own
+// session: Claude SDK transcript, Codex rollout or Copilot CLI session folder, so it resumes as the
+// same session; a transcript when that fails) and its Claude setup-token accounts or OpenRouter/LiteLLM
+// key (sealed for the server). The local chat is archived and locked ("continues on <server>") until
+// Take Back Here; its results come back with Bring Back Changes or Open PR from the Server.
 
 import '../../../../../platform/agentHost/electron-browser/creaeditorDelegationService.js';
 import { raceTimeout, timeout } from '../../../../../base/common/async.js';
