@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { promises as fs } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join } from '../../../../../base/common/path.js';
 import { getRandomTestPath } from '../../../../../base/test/node/testUtils.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../../log/common/log.js';

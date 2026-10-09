@@ -8,7 +8,7 @@
 
 import { execFile } from 'child_process';
 import { promises as fs } from 'fs';
-import { delimiter, join } from 'path';
+import { delimiter, join } from '../../../../base/common/path.js';
 
 /** What Remote Access needs to know about Tailscale on this machine. */
 export interface ITailscaleStatus {

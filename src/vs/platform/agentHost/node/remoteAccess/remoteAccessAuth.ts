@@ -10,7 +10,7 @@
 
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'crypto';
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { join } from '../../../../base/common/path.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { ILogService } from '../../../log/common/log.js';
@@ -401,7 +401,6 @@ export function normalizePairingCode(code: string): string {
 }
 
 function sanitizeDeviceName(name: string): string {
-	// eslint-disable-next-line no-control-regex
 	const trimmed = name.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 60);
 	return trimmed || 'Device';
 }

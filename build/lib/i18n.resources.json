@@ -371,6 +371,10 @@
 			"project": "vscode-workbench"
 		},
 		{
+			"name": "vs/workbench/contrib/remoteAccess",
+			"project": "vscode-workbench"
+		},
+		{
 			"name": "vs/workbench/services/actions",
 			"project": "vscode-workbench"
 		},
@@ -790,6 +794,10 @@
 		},
 		{
 			"name": "vs/sessions/contrib/tunnelHost",
+			"project": "vscode-sessions"
+		},
+		{
+			"name": "vs/sessions/contrib/remoteAccess",
 			"project": "vscode-sessions"
 		},
 		{

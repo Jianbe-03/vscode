@@ -10,7 +10,7 @@
 import { powerSaveBlocker } from 'electron';
 import { promises as fs } from 'fs';
 import { hostname } from 'os';
-import { join } from 'path';
+import { join } from '../../../base/common/path.js';
 import { Sequencer } from '../../../base/common/async.js';
 import { Emitter } from '../../../base/common/event.js';
 import { Disposable, DisposableStore, toDisposable } from '../../../base/common/lifecycle.js';

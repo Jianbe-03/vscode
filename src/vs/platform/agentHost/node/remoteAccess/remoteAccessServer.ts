@@ -9,7 +9,7 @@
 import { promises as fs } from 'fs';
 import type * as httpTypes from 'http';
 import type { Socket } from 'net';
-import { extname, join, resolve, sep } from 'path';
+import { extname, join, resolve, sep } from '../../../../base/common/path.js';
 import type * as wsTypes from 'ws';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable, DisposableStore, IDisposable, toDisposable } from '../../../../base/common/lifecycle.js';
