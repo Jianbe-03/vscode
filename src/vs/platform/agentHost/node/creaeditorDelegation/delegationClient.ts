@@ -7,10 +7,9 @@
 // routes with this device's key, and runs the delegate and Bring Back Changes steps.
 
 import * as fs from 'fs';
-import * as http from 'http';
-import * as https from 'https';
+import type * as http from 'http';
 import { tmpdir } from 'os';
-import { pipeline } from 'stream/promises';
+import { pipeline } from 'stream';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { join } from '../../../../base/common/path.js';
 import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, DelegationAgentKind, DelegationErrorCode, DelegationProgressStage, IBringBackRequest, IBringBackResult, IDelegateRequest, IDelegateResult, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationServerTarget, IDelegationSessionRequest, IDelegationUploadResponse } from '../../common/creaeditorDelegation.js';
@@ -34,12 +33,19 @@ export interface IDelegationProgressReport {
 export type DelegationHttpTransport = (url: URL, options: { readonly method: string; readonly headers: Record<string, string>; readonly body?: Uint8Array | string }) => Promise<http.IncomingMessage>;
 
 /** The transport over Node's `http`/`https` (the main process and the tests). */
-export const nodeDelegationHttpTransport: DelegationHttpTransport = (url, options) => new Promise((resolve, reject) => {
-	const request = (url.protocol === 'https:' ? https : http).request(url, { method: options.method, headers: options.headers, timeout: REQUEST_TIMEOUT_MS }, resolve);
-	request.on('timeout', () => request.destroy(new Error('The request timed out.')));
-	request.on('error', reject);
-	request.end(options.body);
-});
+export const nodeDelegationHttpTransport: DelegationHttpTransport = async (url, options) => {
+	const module = url.protocol === 'https:' ? await import('https') : await import('http');
+	return sendRequest(module.request, url, options);
+};
+
+function sendRequest(requestFn: typeof http.request, url: URL, options: { readonly method: string; readonly headers: Record<string, string>; readonly body?: Uint8Array | string }): Promise<http.IncomingMessage> {
+	return new Promise((resolve, reject) => {
+		const request = requestFn(url, { method: options.method, headers: options.headers, timeout: REQUEST_TIMEOUT_MS }, resolve);
+		request.on('timeout', () => request.destroy(new Error('The request timed out.')));
+		request.on('error', reject);
+		request.end(options.body);
+	});
+}
 
 function readResponse(response: http.IncomingMessage): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
@@ -189,7 +195,7 @@ export class DelegationHttpClient {
 			done += chunk.length;
 			onProgress(done, total);
 		});
-		await pipeline(response, fs.createWriteStream(outFile, { mode: 0o600 }));
+		await new Promise<void>((resolve, reject) => pipeline(response, fs.createWriteStream(outFile, { mode: 0o600 }), error => error ? reject(error) : resolve()));
 		if (total && done !== total) {
 			throw new DelegationError(DelegationErrorCode.Offline, `The download from ${this._server.name} stopped early. Try again.`);
 		}
@@ -315,10 +321,4 @@ export async function bringBackChanges(request: IBringBackRequest, options: IDel
 	} finally {
 		fs.rmSync(workDir, { recursive: true, force: true });
 	}
-}
-
-/** The local branch Bring Back Changes creates: `creaeditor/from-<server>/<shortId>`. */
-export function getBroughtBackBranchName(serverName: string, shortId: string): string {
-	const server = serverName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').replace(/\.{2,}/g, '.') || 'server';
-	return `creaeditor/from-${server}/${shortId}`;
 }

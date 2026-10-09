@@ -20,7 +20,8 @@ import { IActionViewItemService } from '../../../../../platform/actions/browser/
 import { Action2, MenuId, MenuItemAction } from '../../../../../platform/actions/common/actions.js';
 import { IActionWidgetService } from '../../../../../platform/actionWidget/browser/actionWidget.js';
 import { IActionWidgetDropdownAction, IActionWidgetDropdownActionProvider } from '../../../../../platform/actionWidget/browser/actionWidgetDropdown.js';
-import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { ContextKeyExpr, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
@@ -229,6 +230,20 @@ export class ChatContinueInSessionActionItem extends ActionWidgetDropdownActionV
 					if (contrib.canDelegate && isAgentHostTarget(contrib.type)) {
 						actions.push(this.toAction(contrib.type, contrib, instantiationService, location));
 					}
+				}
+
+				// CreaEditor: Delegate to Server (registered in the Agents window, where the servers are).
+				if (CommandsRegistry.getCommand(CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID)) {
+					actions.push({
+						id: CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID,
+						enabled: true,
+						icon: Codicon.server,
+						class: undefined,
+						label: localize('delegateToServer', "Delegate to Server..."),
+						tooltip: localize('delegateToServerTooltip', "Continue this chat on a CreaEditor Server with its code, so this computer can be turned off"),
+						category: { label: localize('continueIn', "Continue In"), order: 0, showHeader: true },
+						run: () => instantiationService.invokeFunction(accessor => accessor.get(ICommandService).executeCommand(CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID)),
+					});
 				}
 
 				// Offer actions to enter setup if we have no contributions

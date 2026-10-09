@@ -61,6 +61,12 @@ export const CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID = 'creaeditor.delegation.
 /** Set GitHub Token on Server. */
 export const CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID = 'creaeditor.delegation.setServerGitHubToken';
 
+/** The local branch Bring Back Changes creates: `creaeditor/from-<server>/<shortId>`. */
+export function getBroughtBackBranchName(serverName: string, shortId: string): string {
+	const server = serverName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').replace(/\.{2,}/g, '.') || 'server';
+	return `creaeditor/from-${server}/${shortId}`;
+}
+
 export const enum DelegationErrorCode {
 	NotARepository = 'notARepository',
 	NoCommits = 'noCommits',
@@ -296,7 +302,7 @@ export interface IDelegationProgress {
 	readonly bytesTotal?: number;
 }
 
-/** Thrown to windows as `Error` with `name` {@link DELEGATION_ERROR_NAME} and the code in front of the message. */
+/** Errors reach windows as `Error` with the name `<{@link DELEGATION_ERROR_NAME}>:<code>`. */
 export const DELEGATION_ERROR_NAME = 'CreaEditorDelegationError';
 
 export interface IBringBackRequest {

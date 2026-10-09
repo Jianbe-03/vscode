@@ -6,15 +6,15 @@
 import assert from 'assert';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
-import * as http from 'http';
+import type * as http from 'http';
 import { AddressInfo } from 'net';
 import { tmpdir } from 'os';
 import { join } from '../../../base/common/path.js';
 import { getRandomTestPath } from '../../../base/test/node/testUtils.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/common/utils.js';
 import { NullLogService } from '../../../platform/log/common/log.js';
-import { DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationAccountsPayload } from '../../../platform/agentHost/common/creaeditorDelegation.js';
-import { bringBackChanges, delegateChat, DelegationHttpClient, getBroughtBackBranchName } from '../../../platform/agentHost/node/creaeditorDelegation/delegationClient.js';
+import { DelegationAgentKind, DelegationErrorCode, getBroughtBackBranchName, DelegationResultsMode, IDelegationAccountsPayload } from '../../../platform/agentHost/common/creaeditorDelegation.js';
+import { bringBackChanges, delegateChat, DelegationHttpClient } from '../../../platform/agentHost/node/creaeditorDelegation/delegationClient.js';
 import { openDelegationPayload } from '../../../platform/agentHost/node/creaeditorDelegation/delegationCrypto.js';
 import { DelegationError } from '../../../platform/agentHost/node/creaeditorDelegation/delegationPack.js';
 import { getClaudeProjectDirName } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
@@ -54,13 +54,14 @@ suite('CreaEditor Server - Delegate to Server', function () {
 			claudeConfigDir: join(dir, 'server-claude'),
 		});
 		// Stands in for the Remote Access front, which checks the device key before the handler runs.
-		server = http.createServer((request, response) => {
+		const { createServer } = await import('http');
+		server = createServer((request, response) => {
 			const url = new URL(request.url ?? '/', 'http://localhost');
 			if (request.headers.authorization !== `Bearer ${deviceKey}` || !url.pathname.startsWith(api.prefix)) {
 				response.writeHead(401).end();
 				return;
 			}
-			void api.handle(request, response, url.pathname.slice(api.prefix.length), url, { id: 'device', name: 'Laptop' });
+			void api.handle(request, response, url.pathname.slice(api.prefix.length), url, { id: 'device', name: 'Laptop', createdAt: 0, lastSeenAt: 0, pairedPublicly: false });
 		});
 		await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
 		serverUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

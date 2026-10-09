@@ -138,6 +138,8 @@ import { ElectronAgentHostStarter } from '../../platform/agentHost/electron-main
 import { AgentHostProcessManager } from '../../platform/agentHost/node/agentHostService.js';
 import { RemoteAccessMainService } from '../../platform/agentHost/electron-main/remoteAccessMainService.js';
 import { REMOTE_ACCESS_CHANNEL_NAME } from '../../platform/agentHost/common/remoteAccess.js';
+import { CreaEditorDelegationMainService } from '../../platform/agentHost/electron-main/creaeditorDelegationMainService.js';
+import { CREAEDITOR_DELEGATION_CHANNEL_NAME } from '../../platform/agentHost/common/creaeditorDelegation.js';
 import { NODE_REMOTE_RESOURCE_CHANNEL_NAME, NODE_REMOTE_RESOURCE_IPC_METHOD_NAME, NodeRemoteResourceResponse, NodeRemoteResourceRouter } from '../../platform/remote/common/electronRemoteResources.js';
 import { Lazy } from '../../base/common/lazy.js';
 import { IAuxiliaryWindowsMainService } from '../../platform/auxiliaryWindow/electron-main/auxiliaryWindows.js';
@@ -773,6 +775,10 @@ export class CodeApplication extends Disposable {
 		// main process, so it outlives window reloads.
 		const remoteAccessMainService = this._register(appInstantiationService.createInstance(RemoteAccessMainService, agentHostProcessManager));
 		mainProcessElectronServer.registerChannel(REMOTE_ACCESS_CHANNEL_NAME, ProxyChannel.fromService(remoteAccessMainService, this._store));
+
+		// CreaEditor: Delegate to Server (git, session files and the server's code receiver).
+		const delegationMainService = this._register(appInstantiationService.createInstance(CreaEditorDelegationMainService));
+		mainProcessElectronServer.registerChannel(CREAEDITOR_DELEGATION_CHANNEL_NAME, ProxyChannel.fromService(delegationMainService, this._store));
 
 		// Metered connection telemetry
 		appInstantiationService.invokeFunction(accessor => {

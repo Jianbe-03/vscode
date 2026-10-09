@@ -222,8 +222,8 @@ suite('CreaEditor Delegation - git', function () {
 			clean: run(prepared.worktree, 'status', '--porcelain'),
 			commands: calls.map(call => [call.command, ...call.args].join(' ')),
 			tokenInArgs: calls.some(call => call.args.some(arg => arg.includes('ghp_FAKE_TOKEN'))),
-			pushHeader: calls[0].env?.['GIT_CONFIG_VALUE_0'] === `AUTHORIZATION: basic ${Buffer.from('x-access-token:ghp_FAKE_TOKEN').toString('base64')}`,
-			ghToken: calls[1].env?.['GH_TOKEN'],
+			pushHeader: calls[0].env?.GIT_CONFIG_VALUE_0 === `AUTHORIZATION: basic ${Buffer.from('x-access-token:ghp_FAKE_TOKEN').toString('base64')}`,
+			ghToken: calls[1].env?.GH_TOKEN,
 		}, {
 			url: 'https://github.com/creacoon/example/pull/7',
 			committed: 'Changes from Server',

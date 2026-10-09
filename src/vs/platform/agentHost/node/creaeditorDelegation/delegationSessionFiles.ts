@@ -26,7 +26,7 @@ const CLAUDE_MAX_PROJECT_DIR_LENGTH = 200;
 
 /** The Claude config folder of a process environment. */
 export function getClaudeConfigDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
-	return env['CLAUDE_CONFIG_DIR'] || join(home, '.claude');
+	return env.CLAUDE_CONFIG_DIR || join(home, '.claude');
 }
 
 function claudePathHash(value: string): string {
