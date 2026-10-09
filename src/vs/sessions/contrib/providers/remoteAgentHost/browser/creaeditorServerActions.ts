@@ -12,7 +12,7 @@ import * as DOM from '../../../../../base/browser/dom.js';
 import { Dialog } from '../../../../../base/browser/ui/dialog/dialog.js';
 import { createQrCodeSvg } from '../../../../../base/browser/qrCodeElement.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
-import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { URI } from '../../../../../base/common/uri.js';
@@ -21,7 +21,7 @@ import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { getCreaEditorServerWebUrl, readCreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
+import { CREAEDITOR_SERVERS_ADD_REQUEST_KEY, getCreaEditorServerWebUrl, readCreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
 import { IAgentConnection } from '../../../../../platform/agentHost/common/agentService.js';
 import { readSubscriptionAccountsState, subscriptionAccountTokenResource, type ISubscriptionAccount, type SubscriptionProvider } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import { IRemoteAgentHostService, RemoteAgentHostsEnabledSettingId } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
@@ -34,8 +34,10 @@ import { INotificationService, Severity } from '../../../../../platform/notifica
 import { IOpenerService } from '../../../../../platform/opener/common/opener.js';
 import { IProgressService, ProgressLocation } from '../../../../../platform/progress/common/progress.js';
 import { IQuickInputButton, IQuickInputService, IQuickPickItem, IQuickPickSeparator } from '../../../../../platform/quickinput/common/quickInput.js';
+import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
 import { defaultDialogStyles } from '../../../../../platform/theme/browser/defaultStyles.js';
 import { createWorkbenchDialogOptions } from '../../../../../workbench/browser/parts/dialogs/dialog.js';
+import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
 import { IHostService } from '../../../../../workbench/services/host/browser/host.js';
 import { dispatchSubscriptionAccountsRequest } from '../../../../../workbench/services/agentHost/browser/subscriptionAccountsService.js';
 import { Menus } from '../../../../browser/menus.js';
@@ -439,3 +441,33 @@ registerAction2(class extends Action2 {
 		return accessor.get(IInstantiationService).invokeFunction(showServersList);
 	}
 });
+
+/** How long a request from the editor window to add a server stays valid. */
+const ADD_REQUEST_LIFETIME_MS = 2 * 60 * 1000;
+
+/** Runs Add CreaEditor Server when the editor window asked for it (see `OPEN_ADD_CREAEDITOR_SERVER_COMMAND_ID`). */
+class CreaEditorServersAddRequestContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'sessions.contrib.creaeditorServersAddRequest';
+
+	constructor(
+		@IStorageService private readonly _storageService: IStorageService,
+		@ICommandService private readonly _commandService: ICommandService,
+	) {
+		super();
+		this._register(this._storageService.onDidChangeValue(StorageScope.APPLICATION, CREAEDITOR_SERVERS_ADD_REQUEST_KEY, this._store)(() => this._handleRequest()));
+		this._handleRequest();
+	}
+
+	private _handleRequest(): void {
+		const requestedAt = this._storageService.getNumber(CREAEDITOR_SERVERS_ADD_REQUEST_KEY, StorageScope.APPLICATION);
+		if (requestedAt === undefined) {
+			return;
+		}
+		this._storageService.remove(CREAEDITOR_SERVERS_ADD_REQUEST_KEY, StorageScope.APPLICATION);
+		if (Date.now() - requestedAt < ADD_REQUEST_LIFETIME_MS) {
+			void this._commandService.executeCommand(CreaEditorServerCommandIds.add);
+		}
+	}
+}
+
+registerWorkbenchContribution2(CreaEditorServersAddRequestContribution.ID, CreaEditorServersAddRequestContribution, WorkbenchPhase.AfterRestored);

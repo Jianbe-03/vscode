@@ -167,3 +167,12 @@ export function readCreaEditorServerMachine(values: Readonly<Record<string, unkn
 	const numbers = [value.cpuPercent, value.cores, value.memoryTotalBytes, value.memoryFreeBytes, value.updatedAt];
 	return numbers.every(item => typeof item === 'number' && Number.isFinite(item)) ? value as ICreaEditorServerMachine : undefined;
 }
+
+/**
+ * Application storage key the editor window sets (to `Date.now()`) to have the Agents window start Add
+ * CreaEditor Server, e.g. from the CreaEditor Features walkthrough.
+ */
+export const CREAEDITOR_SERVERS_ADD_REQUEST_KEY = 'creaeditor.servers.addRequested';
+
+/** Add CreaEditor Server in the editor window: opens the Agents window, which runs it. */
+export const OPEN_ADD_CREAEDITOR_SERVER_COMMAND_ID = 'creaeditor.servers.openAdd';
