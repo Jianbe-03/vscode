@@ -18,6 +18,9 @@ import { AGENT_HOST_SECRETS_DIR_ENV_VAR } from '../../../platform/agentHost/node
 import { AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR } from '../../../platform/agentHost/node/shared/subscriptionAccountsService.js';
 import { AGENT_HOST_PUBLISH_MACHINE_ENV_VAR } from '../../../platform/agentHost/node/shared/serverMachineStatus.js';
 import { AgentHostCodexAgentEnabledEnvVar } from '../../../platform/agentHost/common/agentService.js';
+import { AGENT_HOST_SERVER_NAME_ENV_VAR, AGENT_HOST_WEB_URL_ENV_VAR } from '../../../platform/agentHost/common/creaeditorNotifications.js';
+import { AGENT_HOST_COSTS_DIR_ENV_VAR } from '../../../platform/agentHost/node/shared/serverCostLedger.js';
+import { AGENT_HOST_CHATS_STATUS_FILE_ENV_VAR, AGENT_HOST_MAX_RUNNING_CHATS_ENV_VAR } from '../../../platform/agentHost/node/shared/serverChatsStatus.js';
 import { ICreaEditorServerDataLayout } from './creaeditorServerDataDir.js';
 
 export type CreaEditorAgentHostState = 'starting' | 'running' | 'restarting' | 'stopped';
@@ -34,6 +37,12 @@ export interface ICreaEditorAgentHostOptions {
 	readonly logLevel: string;
 	readonly enableCodex: boolean;
 	readonly enableMockAgent: boolean;
+	/** How many chats run at once (`--max-running-chats`). */
+	readonly maxRunningChats: number;
+	/** The server's name in notifications and queue messages. */
+	readonly serverName: string;
+	/** The web Agents window a notification opens, when known before the server listens. */
+	readonly webUrl: string | undefined;
 	readonly log: (message: string) => void;
 }
 
@@ -99,7 +108,7 @@ export class CreaEditorAgentHost extends Disposable {
 	}
 
 	private _spawn(): Promise<void> {
-		const { outDir, repoRoot, layout, logLevel, enableCodex, enableMockAgent, log } = this._options;
+		const { outDir, repoRoot, layout, logLevel, enableCodex, enableMockAgent, maxRunningChats, serverName, webUrl, log } = this._options;
 		const bootstrap = join(outDir, 'bootstrap-fork.js');
 		const nlsMessages = join(outDir, 'nls.messages.json');
 		const fromSources = !fs.existsSync(nlsMessages);
@@ -112,6 +121,11 @@ export class CreaEditorAgentHost extends Disposable {
 			[AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR]: '1',
 			[AGENT_HOST_PUBLISH_MACHINE_ENV_VAR]: '1',
 			[AgentHostCodexAgentEnabledEnvVar]: enableCodex ? 'true' : 'false',
+			[AGENT_HOST_COSTS_DIR_ENV_VAR]: layout.costs,
+			[AGENT_HOST_CHATS_STATUS_FILE_ENV_VAR]: layout.chatsStatusFile,
+			[AGENT_HOST_MAX_RUNNING_CHATS_ENV_VAR]: String(maxRunningChats),
+			[AGENT_HOST_SERVER_NAME_ENV_VAR]: serverName,
+			...(webUrl ? { [AGENT_HOST_WEB_URL_ENV_VAR]: webUrl } : {}),
 		};
 		delete env.ELECTRON_RUN_AS_NODE;
 		if (fromSources) {

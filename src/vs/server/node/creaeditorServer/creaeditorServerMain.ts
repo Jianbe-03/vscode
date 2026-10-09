@@ -24,10 +24,12 @@ import { ConsoleMainLogger, LogLevel, parseLogLevel } from '../../../platform/lo
 import { LogService } from '../../../platform/log/common/logService.js';
 import product from '../../../platform/product/common/product.js';
 import { FileSecretStore } from '../../../platform/agentHost/node/shared/fileSecretStore.js';
+import { readServerChatsStatus } from '../../../platform/agentHost/node/shared/serverChatsStatus.js';
 import { RemoteAccessAuth, REMOTE_ACCESS_MIN_PASSWORD_LENGTH } from '../../../platform/agentHost/node/remoteAccess/remoteAccessAuth.js';
 import { createSocketRelayConnector, startRemoteAccessServer } from '../../../platform/agentHost/node/remoteAccess/remoteAccessServer.js';
 import { callCreaEditorServerAdmin, createCreaEditorServerStatus, ICreaEditorServerStatus, readMachine, readOrCreateAdminToken, startCreaEditorServerAdmin } from './creaeditorServerAdmin.js';
 import { CreaEditorAgentHost } from './creaeditorServerAgentHost.js';
+import { createCreaEditorServerApi } from './creaeditorServerApi.js';
 import { CreaEditorDelegationApi, getCreaEditorDelegationLayout } from './creaeditorServerDelegation.js';
 import { ensureCreaEditorServerDataDir, getCreaEditorServerDataLayout, ICreaEditorServerDataLayout, ICreaEditorServerRuntimeInfo, readCreaEditorServerRuntimeInfo, writePrivateFile } from './creaeditorServerDataDir.js';
 import { CREAEDITOR_SERVER_USAGE, CreaEditorServerOptionsError, ICreaEditorServerOptions, parseCreaEditorServerOptions } from './creaeditorServerOptions.js';
@@ -105,6 +107,10 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 		logLevel: options.logLevel,
 		enableCodex: options.enableCodex,
 		enableMockAgent: options.enableMockAgent,
+		maxRunningChats: options.maxRunningChats,
+		serverName: os.hostname(),
+		// CreaEditor: the address notifications open (known up front unless the port is picked at random).
+		webUrl: options.publicUrl ?? (options.port ? localUrl({ host: options.host, port: options.port }) : undefined),
 		log,
 	});
 	await agentHost.start();
@@ -114,6 +120,31 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 	if (!webRoot) {
 		log('The web Agents window is not part of this build: browsers see the pairing page only.');
 	}
+	// Set once the front listens (the pairing link needs its address).
+	let createPairing: (() => { code: string; expiresAt: number; link: string }) | undefined;
+	const serverApi = createCreaEditorServerApi({
+		costsDir: layout.costs,
+		createPairing: () => {
+			if (!createPairing) {
+				throw new Error('The server is still starting.');
+			}
+			return createPairing();
+		},
+		logService,
+	});
+	// For a paired device, `/health` also tells how busy the server is.
+	const getHealthDetails = () => {
+		const machine = readMachine();
+		const chats = readServerChatsStatus(layout.chatsStatusFile);
+		return {
+			agentHost: agentHost.state,
+			cpuPercent: Math.min(100, Math.round(machine.loadAverage / Math.max(1, machine.cores) * 100)),
+			cores: machine.cores,
+			memoryTotalBytes: machine.totalBytes,
+			memoryFreeBytes: machine.freeBytes,
+			...(chats ? { runningChats: chats.running, queuedChats: chats.queued, maxRunningChats: chats.max } : { maxRunningChats: options.maxRunningChats }),
+		};
+	};
 	let front;
 	try {
 		front = await startRemoteAccessServer({
@@ -130,7 +161,8 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 			logService,
 			product: { name: PRODUCT_NAME, version: product.version, commit: product.commit },
 			hostName: os.hostname(),
-			apiHandlers: [delegationApi],
+			apiHandlers: [delegationApi, serverApi],
+			getHealthDetails,
 		});
 	} catch (error) {
 		await agentHost.stop();
@@ -139,7 +171,7 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 	}
 
 	const baseUrl = options.publicUrl ?? localUrl({ host: options.host, port: front.port });
-	const createPairing = () => {
+	createPairing = () => {
 		const pairing = auth.createPairingCode();
 		const link = getPairingLink(baseUrl, pairing.code);
 		writePrivateFile(layout.pairingFile, formatPairingText(link, pairing.code, pairing.expiresAt, undefined));

@@ -39,6 +39,8 @@ The desktop app runs the server in the main process and relays to the agent host
 | Route | Auth | Answer |
 |---|---|---|
 | `GET /health` | none | `{ status: 'ok', product, version, commit, publicMode, webUi, uptimeSeconds }` (no secrets) |
+| `GET /health` with `Authorization: Bearer <deviceKey>` | device key (optional) | The same plus `details` from the `getHealthDetails` option (CreaEditor Server: CPU, memory, running and queued chats); a missing or wrong key gets the minimal answer |
+| `<apiHandlers[].prefix>...` | device key | Route groups of the `apiHandlers` option: CreaEditor Server's `/api/delegation/` (Delegate to Server) and `/api/server/` (pairing codes, costs, budgets) |
 | `GET /` | none | The pairing/boot page |
 | `GET /static/<path>` | none | Files of `webRoot` (the open-source web build; no user data) |
 | `GET /api/info` | none | `{ hostName, product, publicMode, passwordRequired, webUi }` |

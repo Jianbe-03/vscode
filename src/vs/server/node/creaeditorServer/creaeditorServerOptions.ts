@@ -6,7 +6,7 @@
 // CreaEditor: the command line of `creaeditor-server`.
 
 import { join } from '../../../base/common/path.js';
-import { CREAEDITOR_SERVER_DEFAULT_PORT } from '../../../platform/agentHost/common/creaeditorServer.js';
+import { CREAEDITOR_SERVER_DEFAULT_MAX_RUNNING_CHATS, CREAEDITOR_SERVER_DEFAULT_PORT } from '../../../platform/agentHost/common/creaeditorServer.js';
 
 export type CreaEditorServerCommand = 'serve' | 'pair' | 'password' | 'status' | 'help' | 'version';
 
@@ -30,6 +30,8 @@ export interface ICreaEditorServerOptions {
 	readonly enableCodex: boolean;
 	/** Development: a scripted agent instead of Claude and Codex, for tests. */
 	readonly enableMockAgent: boolean;
+	/** How many chats run at once; more wait in a queue. */
+	readonly maxRunningChats: number;
 }
 
 /** Where the server runs, for the defaults. */
@@ -63,7 +65,7 @@ export function parseCreaEditorServerOptions(argv: readonly string[], environmen
 	let command: CreaEditorServerCommand | undefined;
 	const values = new Map<string, string>();
 	const flags = new Set<string>();
-	const valueOptions = new Set(['host', 'port', 'data-dir', 'public-url', 'log']);
+	const valueOptions = new Set(['host', 'port', 'data-dir', 'public-url', 'log', 'max-running-chats']);
 	const flagOptions = new Set(['public', 'enable-codex', 'disable-codex', 'enable-mock-agent', 'help', 'version']);
 
 	for (let index = 0; index < argv.length; index++) {
@@ -112,6 +114,12 @@ export function parseCreaEditorServerOptions(argv: readonly string[], environmen
 		throw new CreaEditorServerOptionsError(`--public-url must start with http:// or https://, not '${publicUrl}'.`);
 	}
 
+	const maxRunningText = values.get('max-running-chats') ?? env('CREAEDITOR_SERVER_MAX_RUNNING_CHATS');
+	const maxRunningChats = maxRunningText === undefined ? CREAEDITOR_SERVER_DEFAULT_MAX_RUNNING_CHATS : Number(maxRunningText);
+	if (!Number.isInteger(maxRunningChats) || maxRunningChats < 1 || maxRunningChats > 64) {
+		throw new CreaEditorServerOptionsError(`--max-running-chats must be a number from 1 to 64, not '${maxRunningText}'.`);
+	}
+
 	if (flags.has('enable-codex') && flags.has('disable-codex')) {
 		throw new CreaEditorServerOptionsError('--enable-codex and --disable-codex cannot be used together.');
 	}
@@ -127,6 +135,7 @@ export function parseCreaEditorServerOptions(argv: readonly string[], environmen
 		public: flags.has('public') || env('CREAEDITOR_SERVER_PUBLIC') === '1' || !!env('CREAEDITOR_PUBLIC_DOMAIN'),
 		enableCodex,
 		enableMockAgent: flags.has('enable-mock-agent'),
+		maxRunningChats,
 	};
 }
 
@@ -164,4 +173,7 @@ Options (environment variable in brackets):
                        [CREAEDITOR_SERVER_PUBLIC=1; on when CREAEDITOR_PUBLIC_DOMAIN is set]
   --log <level>        trace, debug, info, warn, error or off [CREAEDITOR_SERVER_LOG] (default info)
   --disable-codex      Do not offer the Codex agent [CREAEDITOR_SERVER_CODEX=0]
+  --max-running-chats <n>
+                       How many chats run at once; more wait in a queue
+                       [CREAEDITOR_SERVER_MAX_RUNNING_CHATS] (default ${CREAEDITOR_SERVER_DEFAULT_MAX_RUNNING_CHATS})
 `;

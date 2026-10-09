@@ -53,6 +53,12 @@ export interface IRemoteAccessServerOptions {
 	 * without a valid key it gets 401. The handler reads the body itself (it may be large).
 	 */
 	readonly apiHandlers?: readonly IRemoteAccessApiHandler[];
+	/**
+	 * More of `/health` for a paired device: when the request carries a valid device key, the answer
+	 * also has `details` with this (CreaEditor Server: CPU, memory, running chats). Without a key
+	 * `/health` stays minimal.
+	 */
+	readonly getHealthDetails?: () => object | Promise<object>;
 }
 
 /** An authenticated route group of {@link IRemoteAccessServerOptions.apiHandlers}. */
@@ -237,6 +243,7 @@ class RemoteAccessServer extends Disposable implements IRemoteAccessServerHandle
 		const path = url.pathname;
 
 		if (path === '/health' && (method === 'GET' || method === 'HEAD')) {
+			const device = this._options.getHealthDetails && request.headers.authorization ? this._authenticateRequest(request) : undefined;
 			sendJson(response, 200, {
 				status: 'ok',
 				product: this._options.product.name,
@@ -245,6 +252,7 @@ class RemoteAccessServer extends Disposable implements IRemoteAccessServerHandle
 				publicMode: this._publicMode,
 				webUi: await this._hasWebUi(),
 				uptimeSeconds: Math.round((Date.now() - this._startedAt) / 1000),
+				...(device && this._options.getHealthDetails ? { details: await this._options.getHealthDetails() } : {}),
 			});
 			return;
 		}

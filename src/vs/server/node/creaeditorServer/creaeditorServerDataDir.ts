@@ -30,6 +30,10 @@ export interface ICreaEditorServerDataLayout {
 	readonly agentHostSocket: string;
 	/** The token of the server's admin endpoint on 127.0.0.1, for `creaeditor-server pair` and `password`. */
 	readonly adminTokenFile: string;
+	/** The AI cost ledger of requests the server makes itself, and the budgets laptops push. */
+	readonly costs: string;
+	/** How many chats run and wait (written by the agent host, read for `/health`). */
+	readonly chatsStatusFile: string;
 }
 
 export function getCreaEditorServerDataLayout(root: string): ICreaEditorServerDataLayout {
@@ -44,12 +48,14 @@ export function getCreaEditorServerDataLayout(root: string): ICreaEditorServerDa
 		runtimeFile: join(root, 'server.json'),
 		agentHostSocket: join(root, 'agent-host', 'agent-host.sock'),
 		adminTokenFile: join(root, 'remote-access', 'admin-token'),
+		costs: join(root, 'costs'),
+		chatsStatusFile: join(root, 'agent-host', 'chats.json'),
 	};
 }
 
 /** Creates the data folder and its subfolders, private to the user running the server. */
 export function ensureCreaEditorServerDataDir(layout: ICreaEditorServerDataLayout): void {
-	for (const dir of [layout.root, layout.agentHost, layout.secrets, layout.remoteAccess, layout.repos, layout.logs]) {
+	for (const dir of [layout.root, layout.agentHost, layout.secrets, layout.remoteAccess, layout.repos, layout.logs, layout.costs]) {
 		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 	}
 	// An existing folder keeps its mode with `mkdir`: make the root private anyway.

@@ -28,15 +28,15 @@ suite('CreaEditor Server', () => {
 		assert.deepStrictEqual([
 			parseCreaEditorServerOptions([], mac),
 			parseCreaEditorServerOptions([], docker),
-			parseCreaEditorServerOptions(['pair', '--port=4000', '--data-dir', '/srv/ce', '--disable-codex'], mac),
-			parseCreaEditorServerOptions(['status'], { ...docker, env: { CREAEDITOR_SERVER_PUBLIC_URL: '', CREAEDITOR_SERVER_PORT: '5000', CREAEDITOR_PUBLIC_DOMAIN: 'agents.example.com', CREAEDITOR_SERVER_CODEX: '0' } }),
+			parseCreaEditorServerOptions(['pair', '--port=4000', '--data-dir', '/srv/ce', '--disable-codex', '--max-running-chats', '2'], mac),
+			parseCreaEditorServerOptions(['status'], { ...docker, env: { CREAEDITOR_SERVER_PUBLIC_URL: '', CREAEDITOR_SERVER_PORT: '5000', CREAEDITOR_PUBLIC_DOMAIN: 'agents.example.com', CREAEDITOR_SERVER_CODEX: '0', CREAEDITOR_SERVER_MAX_RUNNING_CHATS: '8' } }),
 			parseCreaEditorServerOptions(['--host', '100.64.0.2', '--public-url', 'https://box.tail1234.ts.net/', '--help'], mac),
 		], [
-			{ command: 'serve', host: '127.0.0.1', port: 31600, dataDir: '/Users/me/.creaeditor-server', logLevel: 'info', public: false, enableCodex: true, enableMockAgent: false },
-			{ command: 'serve', host: '0.0.0.0', port: 31600, dataDir: '/data', logLevel: 'info', public: false, enableCodex: true, enableMockAgent: false },
-			{ command: 'pair', host: '127.0.0.1', port: 4000, dataDir: '/srv/ce', logLevel: 'info', public: false, enableCodex: false, enableMockAgent: false },
-			{ command: 'status', host: '0.0.0.0', port: 5000, dataDir: '/data', logLevel: 'info', publicUrl: 'https://agents.example.com', public: true, enableCodex: false, enableMockAgent: false },
-			{ command: 'help', host: '100.64.0.2', port: 31600, dataDir: '/Users/me/.creaeditor-server', logLevel: 'info', publicUrl: 'https://box.tail1234.ts.net', public: false, enableCodex: true, enableMockAgent: false },
+			{ command: 'serve', host: '127.0.0.1', port: 31600, dataDir: '/Users/me/.creaeditor-server', logLevel: 'info', public: false, enableCodex: true, enableMockAgent: false, maxRunningChats: 4 },
+			{ command: 'serve', host: '0.0.0.0', port: 31600, dataDir: '/data', logLevel: 'info', public: false, enableCodex: true, enableMockAgent: false, maxRunningChats: 4 },
+			{ command: 'pair', host: '127.0.0.1', port: 4000, dataDir: '/srv/ce', logLevel: 'info', public: false, enableCodex: false, enableMockAgent: false, maxRunningChats: 2 },
+			{ command: 'status', host: '0.0.0.0', port: 5000, dataDir: '/data', logLevel: 'info', publicUrl: 'https://agents.example.com', public: true, enableCodex: false, enableMockAgent: false, maxRunningChats: 8 },
+			{ command: 'help', host: '100.64.0.2', port: 31600, dataDir: '/Users/me/.creaeditor-server', logLevel: 'info', publicUrl: 'https://box.tail1234.ts.net', public: false, enableCodex: true, enableMockAgent: false, maxRunningChats: 4 },
 		]);
 	});
 
@@ -47,6 +47,7 @@ suite('CreaEditor Server', () => {
 			['--port'],
 			['--host', '--port'],
 			['--log', 'loud'],
+			['--max-running-chats', '0'],
 			['--public-url', 'agents.example.com'],
 			['--nope'],
 			['start'],
@@ -59,7 +60,7 @@ suite('CreaEditor Server', () => {
 				return error instanceof CreaEditorServerOptionsError ? 'refused' : 'crashed';
 			}
 		});
-		assert.deepStrictEqual(errors, Array(9).fill('refused'));
+		assert.deepStrictEqual(errors, Array(10).fill('refused'));
 	});
 
 	test('reports its status, hides agent host tokens in logs and draws pairing QR codes', () => {
