@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 // Standalone agent host server with WebSocket protocol transport.
-// Start with: node out/vs/platform/agentHost/node/agentHostServerMain.js [--port <port>] [--host <host>] [--connection-token <token>] [--connection-token-file <path>] [--without-connection-token] [--enable-mock-agent] [--claude-sdk-root <path>] [--codex-sdk-root <path>] [--quiet] [--log <level>]
+// Start with: node out/vs/platform/agentHost/node/agentHostServerMain.js [--port <port>] [--host <host>] [--socket-path <path>] [--connection-token <token>] [--connection-token-file <path>] [--without-connection-token] [--enable-mock-agent] [--claude-sdk-root <path>] [--codex-sdk-root <path>] [--quiet] [--log <level>]
 
 import { fileURLToPath } from 'url';
 
@@ -68,6 +68,8 @@ const connectionTokenRegex = /^[0-9A-Za-z_-]+$/;
 interface IServerOptions {
 	readonly port: number;
 	readonly host: string | undefined;
+	/** CreaEditor: listen on this unix socket instead of a TCP port (the CreaEditor Server relays to it). */
+	readonly socketPath: string | undefined;
 	readonly enableMockAgent: boolean;
 	/**
 	 * Absolute path to the **SDK root directory** that contains
@@ -93,6 +95,8 @@ function parseServerOptions(): IServerOptions {
 	const port = portIdx >= 0 ? parseInt(argv[portIdx + 1], 10) : envPort;
 	const hostIdx = argv.indexOf('--host');
 	const host = hostIdx >= 0 ? argv[hostIdx + 1] : undefined;
+	const socketPathIdx = argv.indexOf('--socket-path');
+	const socketPath = socketPathIdx >= 0 ? argv[socketPathIdx + 1] : undefined;
 	const enableMockAgent = argv.includes('--enable-mock-agent');
 	// `--claude-sdk-root` and `--codex-sdk-root` are dev overrides — they
 	// short-circuit the on-demand download from `product.agentSdks`. They must
@@ -147,7 +151,7 @@ function parseServerOptions(): IServerOptions {
 		connectionToken = generateUuid();
 	}
 
-	return { port, host, enableMockAgent, claudeSdkRoot, codexSdkRoot, quiet, connectionToken };
+	return { port, host, socketPath, enableMockAgent, claudeSdkRoot, codexSdkRoot, quiet, connectionToken };
 }
 
 // ---- Main -------------------------------------------------------------------
@@ -308,6 +312,7 @@ async function main(): Promise<void> {
 	const wsServer = disposables.add(await WebSocketProtocolServer.create({
 		port: options.port,
 		host: options.host,
+		socketPath: options.socketPath,
 		connectionTokenValidate: options.connectionToken
 			? token => token === options.connectionToken
 			: undefined,
@@ -354,9 +359,14 @@ async function main(): Promise<void> {
 		}
 	}
 
-	const address = wsServer.address;
-	if (address) {
-		reportReady(address);
+	if (options.socketPath) {
+		// CreaEditor: a unix socket has no URL to print.
+		await wsServer.whenListening;
+		process.stdout.write('READY:socket\n');
+		agentService.markStartupComplete();
+		log(`  Socket:  ${options.socketPath}`);
+	} else if (wsServer.address) {
+		reportReady(wsServer.address);
 	} else {
 		const interval = setInterval(() => {
 			const addr = wsServer.address;
