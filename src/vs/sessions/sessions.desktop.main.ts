@@ -269,6 +269,9 @@ import './contrib/providers/agentHost/electron-browser/agentHost.contribution.js
 
 // Tunnel Host (allow remote connections to local agent host)
 import './contrib/tunnelHost/electron-browser/tunnelHost.contribution.js';
+// CreaEditor: Remote Access (phones and other devices use this Mac's Agents window)
+import '../workbench/contrib/remoteAccess/electron-browser/remoteAccess.contribution.js';
+import './contrib/remoteAccess/electron-browser/remoteAccess.contribution.js';
 
 // Sessions (desktop only)
 import './contrib/sessions/electron-browser/sessions.contribution.js';

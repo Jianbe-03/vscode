@@ -1,0 +1,150 @@
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+/* CreaEditor: the Remote Access dialog. */
+
+.monaco-dialog-box.remote-access-dialog {
+	width: min(560px, calc(100vw - var(--vscode-spacing-size320)));
+}
+
+.remote-access {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size200);
+	text-align: start;
+	max-height: min(70vh, 640px);
+	overflow-y: auto;
+}
+
+.remote-access-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size80);
+}
+
+.remote-access-headline {
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size80);
+	font-size: var(--vscode-fontSize-heading3);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	overflow-wrap: anywhere;
+}
+
+.remote-access-headline .codicon {
+	font-size: var(--vscode-codiconFontSize);
+	flex-shrink: 0;
+}
+
+.remote-access-heading {
+	margin: 0;
+	font-size: var(--vscode-fontSize-heading3);
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.remote-access-detail {
+	margin: 0;
+	font-size: var(--vscode-fontSize-body2);
+	color: var(--vscode-descriptionForeground);
+	overflow-wrap: anywhere;
+}
+
+.remote-access-warning {
+	color: var(--vscode-editorWarning-foreground);
+}
+
+.remote-access-error {
+	color: var(--vscode-errorForeground);
+}
+
+.remote-access-error a {
+	color: var(--vscode-textLink-foreground);
+}
+
+.remote-access-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size80);
+}
+
+.remote-access-actions .monaco-button {
+	width: auto;
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size120);
+}
+
+.remote-access-pairing {
+	display: flex;
+	gap: var(--vscode-spacing-size160);
+	align-items: flex-start;
+	flex-wrap: wrap;
+}
+
+/* A QR code must stay dark on light with its quiet zone in every theme to scan. */
+.remote-access-qr {
+	width: 168px;
+	height: 168px;
+	flex-shrink: 0;
+	border-radius: var(--vscode-cornerRadius-medium);
+	overflow: hidden;
+	background: #ffffff;
+}
+
+.remote-access-qr svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+
+.remote-access-pairing-info {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size80);
+	flex: 1;
+	min-width: 200px;
+}
+
+.remote-access-code {
+	font-family: var(--monaco-monospace-font);
+	font-size: var(--vscode-fontSize-heading2);
+	font-weight: var(--vscode-fontWeight-semiBold);
+	letter-spacing: 0.08em;
+	user-select: text;
+}
+
+.remote-access-url {
+	font-family: var(--monaco-monospace-font);
+	user-select: text;
+}
+
+.remote-access-devices {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size80);
+}
+
+.remote-access-device {
+	display: flex;
+	align-items: center;
+	gap: var(--vscode-spacing-size120);
+}
+
+.remote-access-device-text {
+	flex: 1;
+	min-width: 0;
+}
+
+.remote-access-device .monaco-button {
+	width: auto;
+	padding: var(--vscode-spacing-size40) var(--vscode-spacing-size120);
+}
+
+.remote-access-password {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size80);
+}

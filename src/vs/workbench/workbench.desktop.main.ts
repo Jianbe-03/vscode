@@ -193,6 +193,8 @@ import './contrib/remoteTunnel/electron-browser/remoteTunnel.contribution.js';
 // Chat
 import './contrib/chat/electron-browser/chat.contribution.js';
 import './contrib/chat/electron-browser/tunnelHost.contribution.js';
+// CreaEditor: Remote Access (phones and other devices use this Mac's Agents window)
+import './contrib/remoteAccess/electron-browser/remoteAccess.contribution.js';
 
 // Copilot Voice
 import './contrib/agentsVoice/electron-browser/agentsVoiceNativeCommands.js';
