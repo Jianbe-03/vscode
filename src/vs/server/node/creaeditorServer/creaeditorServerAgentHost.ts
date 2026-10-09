@@ -113,12 +113,12 @@ export class CreaEditorAgentHost extends Disposable {
 			[AGENT_HOST_PUBLISH_MACHINE_ENV_VAR]: '1',
 			[AgentHostCodexAgentEnabledEnvVar]: enableCodex ? 'true' : 'false',
 		};
-		delete env['ELECTRON_RUN_AS_NODE'];
+		delete env.ELECTRON_RUN_AS_NODE;
 		if (fromSources) {
-			env['VSCODE_DEV'] = '1';
-			env['VSCODE_DEV_INJECT_NODE_MODULE_LOOKUP_PATH'] = join(repoRoot, 'remote', 'node_modules');
+			env.VSCODE_DEV = '1';
+			env.VSCODE_DEV_INJECT_NODE_MODULE_LOOKUP_PATH = join(repoRoot, 'remote', 'node_modules');
 		} else {
-			env['VSCODE_NLS_CONFIG'] = JSON.stringify({ userLocale: 'en', osLocale: 'en', resolvedLanguage: 'en', defaultMessagesFile: nlsMessages, locale: 'en', availableLanguages: {} });
+			env.VSCODE_NLS_CONFIG = JSON.stringify({ userLocale: 'en', osLocale: 'en', resolvedLanguage: 'en', defaultMessagesFile: nlsMessages, locale: 'en', availableLanguages: {} });
 		}
 		// A socket left behind by a crash would make the listen fail.
 		fs.rmSync(this.socketPath, { force: true });

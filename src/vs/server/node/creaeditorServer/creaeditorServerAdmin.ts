@@ -10,7 +10,7 @@
 
 import { randomBytes, timingSafeEqual } from 'crypto';
 import * as fs from 'fs';
-import * as http from 'http';
+import type * as http from 'http';
 import * as os from 'os';
 import { IDisposable } from '../../../base/common/lifecycle.js';
 import { CreaEditorAgentHostState } from './creaeditorServerAgentHost.js';
@@ -104,9 +104,10 @@ export function readOrCreateAdminToken(file: string): string {
 }
 
 /** Starts the admin endpoint on 127.0.0.1 (a free port). */
-export function startCreaEditorServerAdmin(token: string, handler: ICreaEditorServerAdminHandler): Promise<ICreaEditorServerAdmin> {
+export async function startCreaEditorServerAdmin(token: string, handler: ICreaEditorServerAdminHandler): Promise<ICreaEditorServerAdmin> {
+	const { createServer } = await import('http');
 	const expected = Buffer.from(`Bearer ${token}`);
-	const server = http.createServer((request, response) => {
+	const server = createServer((request, response) => {
 		const given = Buffer.from(request.headers.authorization ?? '');
 		if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
 			send(response, 401, { error: 'unauthorized' });

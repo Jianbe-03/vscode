@@ -86,13 +86,13 @@ suite('CreaEditor Server', () => {
 
 	// Starts the real server main from `out/` with a scripted agent. It needs a Node.js binary (the tests
 	// run in Electron); it uses `.tools/node` of this repository when present.
-	const nodeBinary = !process.versions['electron'] ? process.execPath : [join(FileAccess.asFileUri('').fsPath, '..', '.tools', 'node', 'bin', 'node')].find(candidate => !isWindows && fs.existsSync(candidate));
+	const nodeBinary = !process.versions.electron ? process.execPath : [join(FileAccess.asFileUri('').fsPath, '..', '.tools', 'node', 'bin', 'node')].find(candidate => !isWindows && fs.existsSync(candidate));
 	(nodeBinary ? test : test.skip)('starts on 127.0.0.1, pairs a device and relays it to the agent host', async function () {
 		this.timeout(60_000);
 		const dataDir = fs.mkdtempSync(join(tmpdir(), 'creaeditor-server-'));
 		const home = fs.mkdtempSync(join(tmpdir(), 'creaeditor-server-home-'));
 		const env: NodeJS.ProcessEnv = { ...process.env, HOME: home, VSCODE_AGENT_HOST_CLAUDE_AGENT_ENABLED: 'false' };
-		delete env['ELECTRON_RUN_AS_NODE'];
+		delete env.ELECTRON_RUN_AS_NODE;
 		const main = FileAccess.asFileUri('vs/server/node/creaeditorServer/creaeditorServerMain.js').fsPath;
 		const server = spawn(nodeBinary!, [main, '--host', '127.0.0.1', '--port', '0', '--data-dir', dataDir, '--disable-codex', '--enable-mock-agent'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
 		try {

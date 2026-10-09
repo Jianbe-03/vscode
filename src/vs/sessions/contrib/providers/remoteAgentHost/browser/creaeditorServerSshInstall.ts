@@ -128,20 +128,20 @@ async function pickSshHost(accessor: ServicesAccessor): Promise<ISSHAgentHostCon
 		return undefined;
 	}
 
-	const parsed = aliases.includes(value) ? { host: value } : parseSSHHostInput(value);
+	const parsed: { host: string; username?: string; port?: number } | undefined = aliases.includes(value) ? { host: value } : parseSSHHostInput(value);
 	if (!parsed) {
 		notificationService.error(localize('creaeditorServers.ssh.badHost', "Enter a host as user@host or user@host:port."));
 		return undefined;
 	}
 	const resolved = await sshService.resolveSSHConfig(parsed.host).catch(() => undefined);
-	let username = ('username' in parsed ? parsed.username : undefined) ?? resolved?.user;
+	let username = parsed.username ?? resolved?.user;
 	if (!username) {
 		username = (await quickInputService.input({ title, prompt: localize('creaeditorServers.ssh.user', "Enter the username for {0}.", parsed.host), ignoreFocusLost: true }))?.trim();
 		if (!username) {
 			return undefined;
 		}
 	}
-	const port = ('port' in parsed ? parsed.port : undefined) ?? (resolved?.port !== 22 ? resolved?.port : undefined);
+	const port = parsed.port ?? (resolved?.port !== 22 ? resolved?.port : undefined);
 	return {
 		host: resolved?.hostname ?? parsed.host,
 		...(port ? { port } : {}),
