@@ -278,7 +278,9 @@ export async function delegateChat(request: IDelegateRequest, options: IDelegate
 			}
 		}
 
-		const accountsEnvelope = request.accounts && (request.accounts.claudeTokens?.length || request.accounts.gatewayKey)
+		// Sealed even without accounts: the envelope also tells the server's agent host that this chat's
+		// session files arrived (it lists them, so the session can be imported).
+		const accountsEnvelope = request.accounts
 			? sealDelegationPayload(JSON.stringify(request.accounts), serverKey.publicKey, delegationId)
 			: undefined;
 

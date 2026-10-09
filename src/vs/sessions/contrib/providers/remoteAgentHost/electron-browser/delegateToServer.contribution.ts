@@ -10,7 +10,7 @@
 // its results come back with Bring Back Changes or Open PR from the Server.
 
 import '../../../../../platform/agentHost/electron-browser/creaeditorDelegationService.js';
-import { raceTimeout } from '../../../../../base/common/async.js';
+import { raceTimeout, timeout } from '../../../../../base/common/async.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../base/common/observable.js';
@@ -62,6 +62,9 @@ const CHANGE_RESULTS_MODE_COMMAND_ID = 'creaeditor.delegation.changeResultsMode'
 
 /** How long the server's agent host connection is waited for after the code went up. */
 const CONNECTION_TIMEOUT_MS = 30_000;
+/** How often importing the resumed session on the server is tried, and how far apart. */
+const IMPORT_ATTEMPTS = 5;
+const IMPORT_RETRY_MS = 1500;
 /** How long a resumed session may take to show up in the server's sessions list. */
 const SESSION_APPEAR_TIMEOUT_MS = 15_000;
 
@@ -355,7 +358,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 					maxUploadBytes: maxUploadMb * 1024 * 1024,
 					agent: isClaude ? DelegationAgentKind.Claude : DelegationAgentKind.Transcript,
 					...(agentSessionId ? { agentSessionId } : {}),
-					...(claudeTokens?.length ? { accounts: { claudeTokens } } : {}),
+					...(isClaude ? { accounts: { claudeTokens } } : {}),
 					sourceName: '',
 				});
 			} finally {
@@ -400,12 +403,19 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 			}
 		}
 		if (result.sessionFilesSent && result.record.resumeSessionId && connected.connection.importSession) {
-			try {
-				await connected.connection.importSession(URI.from({ scheme: 'claude', path: `/${result.record.resumeSessionId}` }));
-				remoteResource = URI.from({ scheme: remoteAgentHostSessionTypeId(connected.authority, 'claude'), path: `/${result.record.resumeSessionId}` });
-			} catch (error) {
-				logService.warn(`[Delegation] ${server.name} could not resume the Claude session: ${errorMessage(error)}`);
-				transcriptOnly = true;
+			// The server lists the installed session a moment after the accounts call; try a few times.
+			const backendSession = URI.from({ scheme: 'claude', path: `/${result.record.resumeSessionId}` });
+			for (let attempt = 1; attempt <= IMPORT_ATTEMPTS && !remoteResource; attempt++) {
+				try {
+					await connected.connection.importSession(backendSession);
+					remoteResource = URI.from({ scheme: remoteAgentHostSessionTypeId(connected.authority, 'claude'), path: `/${result.record.resumeSessionId}` });
+				} catch (error) {
+					if (attempt === IMPORT_ATTEMPTS) {
+						logService.warn(`[Delegation] ${server.name} could not resume the Claude session: ${errorMessage(error)}`);
+					} else {
+						await timeout(IMPORT_RETRY_MS);
+					}
+				}
 			}
 		}
 		if (!remoteResource) {

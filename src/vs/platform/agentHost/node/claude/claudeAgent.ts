@@ -2530,6 +2530,10 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			await this._accounts.handleRequest({ id: generateUuid(), type: 'add', provider: 'claude', kind: 'token', label: account.label, accountId: account.accountId });
 		}
 		this._logService.info(`[Claude] Added ${payload.claudeTokens?.length ?? 0} account(s) of delegated chat ${delegationId}`);
+		// The delegated chat's session files were just installed: list them, so the client can import
+		// the session (it continues as the same Claude session here).
+		this._claudeCodeChatDiscovery = undefined;
+		await this._startClaudeCodeChatDiscovery();
 		return true;
 	}
 
