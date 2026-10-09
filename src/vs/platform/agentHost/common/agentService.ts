@@ -781,6 +781,9 @@ export interface IConnectionTrackerService {
 	 * enabled (e.g. running in an environment without `node:inspector`).
 	 */
 	getInspectInfo(tryEnable: boolean): Promise<IAgentHostInspectInfo | undefined>;
+
+	/** CreaEditor: the number of sessions with a running turn (Remote Access keeps the Mac awake while above 0). */
+	getActiveSessionCount?(): Promise<number>;
 }
 
 /**
@@ -816,6 +819,8 @@ export interface IAgentHostManagementService {
 	readDebugLogsChunk(resource: URI, position: number): Promise<IAgentHostDebugLogsChunk>;
 	startWebSocketServer(): Promise<IAgentHostSocketInfo>;
 	getInspectInfo(tryEnable: boolean): Promise<IAgentHostInspectInfo | undefined>;
+	/** CreaEditor: the number of sessions with a running turn. */
+	getActiveSessionCount(): Promise<number>;
 }
 
 // ---- Service interfaces -----------------------------------------------------

@@ -400,6 +400,10 @@ async function startAgentHost(): Promise<void> {
 			dynamicSocketInfo = { socketPath };
 			return dynamicSocketInfo;
 		},
+		// CreaEditor: Remote Access keeps the Mac awake while chats run.
+		async getActiveSessionCount(): Promise<number> {
+			return stateManager.rootState.activeSessions ?? 0;
+		},
 		async getInspectInfo(tryEnable: boolean): Promise<IAgentHostInspectInfo | undefined> {
 			let url = inspector.url();
 			if (!url && tryEnable) {

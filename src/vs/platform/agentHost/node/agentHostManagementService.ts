@@ -158,4 +158,9 @@ export class AgentHostManagementService implements IAgentHostManagementService {
 	getInspectInfo(tryEnable: boolean): Promise<IAgentHostInspectInfo | undefined> {
 		return this._connectionTrackerService.getInspectInfo(tryEnable);
 	}
+
+	// CreaEditor: Remote Access keeps the Mac awake while chats run.
+	async getActiveSessionCount(): Promise<number> {
+		return await this._connectionTrackerService.getActiveSessionCount?.() ?? 0;
+	}
 }

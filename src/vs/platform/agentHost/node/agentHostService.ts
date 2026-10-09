@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { raceTimeout } from '../../../base/common/async.js';
+import { ProxyChannel } from '../../../base/parts/ipc/common/ipc.js';
 import { Disposable, DisposableStore, MutableDisposable } from '../../../base/common/lifecycle.js';
 import { ILogService, ILoggerService } from '../../log/common/log.js';
 import { RemoteLoggerChannelClient } from '../../log/common/logIpc.js';
@@ -11,7 +12,7 @@ import { ITelemetryService } from '../../telemetry/common/telemetry.js';
 import { AgentHostStartError, IAgentHostConnection, IAgentHostStarter } from '../common/agent.js';
 import { reportAgentHostProcessError } from '../common/agentHostProcessTelemetry.js';
 import { AgentHostLaunchKind } from '../common/agentHostTelemetry.js';
-import { AgentHostIpcChannels } from '../common/agentService.js';
+import { AgentHostIpcChannels, IAgentHostManagementService } from '../common/agentService.js';
 
 enum Constants {
 	MaxRestarts = 5,
@@ -72,6 +73,19 @@ export class AgentHostProcessManager extends Disposable {
 
 	start(): Promise<void> {
 		return this._ensureStarted();
+	}
+
+	/**
+	 * CreaEditor: the management service of the running agent host (Remote Access relays to it from
+	 * the main process). With `start`, starts the agent host first; otherwise `undefined` when it
+	 * is not running.
+	 */
+	async getManagementService(start: boolean): Promise<IAgentHostManagementService | undefined> {
+		if (start) {
+			await this._ensureStarted();
+		}
+		const connection = this._connection;
+		return connection ? ProxyChannel.toService<IAgentHostManagementService>(connection.client.getChannel(AgentHostIpcChannels.Management)) : undefined;
 	}
 
 	private _ensureStarted(): Promise<void> {
