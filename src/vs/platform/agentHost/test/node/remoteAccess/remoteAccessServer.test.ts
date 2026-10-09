@@ -15,7 +15,8 @@ import { getRandomTestPath } from '../../../../../base/test/node/testUtils.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { NullLogService } from '../../../../log/common/log.js';
 import { RemoteAccessAuth } from '../../../node/remoteAccess/remoteAccessAuth.js';
-import { IRemoteAccessServerHandle, RemoteAccessProtocolServer, startRemoteAccessServer } from '../../../node/remoteAccess/remoteAccessServer.js';
+import { createSocketRelayConnector, IRemoteAccessServerHandle, RemoteAccessProtocolServer, startRemoteAccessServer } from '../../../node/remoteAccess/remoteAccessServer.js';
+import { WebSocketProtocolServer } from '../../../node/webSocketTransport.js';
 
 suite('RemoteAccessServer', () => {
 	const store = ensureNoDisposablesAreLeakedInTestSuite();
@@ -124,6 +125,50 @@ async function request(address: string, options: { method?: string; body?: strin
 		req.end(options.body);
 	});
 }
+
+suite('RemoteAccessServer relay', () => {
+	const store = ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('relays an authenticated connection to an agent host socket', async () => {
+		const dir = getRandomTestPath(tmpdir(), 'vsctests', 'remoteAccessRelay');
+		await fs.mkdir(dir, { recursive: true });
+		// Unix socket paths are short; keep it in the OS temp folder.
+		const socketPath = join(tmpdir(), `ra-${Date.now().toString(36)}.sock`);
+		const agentHost = store.add(await WebSocketProtocolServer.create({ socketPath }, new NullLogService()));
+		await agentHost.whenListening;
+		store.add(agentHost.onConnection(transport => {
+			store.add(transport);
+			store.add(transport.onMessage(message => transport.send(message)));
+		}));
+		const auth = store.add(await RemoteAccessAuth.create(join(dir, 'auth'), new NullLogService(), { scryptCost: 1024 }));
+		const server = store.add(await startRemoteAccessServer({
+			hosts: ['127.0.0.1'],
+			port: 0,
+			webRoot: undefined,
+			auth,
+			publicMode: false,
+			connector: createSocketRelayConnector(async () => socketPath, new NullLogService()),
+			logService: new NullLogService(),
+			product: { name: 'CreaEditor', version: '1.0.0' },
+			hostName: 'test-mac',
+		}));
+		try {
+			const paired = await auth.pair({ code: auth.createPairingCode().code, deviceName: 'Phone', requirePassword: false, client: 'test' });
+			assert.ok(paired.ok);
+			const socket = await connect(`ws://127.0.0.1:${server.port}/ahp?${connectionTokenQueryName}=${encodeURIComponent(paired.deviceKey)}`);
+			const reply = new Promise<string>(resolve => socket.once('message', data => resolve(String(data))));
+			// Sent before the relay reached the agent host: buffered, not lost.
+			socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'ping' }));
+			assert.deepStrictEqual(JSON.parse(await reply), { jsonrpc: '2.0', method: 'ping' });
+			const closed = new Promise<void>(resolve => socket.once('close', () => resolve()));
+			socket.close();
+			await closed;
+		} finally {
+			await server.close();
+			await fs.rm(dir, { recursive: true, force: true });
+		}
+	});
+});
 
 async function connect(address: string): Promise<wsTypes.WebSocket> {
 	const { WebSocket } = await import('ws');
