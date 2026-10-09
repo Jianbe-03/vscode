@@ -244,6 +244,8 @@ import './contrib/providers/remoteAgentHost/browser/remoteAgentHostTerminal.cont
 import './contrib/providers/remoteAgentHost/browser/tunnelAgentHost.contribution.js';
 import './contrib/providers/remoteAgentHost/browser/wslAgentHost.contribution.js';
 import './contrib/providers/remoteAgentHost/browser/sshAgentHost.contribution.js';
+// CreaEditor: Add CreaEditor Server and the Servers list.
+import './contrib/providers/remoteAgentHost/browser/creaeditorServers.contribution.js';
 import './contrib/providers/remoteAgentHost/browser/webSocketAgentHost.contribution.js';
 import './contrib/providers/remoteAgentHost/browser/devContainerAgentHostService.js';
 import './contrib/providers/remoteAgentHost/electron-browser/devContainerAgentHostConnector.contribution.js';

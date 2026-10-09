@@ -143,6 +143,8 @@ export const enum RemoteAgentHostEntryType {
 	Tunnel = 'tunnel',
 	CloudSandbox = 'cloudSandbox',
 	DevContainer = 'devContainer',
+	/** CreaEditor: a CreaEditor Server, paired with a device key kept in secret storage. */
+	CreaEditorServer = 'creaeditorServer',
 }
 
 export interface IRemoteAgentHostWebSocketConnection {
@@ -241,7 +243,22 @@ export interface IRemoteAgentHostDevContainerConnection {
 	readonly hostAuthority?: string;
 }
 
-export type RemoteAgentHostConnection = IRemoteAgentHostWebSocketConnection | IRemoteAgentHostSSHConnection | IRemoteAgentHostWSLConnection | IRemoteAgentHostTunnelConnection | IRemoteAgentHostCloudSandboxConnection | IRemoteAgentHostDevContainerConnection;
+/**
+ * CreaEditor: a CreaEditor Server (`src/vs/server/node/creaeditorServer/`). Its entries come from the
+ * CreaEditor Servers list; the device key is the entry's connection token. A server can also receive
+ * code from this machine (it is a CreaEditor agent host with a code receiver).
+ */
+export interface IRemoteAgentHostCreaEditorServerConnection {
+	readonly type: RemoteAgentHostEntryType.CreaEditorServer;
+	/** The agent host WebSocket, e.g. `wss://agents.example.com/ahp` or `100.64.0.2:31600/ahp`. */
+	readonly address: string;
+	/** The server's `http(s)://host[:port]`. */
+	readonly serverUrl: string;
+	/** The server's id in the CreaEditor Servers list. */
+	readonly serverId: string;
+}
+
+export type RemoteAgentHostConnection = IRemoteAgentHostWebSocketConnection | IRemoteAgentHostSSHConnection | IRemoteAgentHostWSLConnection | IRemoteAgentHostTunnelConnection | IRemoteAgentHostCloudSandboxConnection | IRemoteAgentHostDevContainerConnection | IRemoteAgentHostCreaEditorServerConnection;
 
 /** A configured remote agent host entry. WebSocket entries are persisted in {@link RemoteAgentHostsSettingId}; SSH entries are persisted in storage. */
 export interface IRemoteAgentHostEntry {
@@ -647,6 +664,12 @@ const DEV_CONTAINER_RECONNECT_POLICY: IRemoteAgentHostReconnectPolicy = {
 };
 const DEV_CONTAINER_ENTRY_TYPE_CONFIG = runtimeEntryTypeConfig<IRemoteAgentHostDevContainerConnection>(RemoteAgentHostEntryType.DevContainer, true, connection => connection.address, DEV_CONTAINER_RECONNECT_POLICY);
 
+// CreaEditor: entries come from the CreaEditor Servers list, which also keeps them.
+const CREAEDITOR_SERVER_ENTRY_TYPE_CONFIG: IRemoteAgentHostEntryTypeConfig<IRemoteAgentHostCreaEditorServerConnection> = {
+	...runtimeEntryTypeConfig<IRemoteAgentHostCreaEditorServerConnection>(RemoteAgentHostEntryType.CreaEditorServer, true, connection => connection.address),
+	dialedFromEntries: true,
+};
+
 const ENTRY_TYPE_CONFIGS: { readonly [K in RemoteAgentHostEntryType]: IRemoteAgentHostEntryTypeConfig<Extract<RemoteAgentHostConnection, { type: K }>> } = {
 	[RemoteAgentHostEntryType.WebSocket]: WEBSOCKET_ENTRY_TYPE_CONFIG,
 	[RemoteAgentHostEntryType.SSH]: SSH_ENTRY_TYPE_CONFIG,
@@ -654,6 +677,7 @@ const ENTRY_TYPE_CONFIGS: { readonly [K in RemoteAgentHostEntryType]: IRemoteAge
 	[RemoteAgentHostEntryType.Tunnel]: TUNNEL_ENTRY_TYPE_CONFIG,
 	[RemoteAgentHostEntryType.CloudSandbox]: CLOUD_SANDBOX_ENTRY_TYPE_CONFIG,
 	[RemoteAgentHostEntryType.DevContainer]: DEV_CONTAINER_ENTRY_TYPE_CONFIG,
+	[RemoteAgentHostEntryType.CreaEditorServer]: CREAEDITOR_SERVER_ENTRY_TYPE_CONFIG,
 };
 
 /** Gets the static persistence and connection policy for an entry type. */

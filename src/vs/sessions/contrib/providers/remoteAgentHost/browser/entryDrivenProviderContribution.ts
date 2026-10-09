@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { type Event } from '../../../../../base/common/event.js';
+import { type ThemeIcon } from '../../../../../base/common/themables.js';
 import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { type IRemoteAgentHostEntry, IRemoteAgentHostService, RemoteAgentHostConnectionStatus, RemoteAgentHostEntryType, RemoteAgentHostsEnabledSettingId, getEntryAddress } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { type IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -22,6 +23,10 @@ export interface IEntryDrivenProviderOptions {
 	readonly autoConnect?: IAgentHostAutoConnect;
 	readonly initialStatus?: RemoteAgentHostConnectionStatus;
 	readonly preferenceKey?: string;
+	/** CreaEditor: permanently removes the host (see `IRemoteAgentHostSessionsProviderConfig.removeOnDemand`). */
+	readonly removeOnDemand?: () => Promise<void>;
+	/** CreaEditor: type icon of the host's workspaces. */
+	readonly workspaceTypeIcon?: ThemeIcon;
 }
 
 /**
@@ -102,6 +107,8 @@ export abstract class EntryDrivenProviderContribution extends Disposable {
 			onDidReportConnectProgress: options.onDidReportConnectProgress,
 			autoConnect: options.autoConnect,
 			preferenceKey: options.preferenceKey,
+			removeOnDemand: options.removeOnDemand,
+			workspaceTypeIcon: options.workspaceTypeIcon,
 		});
 		if (options.initialStatus !== undefined) {
 			provider.setConnectionStatus(options.initialStatus);
