@@ -16,6 +16,11 @@ export const GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID = 'creaeditor.subscripti
 export const REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID = 'creaeditor.subscriptionAccounts.refreshUsage';
 /** Workbench command that opens the Subscription Usage page. */
 export const SHOW_SUBSCRIPTION_USAGE_COMMAND_ID = 'workbench.action.chat.showSubscriptionUsage';
+/** Workbench commands that add a Claude or Codex subscription account. */
+export const ADD_SUBSCRIPTION_ACCOUNT_COMMAND_IDS = {
+	claude: 'workbench.action.chat.addClaudeAccount',
+	codex: 'workbench.action.chat.addCodexAccount',
+} as const;
 
 /** One usage window of an account, such as the 5-hour or the weekly limit. */
 interface ISubscriptionUsageWindow {
@@ -69,7 +74,9 @@ export function getSubscriptionsStrings() {
 		subsRefresh: l10n.t('Refresh Usage'),
 		subsOpen: l10n.t('Show Subscription Usage'),
 		subsUpdated: l10n.t('Usage read at {0}'),
-		subsEmpty: l10n.t('No Claude or Codex subscription accounts. Add one with the Add Claude Account or Add Codex Account command.'),
+		subsEmpty: l10n.t('No Claude or Codex subscription accounts yet. Add one to run chats on your subscription.'),
+		subsAddClaude: l10n.t('Add Claude Account'),
+		subsAddCodex: l10n.t('Add Codex Account'),
 		subsUnavailable: l10n.t('Subscription accounts are not available in this window.'),
 		subsProvider_claude: l10n.t('Claude'),
 		subsProvider_codex: l10n.t('Codex'),
@@ -120,6 +127,7 @@ export const SUBSCRIPTIONS_STYLES = `
 	.subs-head { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin-bottom: 8px; }
 	.subs-head h2 { font-size: var(--vscode-fontSize-heading3, 13px); font-weight: var(--vscode-fontWeight-semiBold, 600); margin: 0; }
 	.subs-empty { color: var(--vscode-descriptionForeground); }
+	.subs-add { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 	.pools { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 12px 24px; }
 	.pool-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; margin-bottom: 4px; }
 	.pool-name { font-weight: var(--vscode-fontWeight-semiBold, 600); }
@@ -172,7 +180,11 @@ function renderSubscriptions() {
 	if (!subscriptionsLoaded) { return; }
 	if (!subscriptions) { body.innerHTML = '<div class="subs-empty">' + esc(S.subsUnavailable) + '</div>'; $('subs-updated').textContent = ''; $('subs-refresh').hidden = true; return; }
 	$('subs-refresh').hidden = false;
-	if (!subscriptions.accounts.length) { body.innerHTML = '<div class="subs-empty">' + esc(S.subsEmpty) + '</div>'; $('subs-updated').textContent = ''; return; }
+	if (!subscriptions.accounts.length) {
+		body.innerHTML = '<div class="subs-empty">' + esc(S.subsEmpty) + '</div><div class="subs-add"><button type="button" data-add-account="claude">' + esc(S.subsAddClaude) + '</button><button type="button" data-add-account="codex">' + esc(S.subsAddCodex) + '</button></div>';
+		$('subs-updated').textContent = '';
+		return;
+	}
 	const updated = Math.max(0, ...subscriptions.accounts.map(a => a.usageUpdatedAt || 0));
 	$('subs-updated').textContent = updated ? fmt(S.subsUpdated, new Date(updated).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })) : '';
 	body.innerHTML = '<div class="pools">' + subscriptions.pools.map(pool => {
@@ -199,6 +211,10 @@ function renderSubscriptions() {
 }
 $('subs-refresh').addEventListener('click', () => vscode.postMessage({ type: 'refreshSubscriptions' }));
 $('subs-open').addEventListener('click', () => vscode.postMessage({ type: 'openSubscriptionUsage' }));
+$('subs-body').addEventListener('click', event => {
+	const target = event.target instanceof Element ? event.target.closest('button') : null;
+	if (target?.dataset.addAccount) { vscode.postMessage({ type: 'addSubscriptionAccount', provider: target.dataset.addAccount }); }
+});
 window.addEventListener('message', event => {
 	if (event.data?.type === 'subscriptions') {
 		subscriptions = event.data.state;

@@ -15,7 +15,7 @@ import { ADVANCED_STYLES, escapeHtml, getAdvancedMarkup, getAdvancedScript, getA
 import { GatewayBudgets } from './gatewayBudgets';
 import { getKeysMarkup, getKeysStrings, KEYS_SCRIPT, KEYS_STYLES, toBudgetSnapshots } from './gatewayCostsKeysView';
 import { GatewayKeyStatusMonitor } from './gatewayKeyStatusMonitor';
-import { GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID, getSubscriptionsMarkup, ISubscriptionAccountsSnapshot, getSubscriptionsStrings, REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SUBSCRIPTIONS_SCRIPT, SUBSCRIPTIONS_STYLES, toSubscriptionAccountsSnapshot } from './gatewayCostsSubscriptionsView';
+import { ADD_SUBSCRIPTION_ACCOUNT_COMMAND_IDS, GET_SUBSCRIPTION_ACCOUNTS_STATE_COMMAND_ID, getSubscriptionsMarkup, ISubscriptionAccountsSnapshot, getSubscriptionsStrings, REFRESH_SUBSCRIPTION_USAGE_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SUBSCRIPTIONS_SCRIPT, SUBSCRIPTIONS_STYLES, toSubscriptionAccountsSnapshot } from './gatewayCostsSubscriptionsView';
 
 export const SHOW_GATEWAY_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
 
@@ -30,6 +30,7 @@ type PanelMessage =
 	| { readonly type: 'clear' }
 	| { readonly type: 'refreshSubscriptions' }
 	| { readonly type: 'openSubscriptionUsage' }
+	| { readonly type: 'addSubscriptionAccount'; readonly provider: string }
 	| { readonly type: 'refreshKeys' }
 	| { readonly type: 'addBudget' }
 	| { readonly type: 'editBudget'; readonly id: string }
@@ -152,6 +153,11 @@ export class GatewayCostsPanel extends Disposable {
 				break;
 			case 'openSubscriptionUsage':
 				await commands.executeCommand(SHOW_SUBSCRIPTION_USAGE_COMMAND_ID);
+				break;
+			case 'addSubscriptionAccount':
+				if (message.provider === 'claude' || message.provider === 'codex') {
+					await commands.executeCommand(ADD_SUBSCRIPTION_ACCOUNT_COMMAND_IDS[message.provider]);
+				}
 				break;
 			case 'exportCsv':
 				await this._exportCsv();
