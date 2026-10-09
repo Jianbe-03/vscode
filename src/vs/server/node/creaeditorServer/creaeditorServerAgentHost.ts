@@ -16,6 +16,7 @@ import { Disposable } from '../../../base/common/lifecycle.js';
 import { join } from '../../../base/common/path.js';
 import { AGENT_HOST_SECRETS_DIR_ENV_VAR } from '../../../platform/agentHost/node/shared/fileSecretStore.js';
 import { AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR } from '../../../platform/agentHost/node/shared/subscriptionAccountsService.js';
+import { AGENT_HOST_PUBLISH_MACHINE_ENV_VAR } from '../../../platform/agentHost/node/shared/serverMachineStatus.js';
 import { AgentHostCodexAgentEnabledEnvVar } from '../../../platform/agentHost/common/agentService.js';
 import { ICreaEditorServerDataLayout } from './creaeditorServerDataDir.js';
 
@@ -109,6 +110,7 @@ export class CreaEditorAgentHost extends Disposable {
 			VSCODE_HANDLES_UNCAUGHT_ERRORS: 'true',
 			[AGENT_HOST_SECRETS_DIR_ENV_VAR]: layout.secrets,
 			[AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR]: '1',
+			[AGENT_HOST_PUBLISH_MACHINE_ENV_VAR]: '1',
 			[AgentHostCodexAgentEnabledEnvVar]: enableCodex ? 'true' : 'false',
 		};
 		delete env['ELECTRON_RUN_AS_NODE'];

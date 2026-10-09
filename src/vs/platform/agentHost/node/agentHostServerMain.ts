@@ -55,6 +55,7 @@ import { resolveServerUrls } from './serverUrls.js';
 import ErrorTelemetry from '../../telemetry/node/errorTelemetry.js';
 import { AgentHostLaunchKind } from '../common/agentHostTelemetry.js';
 import { ISessionDataService } from '../common/sessionDataService.js';
+import { AGENT_HOST_PUBLISH_MACHINE_ENV_VAR, ServerMachineStatusPublisher } from './shared/serverMachineStatus.js';
 
 /** Log to stderr so messages appear in the terminal alongside the process. */
 function log(msg: string): void {
@@ -307,6 +308,11 @@ async function main(): Promise<void> {
 	// recurring timer in its constructor is one that no faked-timer unit test
 	// can ever drain.
 	disposables.add(instantiationService.createInstance(AgentModelRefreshScheduler, runtime.agents, runtime.onDidStartTurn, MODEL_REFRESH_INTERVAL_MS));
+
+	// CreaEditor: on a CreaEditor Server, show clients how busy the machine is.
+	if (process.env[AGENT_HOST_PUBLISH_MACHINE_ENV_VAR] === '1') {
+		disposables.add(instantiationService.createInstance(ServerMachineStatusPublisher));
+	}
 
 	// WebSocket server
 	const wsServer = disposables.add(await WebSocketProtocolServer.create({

@@ -329,13 +329,10 @@ async function main(): Promise<void> {
 				return;
 			case 'status':
 				process.exit(await status(options));
-				return;
 			case 'pair':
 				process.exit(await pair(options));
-				return;
 			case 'password':
 				process.exit(await password(options));
-				return;
 			case 'serve':
 				await serve(options);
 				return;

@@ -140,3 +140,30 @@ export function normalizePairingCode(code: string): string {
 export function getCreaEditorServerWebUrl(baseUrl: string): string {
 	return `${baseUrl.replace(/\/+$/, '')}/`;
 }
+
+/**
+ * The root config value (transient) in which the agent host of a CreaEditor Server publishes how busy
+ * its machine is, so clients can show it next to the server (`readCreaEditorServerMachine`).
+ */
+export const CREAEDITOR_SERVER_MACHINE_KEY = 'creaeditor.server.machine';
+
+/** What {@link CREAEDITOR_SERVER_MACHINE_KEY} holds. */
+export interface ICreaEditorServerMachine {
+	/** The 1-minute load average as a share of all cores, 0-100. */
+	readonly cpuPercent: number;
+	readonly cores: number;
+	readonly memoryTotalBytes: number;
+	readonly memoryFreeBytes: number;
+	/** Epoch milliseconds of the reading. */
+	readonly updatedAt: number;
+}
+
+/** Reads {@link CREAEDITOR_SERVER_MACHINE_KEY} from root config values. */
+export function readCreaEditorServerMachine(values: Readonly<Record<string, unknown>> | undefined): ICreaEditorServerMachine | undefined {
+	const value = values?.[CREAEDITOR_SERVER_MACHINE_KEY] as Partial<ICreaEditorServerMachine> | undefined;
+	if (!value || typeof value !== 'object') {
+		return undefined;
+	}
+	const numbers = [value.cpuPercent, value.cores, value.memoryTotalBytes, value.memoryFreeBytes, value.updatedAt];
+	return numbers.every(item => typeof item === 'number' && Number.isFinite(item)) ? value as ICreaEditorServerMachine : undefined;
+}
