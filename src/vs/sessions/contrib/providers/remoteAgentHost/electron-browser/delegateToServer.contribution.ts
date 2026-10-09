@@ -36,6 +36,7 @@ import { IOpenerService } from '../../../../../platform/opener/common/opener.js'
 import { IProgressService, ProgressLocation } from '../../../../../platform/progress/common/progress.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../../platform/quickinput/common/quickInput.js';
 import { Registry } from '../../../../../platform/registry/common/platform.js';
+import { IWorkspaceTrustManagementService } from '../../../../../platform/workspace/common/workspaceTrust.js';
 import { ISecretStorageService } from '../../../../../platform/secrets/common/secrets.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
 import { buildDelegationTranscript, createDelegationTranscriptAttachment } from '../../../../../workbench/contrib/chat/browser/actions/chatContinueInAction.js';
@@ -223,6 +224,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 	const configurationService = accessor.get(IConfigurationService);
 	const logService = accessor.get(ILogService);
 	const instantiationService = accessor.get(IInstantiationService);
+	const workspaceTrustManagementService = accessor.get(IWorkspaceTrustManagementService);
 	const store = getDelegatedChats(accessor);
 
 	const session = getSessionArg(accessor, context);
@@ -388,6 +390,8 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 	let remoteResource: URI | undefined;
 	let transcriptOnly = !result.sessionFilesSent;
 	if (connected) {
+		// The worktree holds this computer's own code: trust it like the folder it came from.
+		await workspaceTrustManagementService.setUrisTrust([toAgentHostUri(URI.file(result.record.worktree), connected.authority)], true).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
 		if (result.accountsEnvelope) {
 			try {
 				await connected.connection.authenticate({ resource: `${CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}${result.record.delegationId}`, token: JSON.stringify(result.accountsEnvelope) });
