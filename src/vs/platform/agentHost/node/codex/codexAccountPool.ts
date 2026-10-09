@@ -28,6 +28,8 @@ export interface ICodexAccountRuntime {
 	readonly limitedUntil?: number;
 	readonly error?: string;
 	readonly authUrl?: string;
+	/** A device sign-in: the code to enter on the {@link authUrl} page. */
+	readonly authCode?: string;
 }
 
 /** What to do with a chat whose account just hit its limit. */
@@ -99,7 +101,7 @@ export class CodexAccountPool extends Disposable {
 		const previous = this.getRuntime(accountId);
 		const full = usage.some(window => window.usedPercent >= 100);
 		const limitedUntil = full ? codexLimitedUntil(usage, now) : previous.limitedUntil !== undefined && previous.limitedUntil > now ? previous.limitedUntil : undefined;
-		this.update(accountId, { usage, usageUpdatedAt: readAt, limitedUntil, status: limitedUntil !== undefined ? 'limited' : 'signedIn', error: undefined, authUrl: undefined });
+		this.update(accountId, { usage, usageUpdatedAt: readAt, limitedUntil, status: limitedUntil !== undefined ? 'limited' : 'signedIn', error: undefined, authUrl: undefined, authCode: undefined });
 	}
 
 	/** Marks the account used up after Codex refused a turn. */
@@ -173,6 +175,7 @@ export class CodexAccountPool extends Disposable {
 			// A signed-in account keeps its note too, such as why its usage could not be read.
 			...(runtime.error ? { error: runtime.error } : {}),
 			...(runtime.authUrl && status === 'signingIn' ? { authUrl: runtime.authUrl } : {}),
+			...(runtime.authUrl && runtime.authCode && status === 'signingIn' ? { authCode: runtime.authCode } : {}),
 		};
 	}
 }

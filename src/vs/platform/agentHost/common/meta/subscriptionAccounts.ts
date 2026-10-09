@@ -71,6 +71,13 @@ export interface ISubscriptionAccount {
 	readonly error?: string;
 	/** Browser URL to finish a `login` sign-in, while `status` is `signingIn`. */
 	readonly authUrl?: string;
+	/** A device sign-in: the code to enter on the {@link authUrl} page, while `status` is `signingIn`. */
+	readonly authCode?: string;
+	/**
+	 * The sign-in waits for the code the {@link authUrl} page shows after signing in (a sign-in on another
+	 * machine, such as a CreaEditor Server): send it with a `submitAuthCode` request.
+	 */
+	readonly acceptsAuthCode?: boolean;
 }
 
 export interface ISubscriptionAccountsState {
@@ -84,6 +91,8 @@ export type ISubscriptionAccountsRequest =
 	| { readonly id: string; readonly type: 'rename'; readonly accountId: string; readonly label: string }
 	| { readonly id: string; readonly type: 'move'; readonly accountId: string; readonly index: number }
 	| { readonly id: string; readonly type: 'signIn'; readonly accountId: string }
+	/** The code the sign-in page showed, for an account whose sign-in {@link ISubscriptionAccount.acceptsAuthCode}. */
+	| { readonly id: string; readonly type: 'submitAuthCode'; readonly accountId: string; readonly code: string }
 	| { readonly id: string; readonly type: 'refreshUsage'; readonly provider?: SubscriptionProvider }
 	/** Continue the chat's interrupted turn on another account, after the user agreed to switch. */
 	| { readonly id: string; readonly type: 'switchChat'; readonly chat: string; readonly accountId: string }

@@ -106,7 +106,7 @@ import { codexAccountRateLimitsFromResponse, codexAccountStateFromResponse, type
 import { getCodexAccountTelemetryContext } from './codexAccountTelemetry.js';
 // CreaEditor: several Codex (ChatGPT subscription) accounts pooled behind one model picker entry.
 import { SUBSCRIPTION_LIMIT_ERROR_META_KEY, type ISubscriptionAccount, type ISubscriptionAccountsRequest } from '../../common/meta/subscriptionAccounts.js';
-import { ISubscriptionAccountsService, type IStoredSubscriptionAccount } from '../shared/subscriptionAccountsService.js';
+import { ISubscriptionAccountsService, isHeadlessSignIn, type IStoredSubscriptionAccount } from '../shared/subscriptionAccountsService.js';
 import { CODEX_DEFAULT_ACCOUNT_ID, CodexAccountPool } from './codexAccountPool.js';
 import { getCodexAccountHome, prepareCodexAccountHome, removeCodexAccountSignIn, resolveDefaultCodexHome } from './codexAccountHomes.js';
 import { CODEX_CONTINUE_PROMPT, codexContinuationPrompt, codexLimitErrorMeta, codexUsageWindows, isCodexAccountAvailable, isCodexUsageLimitError } from './codexSubscriptionAccounts.js';
@@ -1961,11 +1961,16 @@ export class CodexAgent extends Disposable implements IAgent {
 					void loginCompleted.complete(params);
 				});
 				try {
-					const response = await client.request<'account/login/start', LoginAccountResponse>('account/login/start', { type: 'chatgpt' });
-					if (response.type !== 'chatgpt') {
+					// CreaEditor: without a browser on this machine (a CreaEditor Server), sign in with a device
+					// code that the user enters on any device.
+					const response = await client.request<'account/login/start', LoginAccountResponse>('account/login/start', isHeadlessSignIn() ? { type: 'chatgptDeviceCode' } : { type: 'chatgpt' });
+					if (response.type === 'chatgpt') {
+						this._accountPool.update(accountId, { status: 'signingIn', authUrl: response.authUrl, authCode: undefined, error: undefined });
+					} else if (response.type === 'chatgptDeviceCode') {
+						this._accountPool.update(accountId, { status: 'signingIn', authUrl: response.verificationUrl, authCode: response.userCode, error: undefined });
+					} else {
 						return;
 					}
-					this._accountPool.update(accountId, { status: 'signingIn', authUrl: response.authUrl, error: undefined });
 					const result = completions.find(completion => completion.loginId === response.loginId) ?? await raceCancellationError(raceTimeout(Promise.race([
 						loginCompleted.p,
 						Event.toPromise(client.onExit).then(event => { throw new Error(`Codex app-server exited during ChatGPT sign-in (code=${event.code}, signal=${event.signal})`); }),
@@ -1976,7 +1981,7 @@ export class CodexAgent extends Disposable implements IAgent {
 					if (!result.success) {
 						throw new Error(result.error ?? localize('codexAccounts.signInFailed', "ChatGPT sign-in failed."));
 					}
-					this._accountPool.update(accountId, { authUrl: undefined, status: 'signedIn' });
+					this._accountPool.update(accountId, { authUrl: undefined, authCode: undefined, status: 'signedIn' });
 					await this._readCodexAccount(accountId, client);
 				} finally {
 					listener.dispose();
@@ -1985,7 +1990,7 @@ export class CodexAgent extends Disposable implements IAgent {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			this._logService.warn(`[Codex] Signing in account ${accountId} failed: ${message}`);
-			this._accountPool.update(accountId, { status: 'error', error: message, authUrl: undefined });
+			this._accountPool.update(accountId, { status: 'error', error: message, authUrl: undefined, authCode: undefined });
 		}
 	}
 

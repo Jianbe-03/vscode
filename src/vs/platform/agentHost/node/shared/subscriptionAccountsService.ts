@@ -52,6 +52,17 @@ import { SubscriptionUsageHistory } from './subscriptionUsageHistory.js';
  */
 const FAKE_ACCOUNTS_ENV_VAR = 'CREAEDITOR_FAKE_SUBSCRIPTION_ACCOUNTS';
 
+/**
+ * Set (to `1`) by the CreaEditor Server: this agent host has no browser, so `login` accounts sign in in a
+ * browser on another device (Codex with a device code, Claude with the code its sign-in page shows).
+ */
+export const AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR = 'CREAEDITOR_AGENT_HOST_HEADLESS_SIGN_IN';
+
+/** Whether `login` accounts sign in in a browser on another device, see {@link AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR}. */
+export function isHeadlessSignIn(): boolean {
+	return process.env[AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR] === '1';
+}
+
 /** How often the service asks every provider to read its accounts' usage. */
 const USAGE_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 /** How often a provider with an account past the usage warning threshold is read. */
