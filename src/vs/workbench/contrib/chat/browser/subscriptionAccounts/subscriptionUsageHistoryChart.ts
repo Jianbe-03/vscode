@@ -3,93 +3,50 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: the usage history charts of the Subscription Usage page. Per account a line per usage
-// window (used share per hour over the past weeks, with the 100% limit as a reference line), per pool
-// the tightest window averaged over its accounts, each with a summary such as "Hit its limit 6 times in
-// 4 weeks". Pointing at a chart shows the values of that hour below it.
+// CreaEditor: the usage history of the Subscription Usage page, one bar per day for the past weeks.
+// Per pool a verdict ("Enough accounts"), a one-line summary, a bar per day for how full the pool got
+// (colored when an account hit its limit or all were used up, with a tick for the weekly limits) and a
+// weekday-by-hour strip of when it is used; per account a compact row of daily bars. Pointing at a day,
+// or moving through the days with the arrow keys, shows that day's details.
 
 import * as DOM from '../../../../../base/browser/dom.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { language } from '../../../../../base/common/platform.js';
 import { localize } from '../../../../../nls.js';
-import { ISubscriptionUsageSample, countLimitHits, getSampleUsedPercent } from '../../../../../platform/agentHost/common/meta/subscriptionUsageHistory.js';
+import { ISubscriptionPoolVerdict, ISubscriptionUsageDay, ISubscriptionUsageHistorySummary, SUBSCRIPTION_POOL_TIGHT_PERCENT, getBusiestUsageTimes } from '../../../../../platform/agentHost/common/meta/subscriptionUsageHistory.js';
+import { formatShortDuration } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
+
+const $ = DOM.$;
 
 /** The charts cover this many weeks. */
 export const USAGE_HISTORY_WEEKS = 4;
-/** One point per hour. */
-export const USAGE_HISTORY_BUCKET_MS = 60 * 60 * 1000;
+export const USAGE_HISTORY_DAYS = USAGE_HISTORY_WEEKS * 7;
 
-/** One line of a chart: a name and the highest used share per bucket (undefined without a reading). */
-export interface IUsageHistorySeries {
-	readonly label: string;
-	readonly values: readonly (number | undefined)[];
+/** Up to this many limit hits a day are listed by account and time; more are counted. */
+const LISTED_LIMIT_HITS = 3;
+
+function formatDay(time: number): string {
+	return new Date(time).toLocaleDateString(language, { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-/** The time range of the charts, ending at the hour `now` falls in. */
-export function getUsageHistoryRange(now: number): { readonly start: number; readonly buckets: number } {
-	const end = Math.floor(now / USAGE_HISTORY_BUCKET_MS) * USAGE_HISTORY_BUCKET_MS + USAGE_HISTORY_BUCKET_MS;
-	const buckets = USAGE_HISTORY_WEEKS * 7 * 24;
-	return { start: end - buckets * USAGE_HISTORY_BUCKET_MS, buckets };
+function formatTime(time: number): string {
+	return new Date(time).toLocaleTimeString(language, { hour: 'numeric', minute: '2-digit' });
 }
 
-function bucketOf(time: number, start: number, buckets: number): number | undefined {
-	const index = Math.floor((time - start) / USAGE_HISTORY_BUCKET_MS);
-	return index >= 0 && index < buckets ? index : undefined;
+/** The time of day `hour` (0-24), such as "14:00". */
+function formatHour(hour: number): string {
+	return formatTime(new Date(2024, 0, 1, hour).getTime());
 }
 
-/**
- * One series per usage window of an account's samples, in the order the windows first appear, with
- * the highest used share per bucket. `labels` names the windows (by kind); unknown kinds keep their kind.
- */
-export function getAccountUsageSeries(samples: readonly ISubscriptionUsageSample[], start: number, buckets: number, labels: ReadonlyMap<string, string>): IUsageHistorySeries[] {
-	const byKind = new Map<string, (number | undefined)[]>();
-	for (const sample of samples) {
-		const index = bucketOf(sample.t, start, buckets);
-		if (index === undefined) {
-			continue;
-		}
-		for (const [kind, used] of sample.w) {
-			let values = byKind.get(kind);
-			if (!values) {
-				values = new Array<number | undefined>(buckets).fill(undefined);
-				byKind.set(kind, values);
-			}
-			values[index] = Math.max(values[index] ?? 0, Math.min(100, used));
-		}
-	}
-	return [...byKind].map(([kind, values]) => ({ label: labels.get(kind) ?? kind, values }));
+/** The name of a weekday, 0 being Monday. */
+function formatWeekday(weekday: number, style: 'long' | 'short'): string {
+	// 1 January 2024 was a Monday.
+	return new Date(2024, 0, 1 + weekday).toLocaleDateString(language, { weekday: style });
 }
 
-/**
- * The pool line (the tightest window, averaged over the accounts with a reading in each bucket) and
- * how many buckets every account of the pool was used up at once.
- */
-export function getPoolUsageHistory(samplesByAccount: ReadonlyMap<string, readonly ISubscriptionUsageSample[]>, start: number, buckets: number): { readonly values: readonly (number | undefined)[]; readonly exhaustedBuckets: number } {
-	const perAccount = [...samplesByAccount.values()].map(samples => {
-		const values = new Array<number | undefined>(buckets).fill(undefined);
-		for (const sample of samples) {
-			const index = bucketOf(sample.t, start, buckets);
-			if (index !== undefined) {
-				values[index] = Math.max(values[index] ?? 0, Math.min(100, getSampleUsedPercent(sample)));
-			}
-		}
-		return values;
-	});
-	const values: (number | undefined)[] = [];
-	let exhaustedBuckets = 0;
-	for (let index = 0; index < buckets; index++) {
-		const readings = perAccount.map(account => account[index]).filter((value): value is number => value !== undefined);
-		values.push(readings.length ? Math.round(readings.reduce((sum, value) => sum + value, 0) / readings.length) : undefined);
-		if (perAccount.length > 0 && readings.length === perAccount.length && readings.every(value => value >= 100)) {
-			exhaustedBuckets++;
-		}
-	}
-	return { values, exhaustedBuckets };
-}
-
-/** E.g. "Hit its limit 6 times in 4 weeks". */
-export function formatAccountHistorySummary(samples: readonly ISubscriptionUsageSample[], start: number): string {
-	const hits = countLimitHits(samples.filter(sample => sample.t >= start));
+/** E.g. "Hit its limit 2 times in 4 weeks". */
+export function formatAccountHistorySummary(days: readonly ISubscriptionUsageDay[]): string {
+	const hits = days.reduce((sum, day) => sum + day.limitHits.length, 0);
 	switch (hits) {
 		case 0: return localize('subscriptionHistory.neverHit', "Never hit its limit in {0} weeks", USAGE_HISTORY_WEEKS);
 		case 1: return localize('subscriptionHistory.hitOnce', "Hit its limit once in {0} weeks", USAGE_HISTORY_WEEKS);
@@ -97,116 +54,247 @@ export function formatAccountHistorySummary(samples: readonly ISubscriptionUsage
 	}
 }
 
-/** E.g. "Accounts hit their limit 9 times in 4 weeks; all were used up at once for 5 hours". */
-export function formatPoolHistorySummary(samplesByAccount: ReadonlyMap<string, readonly ISubscriptionUsageSample[]>, start: number, exhaustedBuckets: number): string {
-	const hits = [...samplesByAccount.values()].reduce((sum, samples) => sum + countLimitHits(samples.filter(sample => sample.t >= start)), 0);
-	const hitsText = localize('subscriptionHistory.poolHits', "Accounts hit their limit {0} times in {1} weeks", hits, USAGE_HISTORY_WEEKS);
-	if (!exhaustedBuckets) {
-		return localize('subscriptionHistory.poolNeverExhausted', "{0}; never all used up at once", hitsText);
+/**
+ * E.g. "Last 4 weeks: an account hit its limit on 3 of 18 days with use · all accounts were used up
+ * for 40m in total · busiest day: Tuesday, busiest hours: 14:00–16:00".
+ */
+export function formatPoolHistorySummary(summary: ISubscriptionUsageHistorySummary, verdict: ISubscriptionPoolVerdict): string {
+	const parts = [
+		verdict.limitDays
+			? localize('subscriptionHistory.poolLimitDays', "an account hit its limit on {0} of {1} days with use", verdict.limitDays, verdict.usedDays)
+			: localize('subscriptionHistory.poolNoLimitDays', "no account hit its limit on the {0} days with use", verdict.usedDays),
+		verdict.allUsedUpMs
+			? localize('subscriptionHistory.poolUsedUp', "all accounts were used up for {0} in total", formatShortDuration(verdict.allUsedUpMs))
+			: localize('subscriptionHistory.poolNeverUsedUp', "never all used up at once"),
+	];
+	const busiest = getBusiestUsageTimes(summary.activity);
+	if (busiest) {
+		parts.push(localize('subscriptionHistory.poolBusiest', "busiest day: {0}, busiest hours: {1}–{2}", formatWeekday(busiest.weekday, 'long'), formatHour(busiest.hour), formatHour(busiest.hour + 2)));
 	}
-	return exhaustedBuckets === 1
-		? localize('subscriptionHistory.poolExhaustedHour', "{0}; all were used up at once for about an hour", hitsText)
-		: localize('subscriptionHistory.poolExhaustedHours', "{0}; all were used up at once for about {1} hours", hitsText, exhaustedBuckets);
+	return localize('subscriptionHistory.poolSummary', "Last {0} weeks: {1}", USAGE_HISTORY_WEEKS, parts.join(' · '));
 }
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-const CHART_WIDTH = 640;
-const CHART_HEIGHT = 120;
-/** Room for the percent labels on the left. */
-const PLOT_LEFT = 32;
-const PLOT_TOP = 6;
-const PLOT_BOTTOM = 18;
-/** Fixed hue order: the first window (5-hour) takes the first color, and so on. */
-const SERIES_CLASSES = ['series-1', 'series-2', 'series-3', 'series-4'];
-
-function svg<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<string, string | number>, parent: Element): SVGElementTagNameMap[K] {
-	const element = parent.ownerDocument.createElementNS(SVG_NS, tag);
-	for (const [name, value] of Object.entries(attributes)) {
-		element.setAttribute(name, String(value));
+/** The verdict as a short title, a sentence with the reason, and the rule behind it. */
+export function formatPoolVerdict(verdict: ISubscriptionPoolVerdict): { readonly title: string; readonly detail: string; readonly rule: string } {
+	const rule = localize('subscriptionHistory.verdictRule', "Judged on the last {0} weeks. Not enough: all accounts were used up at once on two days or more. Close to the limit: that happened on one day, or the pool got {1}% full on two days or more. Enough: otherwise. How full the pool is means the share of all accounts' 5-hour limits in use at the same moment.", USAGE_HISTORY_WEEKS, SUBSCRIPTION_POOL_TIGHT_PERCENT);
+	switch (verdict.verdict) {
+		case 'notEnough':
+			return { title: localize('subscriptionHistory.verdictNotEnough', "Not enough accounts"), detail: localize('subscriptionHistory.verdictNotEnoughDetail', "All accounts were used up at once on {0} days.", verdict.usedUpDays), rule };
+		case 'tight':
+			return {
+				title: localize('subscriptionHistory.verdictTight', "Close to the limit on busy days"),
+				detail: verdict.usedUpDays
+					? localize('subscriptionHistory.verdictTightUsedUp', "All accounts were used up at once on one day.")
+					: localize('subscriptionHistory.verdictTightFull', "The pool got {0}% full or more on {1} days.", SUBSCRIPTION_POOL_TIGHT_PERCENT, verdict.tightDays),
+				rule,
+			};
+		case 'enough':
+			return {
+				title: localize('subscriptionHistory.verdictEnough', "Enough accounts"),
+				detail: verdict.tightDays
+					? localize('subscriptionHistory.verdictEnoughOneDay', "The pool got {0}% full on only one day.", SUBSCRIPTION_POOL_TIGHT_PERCENT)
+					: localize('subscriptionHistory.verdictEnoughDetail', "The pool stayed below {0}% full on every day.", SUBSCRIPTION_POOL_TIGHT_PERCENT),
+				rule,
+			};
 	}
-	parent.appendChild(element);
-	return element;
 }
 
-function formatBucketTime(time: number): string {
-	return new Date(time).toLocaleString(language, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+function formatLimitHits(day: ISubscriptionUsageDay, accountLabels: ReadonlyMap<string, string> | undefined): string | undefined {
+	if (!day.limitHits.length) {
+		return undefined;
+	}
+	if (!accountLabels) {
+		return localize('subscriptionHistory.dayAccountHits', "hit its limit at {0}", day.limitHits.map(hit => formatTime(hit.t)).join(', '));
+	}
+	if (day.limitHits.length > LISTED_LIMIT_HITS) {
+		return localize('subscriptionHistory.dayPoolHitCount', "accounts hit their limit {0} times", day.limitHits.length);
+	}
+	return day.limitHits.map(hit => localize('subscriptionHistory.dayPoolHit', "{0} hit its limit at {1}", accountLabels.get(hit.account) ?? hit.account, formatTime(hit.t))).join(', ');
 }
 
 /**
- * Renders a line chart of `series` (at most four lines; more fold into the first four) from `start`, one
- * point per bucket, with a legend, a 100% limit line and a readout of the hour under the pointer.
+ * The details of a day, e.g. "Tue, 6 Oct: the pool got 85% full · Work hit its limit at 14:20 · all
+ * accounts used up for 40m · weekly limits 45% used". `accountLabels` names the accounts of a pool;
+ * without it the day is of a single account.
  */
-export function renderUsageHistoryChart(parent: HTMLElement, series: readonly IUsageHistorySeries[], start: number, ariaLabel: string): DisposableStore {
+export function formatUsageDay(day: ISubscriptionUsageDay, accountLabels: ReadonlyMap<string, string> | undefined): string {
+	if (!day.used || day.peak === undefined) {
+		return localize('subscriptionHistory.dayUnused', "{0}: not used", formatDay(day.start));
+	}
+	const parts = [accountLabels
+		? localize('subscriptionHistory.dayPoolPeak', "the pool got {0}% full", day.peak)
+		: localize('subscriptionHistory.dayAccountPeak', "5-hour limit up to {0}% used", day.peak)];
+	const hits = formatLimitHits(day, accountLabels);
+	if (hits) {
+		parts.push(hits);
+	}
+	if (accountLabels && day.allUsedUpMs) {
+		parts.push(localize('subscriptionHistory.dayUsedUp', "all accounts used up for {0}", formatShortDuration(day.allUsedUpMs)));
+	}
+	if (day.weekly !== undefined) {
+		parts.push(accountLabels
+			? localize('subscriptionHistory.dayPoolWeekly', "weekly limits {0}% used", day.weekly)
+			: localize('subscriptionHistory.dayAccountWeekly', "weekly limit {0}% used", day.weekly));
+	}
+	return localize('subscriptionHistory.day', "{0}: {1}", formatDay(day.start), parts.join(' · '));
+}
+
+export interface IUsageDayChartOptions {
+	/** The pool chart: taller, with axis labels and a legend, and a used-up pool in its own color. */
+	readonly pool: boolean;
+	readonly ariaLabel: string;
+	/** Shows the details of the day under the pointer or keyboard focus, and `defaultReadout` otherwise. */
+	readonly readout: HTMLElement;
+	readonly defaultReadout: string;
+	readonly describe: (day: ISubscriptionUsageDay) => string;
+}
+
+/**
+ * Renders one bar per day: its height is the day's peak, a lighter and narrower bar is a weekend, a
+ * warning color marks a limit hit (and, on the pool, a stronger one all accounts used up at once), and
+ * a thin tick shows the weekly limit. The chart takes keyboard focus; the arrow keys move through the days.
+ */
+export function renderUsageDayChart(parent: HTMLElement, days: readonly ISubscriptionUsageDay[], options: IUsageDayChartOptions): DisposableStore {
 	const disposables = new DisposableStore();
-	const shown = series.slice(0, SERIES_CLASSES.length);
-	const buckets = shown[0]?.values.length ?? 0;
-	const container = DOM.append(parent, DOM.$('.subscription-usage-history-chart'));
-	if (!buckets || shown.every(line => line.values.every(value => value === undefined))) {
-		DOM.append(container, DOM.$('.subscription-usage-history-empty', undefined, localize('subscriptionHistory.empty', "No usage history yet. Readings are recorded every ten minutes while CreaEditor runs.")));
+	const { readout, defaultReadout } = options;
+	readout.textContent = defaultReadout;
+	const chart = DOM.append(parent, $(`.subscription-usage-days.${options.pool ? 'pool' : 'compact'}`));
+	if (!days.some(day => day.used)) {
+		DOM.append(chart, $('.subscription-usage-days-empty', undefined, localize('subscriptionHistory.empty', "No usage recorded yet. Readings are taken every ten minutes while CreaEditor runs.")));
 		return disposables;
 	}
 
-	if (shown.length > 1) {
-		const legend = DOM.append(container, DOM.$('.subscription-usage-history-legend'));
-		shown.forEach((line, index) => {
-			const entry = DOM.append(legend, DOM.$(`span.subscription-usage-history-legend-entry.${SERIES_CLASSES[index]}`));
-			DOM.append(entry, DOM.$('span.subscription-usage-history-swatch'));
-			DOM.append(entry, DOM.$('span', undefined, line.label));
-		});
+	if (options.pool) {
+		const axis = DOM.append(chart, $('.subscription-usage-days-axis'));
+		axis.setAttribute('aria-hidden', 'true');
+		for (const value of [100, 50, 0]) {
+			DOM.append(axis, $('span', undefined, localize('subscriptionHistory.percent', "{0}%", value)));
+		}
 	}
-
-	const root = svg('svg', { viewBox: `0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`, role: 'img', 'aria-label': ariaLabel, class: 'subscription-usage-history-svg' }, container);
-	const plotWidth = CHART_WIDTH - PLOT_LEFT;
-	const plotHeight = CHART_HEIGHT - PLOT_TOP - PLOT_BOTTOM;
-	const x = (index: number) => PLOT_LEFT + (buckets === 1 ? 0 : index / (buckets - 1)) * plotWidth;
-	const y = (value: number) => PLOT_TOP + (1 - value / 100) * plotHeight;
-
-	for (const value of [0, 50, 100]) {
-		svg('line', { x1: PLOT_LEFT, x2: CHART_WIDTH, y1: y(value), y2: y(value), class: value === 100 ? 'limit-line' : 'grid-line' }, root);
-		const label = svg('text', { x: PLOT_LEFT - 4, y: y(value) + 3, 'text-anchor': 'end', class: 'axis-label' }, root);
-		label.textContent = localize('subscriptionHistory.percent', "{0}%", value);
+	const plot = DOM.append(chart, $('.subscription-usage-days-plot'));
+	plot.tabIndex = 0;
+	plot.setAttribute('role', 'group');
+	plot.setAttribute('aria-label', options.ariaLabel);
+	DOM.append(plot, $('.subscription-usage-days-rule.limit'));
+	if (options.pool) {
+		DOM.append(plot, $('.subscription-usage-days-rule.half'));
 	}
-	// A label per week on the time axis.
-	const bucketsPerWeek = 7 * 24;
-	for (let index = 0; index < buckets; index += bucketsPerWeek) {
-		const label = svg('text', { x: x(index), y: CHART_HEIGHT - 4, 'text-anchor': index === 0 ? 'start' : 'middle', class: 'axis-label' }, root);
-		label.textContent = new Date(start + index * USAGE_HISTORY_BUCKET_MS).toLocaleDateString(language, { day: 'numeric', month: 'short' });
-	}
-
-	shown.forEach((line, seriesIndex) => {
-		// A gap without readings (the app was closed) breaks the line.
-		let path = '';
-		let drawing = false;
-		line.values.forEach((value, index) => {
-			if (value === undefined) {
-				drawing = false;
-				return;
-			}
-			path += `${drawing ? 'L' : 'M'}${x(index).toFixed(1)},${y(value).toFixed(1)}`;
-			drawing = true;
-		});
-		svg('path', { d: path, class: `series-line ${SERIES_CLASSES[seriesIndex]}`, 'vector-effect': 'non-scaling-stroke' }, root);
+	const columns = days.map(day => {
+		const column = DOM.append(plot, $('.subscription-usage-days-day'));
+		column.classList.toggle('weekend', day.weekend);
+		if (day.peak === undefined) {
+			DOM.append(column, $('.subscription-usage-days-none'));
+		} else {
+			const level = options.pool && day.allUsedUpMs ? 'used-up' : day.limitHits.length ? 'limit' : 'normal';
+			const bar = DOM.append(column, $(`.subscription-usage-days-bar.${level}`));
+			bar.style.height = `${Math.max(3, day.peak)}%`;
+		}
+		if (day.weekly !== undefined) {
+			const tick = DOM.append(column, $('.subscription-usage-days-weekly'));
+			tick.style.bottom = `${day.weekly}%`;
+		}
+		return column;
 	});
 
-	const guide = svg('line', { x1: 0, x2: 0, y1: PLOT_TOP, y2: PLOT_TOP + plotHeight, class: 'guide-line', visibility: 'hidden' }, root);
-	const readout = DOM.append(container, DOM.$('.subscription-usage-history-readout'));
-	const defaultReadout = localize('subscriptionHistory.pointHint', "Point at the chart to see the usage of an hour.");
-	readout.textContent = defaultReadout;
-	disposables.add(DOM.addDisposableListener(root, DOM.EventType.MOUSE_MOVE, (e: MouseEvent) => {
-		const rect = root.getBoundingClientRect();
-		const svgX = (e.clientX - rect.left) / rect.width * CHART_WIDTH;
-		const index = Math.max(0, Math.min(buckets - 1, Math.round((svgX - PLOT_LEFT) / plotWidth * (buckets - 1))));
-		guide.setAttribute('x1', String(x(index)));
-		guide.setAttribute('x2', String(x(index)));
-		guide.setAttribute('visibility', 'visible');
-		const values = shown.map(line => line.values[index] === undefined
-			? localize('subscriptionHistory.noValue', "{0}: no reading", line.label)
-			: localize('subscriptionHistory.value', "{0}: {1}% used", line.label, Math.round(line.values[index]!)));
-		readout.textContent = localize('subscriptionHistory.readout', "{0} · {1}", formatBucketTime(start + index * USAGE_HISTORY_BUCKET_MS), values.join(' · '));
+	if (options.pool) {
+		DOM.append(chart, $('span'));
+		const labels = DOM.append(chart, $('.subscription-usage-days-labels'));
+		labels.setAttribute('aria-hidden', 'true');
+		days.forEach(day => {
+			// A date at the start of every week.
+			const text = new Date(day.start).getDay() === 1 ? new Date(day.start).toLocaleDateString(language, { day: 'numeric', month: 'short' }) : '';
+			DOM.append(labels, $('span', undefined, text));
+		});
+	}
+	// The readout goes right below the chart, unless it already has a place (such as a summary line).
+	if (!readout.parentElement) {
+		parent.appendChild(readout);
+	}
+	if (options.pool) {
+		renderLegend(parent);
+	}
+
+	let selected: number | undefined;
+	let focused = false;
+	const select = (index: number | undefined) => {
+		selected = index;
+		columns.forEach((column, columnIndex) => column.classList.toggle('selected', columnIndex === index));
+		readout.textContent = index === undefined ? defaultReadout : options.describe(days[index]);
+	};
+	const lastUsed = () => days.reduce((last, day, index) => day.used ? index : last, days.length - 1);
+	disposables.add(DOM.addDisposableListener(plot, DOM.EventType.MOUSE_MOVE, (e: MouseEvent) => {
+		const rect = plot.getBoundingClientRect();
+		select(Math.max(0, Math.min(days.length - 1, Math.floor((e.clientX - rect.left) / rect.width * days.length))));
 	}));
-	disposables.add(DOM.addDisposableListener(root, DOM.EventType.MOUSE_LEAVE, () => {
-		guide.setAttribute('visibility', 'hidden');
-		readout.textContent = defaultReadout;
+	disposables.add(DOM.addDisposableListener(plot, DOM.EventType.MOUSE_LEAVE, () => {
+		if (!focused) {
+			select(undefined);
+		}
+	}));
+	disposables.add(DOM.addDisposableListener(plot, DOM.EventType.FOCUS, () => {
+		focused = true;
+		select(selected ?? lastUsed());
+	}));
+	disposables.add(DOM.addDisposableListener(plot, DOM.EventType.BLUR, () => {
+		focused = false;
+		select(undefined);
+	}));
+	disposables.add(DOM.addDisposableListener(plot, DOM.EventType.KEY_DOWN, (e: KeyboardEvent) => {
+		const current = selected ?? lastUsed();
+		const next = e.key === 'ArrowLeft' ? current - 1 : e.key === 'ArrowRight' ? current + 1 : e.key === 'Home' ? 0 : e.key === 'End' ? days.length - 1 : undefined;
+		if (next !== undefined) {
+			e.preventDefault();
+			select(Math.max(0, Math.min(days.length - 1, next)));
+		}
 	}));
 	return disposables;
+}
+
+function renderLegend(parent: HTMLElement): void {
+	const legend = DOM.append(parent, $('.subscription-usage-days-legend'));
+	const entries: [string, string][] = [
+		['normal', localize('subscriptionHistory.legendPeak', "How full the pool got (5-hour limits)")],
+		['limit', localize('subscriptionHistory.legendLimit', "An account hit its limit")],
+		['used-up', localize('subscriptionHistory.legendUsedUp', "All accounts used up")],
+		['weekly', localize('subscriptionHistory.legendWeekly', "Weekly limits used")],
+		['weekend', localize('subscriptionHistory.legendWeekend', "Weekend")],
+	];
+	for (const [kind, label] of entries) {
+		const entry = DOM.append(legend, $('span.subscription-usage-days-legend-entry'));
+		DOM.append(entry, $(`span.subscription-usage-days-swatch.${kind}`));
+		DOM.append(entry, $('span', undefined, label));
+	}
+}
+
+/**
+ * Renders when the pool is used: a row per weekday and a cell per hour, darker where more of the
+ * 5-hour limits was used. Renders nothing without usage.
+ */
+export function renderUsageActivity(parent: HTMLElement, activity: readonly (readonly number[])[]): void {
+	const max = Math.max(0, ...activity.flat());
+	if (!max) {
+		return;
+	}
+	const section = DOM.append(parent, $('.subscription-usage-activity'));
+	DOM.append(section, $('.subscription-usage-activity-title', undefined, localize('subscriptionHistory.activityTitle', "When the pool is used, by weekday and hour")));
+	const grid = DOM.append(section, $('.subscription-usage-activity-grid'));
+	grid.setAttribute('role', 'img');
+	const busiest = getBusiestUsageTimes(activity);
+	grid.setAttribute('aria-label', busiest
+		? localize('subscriptionHistory.activityAria', "Usage by weekday and hour; most on {0}, between {1} and {2}", formatWeekday(busiest.weekday, 'long'), formatHour(busiest.hour), formatHour(busiest.hour + 2))
+		: localize('subscriptionHistory.activityAriaEmpty', "Usage by weekday and hour"));
+	DOM.append(grid, $('span'));
+	for (let hour = 0; hour < 24; hour += 6) {
+		DOM.append(grid, $('span.subscription-usage-activity-hour', undefined, formatHour(hour)));
+	}
+	activity.forEach((hours, weekday) => {
+		DOM.append(grid, $('span.subscription-usage-activity-weekday', undefined, formatWeekday(weekday, 'short')));
+		for (const value of hours) {
+			const cell = DOM.append(grid, $('span.subscription-usage-activity-cell'));
+			if (value > 0) {
+				cell.classList.add('used');
+				cell.style.opacity = String(0.15 + 0.85 * value / max);
+			}
+		}
+	});
 }

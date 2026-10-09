@@ -5,8 +5,9 @@
 
 // CreaEditor: the Subscription Usage page. Per provider (Claude, Codex) a card with the pool as a
 // whole, and below it one row per account with a bar per usage window and the account's actions. The
-// pool and every account also chart their usage of the past weeks, read from the usage history the
-// agent host records (`agent-subscription-usage-history.jsonl` in the user's `globalStorage`).
+// pool and every account also show their usage of the past weeks per day (with a verdict on whether the
+// pool has enough accounts), read from the usage history the agent host records
+// (`agent-subscription-usage-history.jsonl` in the user's `globalStorage`).
 
 import './media/subscriptionUsage.css';
 import * as DOM from '../../../../../base/browser/dom.js';
@@ -24,7 +25,7 @@ import { ScrollbarVisibility } from '../../../../../base/common/scrollable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize } from '../../../../../nls.js';
 import { ISubscriptionAccount, ISubscriptionUsageWindow, SubscriptionAccountStatus, SubscriptionProvider, getRemainingPercent } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
-import { ISubscriptionUsageSample, SUBSCRIPTION_USAGE_HISTORY_FILE, parseUsageHistory } from '../../../../../platform/agentHost/common/meta/subscriptionUsageHistory.js';
+import { ISubscriptionUsageSample, SUBSCRIPTION_USAGE_HISTORY_FILE, getPoolVerdict, parseUsageHistory, summarizeUsageHistory } from '../../../../../platform/agentHost/common/meta/subscriptionUsageHistory.js';
 import { IEditorOptions } from '../../../../../platform/editor/common/editor.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { IFileService } from '../../../../../platform/files/common/files.js';
@@ -40,7 +41,7 @@ import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IEditorGroup } from '../../../../services/editor/common/editorGroupsService.js';
 import { ISubscriptionAccountsService, ISubscriptionPoolSummary, SUBSCRIPTION_PROVIDERS, formatAvailability, formatRemaining, formatResetsIn, formatShortDuration, getEarliestReset, getPoolSummaries, getSubscriptionProviderLabel } from '../../../../services/agentHost/browser/subscriptionAccountsService.js';
 import { SubscriptionAccountsFlows } from './subscriptionAccountsFlows.js';
-import { formatAccountHistorySummary, formatPoolHistorySummary, getAccountUsageSeries, getPoolUsageHistory, getUsageHistoryRange, renderUsageHistoryChart } from './subscriptionUsageHistoryChart.js';
+import { USAGE_HISTORY_DAYS, formatAccountHistorySummary, formatPoolHistorySummary, formatPoolVerdict, formatUsageDay, renderUsageActivity, renderUsageDayChart } from './subscriptionUsageHistoryChart.js';
 
 const $ = DOM.$;
 
@@ -306,23 +307,48 @@ export class SubscriptionUsageEditor extends EditorPane {
 	}
 
 	private _renderAccountHistory(row: HTMLElement, account: ISubscriptionAccount, now: number): void {
-		const samples = this._history.get(account.id) ?? [];
-		const { start, buckets } = getUsageHistoryRange(now);
+		const { days } = summarizeUsageHistory(new Map([[account.id, this._history.get(account.id) ?? []]]), now, USAGE_HISTORY_DAYS);
 		const history = DOM.append(row, $('.subscription-usage-history'));
-		DOM.append(history, $('.subscription-usage-history-summary', undefined, formatAccountHistorySummary(samples, start)));
-		const labels = new Map<string, string>((account.usage ?? []).map(window => [window.kind, window.label]));
-		const series = getAccountUsageSeries(samples, start, buckets, labels);
-		this._renderDisposables.add(renderUsageHistoryChart(history, series, start, localize('subscriptionUsage.accountHistory', "Usage of {0} over the past weeks", account.label)));
+		// The summary line doubles as the readout of the day under the pointer.
+		const summary = DOM.append(history, $('.subscription-usage-history-summary'));
+		summary.setAttribute('aria-live', 'polite');
+		this._renderDisposables.add(renderUsageDayChart(history, days, {
+			pool: false,
+			ariaLabel: localize('subscriptionUsage.accountHistory', "Daily usage of {0} over the past {1} weeks; use the arrow keys to read a day", account.label, USAGE_HISTORY_DAYS / 7),
+			readout: summary,
+			defaultReadout: formatAccountHistorySummary(days),
+			describe: day => formatUsageDay(day, undefined),
+		}));
 	}
 
 	private _renderPoolHistory(section: HTMLElement, providerLabel: string, accounts: readonly ISubscriptionAccount[], now: number): void {
-		const { start, buckets } = getUsageHistoryRange(now);
 		const samplesByAccount = new Map(accounts.map(account => [account.id, this._history.get(account.id) ?? []] as const));
-		const pool = getPoolUsageHistory(samplesByAccount, start, buckets);
+		const summary = summarizeUsageHistory(samplesByAccount, now, USAGE_HISTORY_DAYS);
+		const verdict = getPoolVerdict(summary.days);
 		const history = DOM.append(section, $('.subscription-usage-history.pool'));
-		DOM.append(history, $('.subscription-usage-history-summary', undefined, formatPoolHistorySummary(samplesByAccount, start, pool.exhaustedBuckets)));
-		const label = localize('subscriptionUsage.poolHistoryLine', "Tightest limit, average");
-		this._renderDisposables.add(renderUsageHistoryChart(history, [{ label, values: pool.values }], start, localize('subscriptionUsage.poolHistory', "Usage of the {0} pool over the past weeks", providerLabel)));
+		if (verdict) {
+			const text = formatPoolVerdict(verdict);
+			const headline = DOM.append(history, $(`.subscription-usage-verdict.${verdict.verdict}`));
+			headline.tabIndex = 0;
+			headline.setAttribute('aria-label', localize('subscriptionUsage.verdictAria', "{0}. {1} {2}", text.title, text.detail, text.rule));
+			const icon = verdict.verdict === 'enough' ? Codicon.passFilled : verdict.verdict === 'tight' ? Codicon.warning : Codicon.error;
+			DOM.append(headline, $(`span.subscription-usage-verdict-icon${ThemeIcon.asCSSSelector(icon)}`));
+			DOM.append(headline, $('span.subscription-usage-verdict-title', undefined, text.title));
+			DOM.append(headline, $('span.subscription-usage-verdict-detail', undefined, text.detail));
+			this._renderDisposables.add(this._hoverService.setupDelayedHover(headline, { content: text.rule }));
+			DOM.append(history, $('.subscription-usage-history-summary', undefined, formatPoolHistorySummary(summary, verdict)));
+		}
+		const labels = new Map(accounts.map(account => [account.id, account.label]));
+		const readout = $('.subscription-usage-history-readout');
+		readout.setAttribute('aria-live', 'polite');
+		this._renderDisposables.add(renderUsageDayChart(history, summary.days, {
+			pool: true,
+			ariaLabel: localize('subscriptionUsage.poolHistory', "How full the {0} pool got per day over the past {1} weeks; use the arrow keys to read a day", providerLabel, USAGE_HISTORY_DAYS / 7),
+			readout,
+			defaultReadout: localize('subscriptionUsage.poolHistoryHint', "Point at a day, or focus the chart and use the arrow keys, to see its details."),
+			describe: day => formatUsageDay(day, labels),
+		}));
+		renderUsageActivity(history, summary.activity);
 	}
 
 	private _renderStatus(parent: HTMLElement, account: ISubscriptionAccount, now: number): void {

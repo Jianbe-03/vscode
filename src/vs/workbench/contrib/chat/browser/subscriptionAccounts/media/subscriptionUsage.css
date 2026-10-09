@@ -362,7 +362,7 @@
 	gap: var(--vscode-spacing-size120);
 }
 
-/* Usage history: a calm chart per pool and account, spanning the row. */
+/* Usage history: a bar per day for the pool and every account, spanning the row. */
 
 .subscription-usage-history {
 	grid-column: 1 / -1;
@@ -373,100 +373,286 @@
 }
 
 .subscription-usage-history.pool {
+	gap: var(--vscode-spacing-size80);
 	padding: 0 var(--vscode-spacing-size160);
 }
 
+.subscription-usage-history-summary,
+.subscription-usage-history-readout {
+	font-size: var(--vscode-fontSize-body2);
+	line-height: 1.5;
+	min-height: 1.5em;
+}
+
 .subscription-usage-history-summary {
-	font-size: var(--vscode-fontSize-body2, 12px);
 	color: var(--vscode-foreground);
 }
 
-.subscription-usage-history-legend {
-	display: flex;
-	flex-wrap: wrap;
-	gap: var(--vscode-spacing-size120);
-	font-size: var(--vscode-fontSize-body2, 12px);
+.subscription-usage-history-readout {
 	color: var(--vscode-descriptionForeground);
 }
 
-.subscription-usage-history-legend-entry {
+/* The verdict leads the pool's history: an icon, a short title and the reason. */
+
+.subscription-usage-verdict {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size40) var(--vscode-spacing-size80);
+	width: fit-content;
+	border-radius: var(--vscode-cornerRadius-small);
+	outline-offset: 2px;
+}
+
+.subscription-usage-verdict-icon {
+	align-self: center;
+}
+
+.subscription-usage-verdict.enough .subscription-usage-verdict-icon {
+	color: var(--vscode-testing-iconPassed);
+}
+
+.subscription-usage-verdict.tight .subscription-usage-verdict-icon {
+	color: var(--vscode-editorWarning-foreground);
+}
+
+.subscription-usage-verdict.notEnough .subscription-usage-verdict-icon {
+	color: var(--vscode-errorForeground);
+}
+
+.subscription-usage-verdict-title {
+	font-weight: var(--vscode-fontWeight-semiBold);
+}
+
+.subscription-usage-verdict-detail {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+/* Day bars. */
+
+.subscription-usage-days {
+	display: grid;
+	grid-template-columns: 1fr;
+	column-gap: var(--vscode-spacing-size60);
+	min-width: 0;
+}
+
+.subscription-usage-days.pool {
+	grid-template-columns: auto 1fr;
+}
+
+.subscription-usage-days-axis {
+	display: flex;
+	flex-direction: column;
+	justify-content: space-between;
+	height: 96px;
+	margin: -0.5em 0;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label3);
+	font-variant-numeric: tabular-nums;
+	text-align: end;
+}
+
+.subscription-usage-days-plot {
+	position: relative;
+	display: flex;
+	align-items: stretch;
+	gap: 2px;
+	height: 28px;
+	border-bottom: var(--vscode-strokeThickness, 1px) solid var(--vscode-widget-border, var(--vscode-panel-border));
+	border-radius: var(--vscode-cornerRadius-xSmall);
+}
+
+.subscription-usage-days.pool .subscription-usage-days-plot {
+	height: 96px;
+}
+
+.subscription-usage-days-plot:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 2px;
+}
+
+/* Reference lines: the limit (dashed) and, on the pool, half way. */
+.subscription-usage-days-rule {
+	position: absolute;
+	left: 0;
+	right: 0;
+	border-top: var(--vscode-strokeThickness, 1px) dashed var(--vscode-widget-border, var(--vscode-panel-border));
+	pointer-events: none;
+}
+
+.subscription-usage-days-rule.limit {
+	top: 0;
+}
+
+.subscription-usage-days-rule.half {
+	top: 50%;
+	border-top-style: dotted;
+	opacity: 0.6;
+}
+
+.subscription-usage-days-day {
+	position: relative;
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	justify-content: center;
+	align-items: flex-end;
+	border-radius: var(--vscode-cornerRadius-xSmall) var(--vscode-cornerRadius-xSmall) 0 0;
+}
+
+.subscription-usage-days-day.selected {
+	background-color: var(--vscode-list-hoverBackground);
+}
+
+.subscription-usage-days-bar {
+	width: 100%;
+	max-width: 18px;
+	border-radius: var(--vscode-cornerRadius-xSmall) var(--vscode-cornerRadius-xSmall) 0 0;
+	background-color: var(--vscode-charts-blue);
+	opacity: 0.85;
+}
+
+.subscription-usage-days-bar.limit {
+	background-color: var(--vscode-charts-orange);
+}
+
+.subscription-usage-days-bar.used-up {
+	background-color: var(--vscode-charts-red);
+}
+
+/* Weekends are lighter and narrower: a 9-to-5 week reads at a glance. */
+.subscription-usage-days-day.weekend .subscription-usage-days-bar {
+	width: 50%;
+	opacity: 0.45;
+}
+
+.subscription-usage-days-day.selected .subscription-usage-days-bar {
+	opacity: 1;
+}
+
+/* A day without use: a dot on the baseline, so it reads as "none" rather than missing. */
+.subscription-usage-days-none {
+	width: 3px;
+	height: 3px;
+	margin-bottom: 1px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background-color: var(--vscode-widget-border, var(--vscode-panel-border));
+}
+
+.subscription-usage-days-weekly {
+	position: absolute;
+	left: 15%;
+	right: 15%;
+	height: 2px;
+	margin-bottom: -1px;
+	border-radius: var(--vscode-cornerRadius-circle);
+	background-color: var(--vscode-foreground);
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+.subscription-usage-days-labels {
+	display: flex;
+	gap: 2px;
+	padding-top: var(--vscode-spacing-size40);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label3);
+}
+
+.subscription-usage-days-labels > span {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: visible;
+}
+
+.subscription-usage-days-empty {
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-body2);
+}
+
+.subscription-usage-days-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--vscode-spacing-size40) var(--vscode-spacing-size120);
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label2);
+}
+
+.subscription-usage-days-legend-entry {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--vscode-spacing-size40);
 }
 
-.subscription-usage-history-swatch {
-	width: 10px;
-	height: 2px;
-	border-radius: 1px;
-	background-color: currentColor;
-}
-
-.subscription-usage-history-svg {
-	display: block;
-	width: 100%;
-	height: auto;
-	overflow: visible;
-}
-
-.subscription-usage-history-svg .grid-line {
-	stroke: var(--vscode-widget-border, var(--vscode-panel-border));
-	stroke-width: 1;
-	vector-effect: non-scaling-stroke;
-}
-
-.subscription-usage-history-svg .limit-line {
-	stroke: var(--vscode-charts-red);
-	stroke-width: 1;
-	stroke-dasharray: 4 3;
-	vector-effect: non-scaling-stroke;
-}
-
-.subscription-usage-history-svg .guide-line {
-	stroke: var(--vscode-descriptionForeground);
-	stroke-width: 1;
-	vector-effect: non-scaling-stroke;
-}
-
-.subscription-usage-history-svg .axis-label {
-	fill: var(--vscode-descriptionForeground);
-	font-size: 9px;
-}
-
-.subscription-usage-history-svg .series-line {
-	fill: none;
-	stroke-width: 2;
-	stroke-linejoin: round;
-	stroke-linecap: round;
-}
-
-.subscription-usage-history-svg .series-line.series-1,
-.subscription-usage-history-legend-entry.series-1 .subscription-usage-history-swatch {
-	stroke: var(--vscode-charts-blue);
+.subscription-usage-days-swatch {
+	width: 8px;
+	height: 8px;
+	border-radius: var(--vscode-cornerRadius-xSmall);
 	background-color: var(--vscode-charts-blue);
 }
 
-.subscription-usage-history-svg .series-line.series-2,
-.subscription-usage-history-legend-entry.series-2 .subscription-usage-history-swatch {
-	stroke: var(--vscode-charts-orange);
+.subscription-usage-days-swatch.limit {
 	background-color: var(--vscode-charts-orange);
 }
 
-.subscription-usage-history-svg .series-line.series-3,
-.subscription-usage-history-legend-entry.series-3 .subscription-usage-history-swatch {
-	stroke: var(--vscode-charts-purple);
-	background-color: var(--vscode-charts-purple);
+.subscription-usage-days-swatch.used-up {
+	background-color: var(--vscode-charts-red);
 }
 
-.subscription-usage-history-svg .series-line.series-4,
-.subscription-usage-history-legend-entry.series-4 .subscription-usage-history-swatch {
-	stroke: var(--vscode-charts-green);
-	background-color: var(--vscode-charts-green);
+.subscription-usage-days-swatch.weekly {
+	height: 2px;
+	background-color: var(--vscode-foreground);
+	opacity: 0.55;
 }
 
-.subscription-usage-history-readout,
-.subscription-usage-history-empty {
-	font-size: var(--vscode-fontSize-body2, 12px);
+.subscription-usage-days-swatch.weekend {
+	width: 4px;
+	opacity: 0.45;
+}
+
+/* When the pool is used: a row per weekday, a cell per hour. */
+
+.subscription-usage-activity {
+	display: flex;
+	flex-direction: column;
+	gap: var(--vscode-spacing-size40);
+	padding-top: var(--vscode-spacing-size80);
+	max-width: 480px;
+}
+
+.subscription-usage-activity-title {
 	color: var(--vscode-descriptionForeground);
-	min-height: 1.4em;
+	font-size: var(--vscode-fontSize-label2);
+}
+
+.subscription-usage-activity-grid {
+	display: grid;
+	grid-template-columns: auto repeat(24, minmax(0, 1fr));
+	gap: 2px;
+	align-items: center;
+	color: var(--vscode-descriptionForeground);
+	font-size: var(--vscode-fontSize-label3);
+}
+
+.subscription-usage-activity-hour {
+	grid-column: span 6;
+	white-space: nowrap;
+}
+
+.subscription-usage-activity-weekday {
+	padding-right: var(--vscode-spacing-size40);
+}
+
+.subscription-usage-activity-cell {
+	height: 8px;
+	border-radius: var(--vscode-cornerRadius-xSmall);
+	background-color: var(--vscode-widget-border, var(--vscode-panel-border));
+	opacity: 0.35;
+}
+
+.subscription-usage-activity-cell.used {
+	background-color: var(--vscode-charts-blue);
 }
