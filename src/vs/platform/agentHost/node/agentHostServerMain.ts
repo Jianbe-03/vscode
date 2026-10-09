@@ -56,6 +56,11 @@ import ErrorTelemetry from '../../telemetry/node/errorTelemetry.js';
 import { AgentHostLaunchKind } from '../common/agentHostTelemetry.js';
 import { ISessionDataService } from '../common/sessionDataService.js';
 import { AGENT_HOST_PUBLISH_MACHINE_ENV_VAR, ServerMachineStatusPublisher } from './shared/serverMachineStatus.js';
+import { ByokLmBridgeRegistry } from './byokLmBridgeRegistry.js';
+import { getServerGatewayKeys } from './shared/serverGatewayKeys.js';
+import { GatewayDirectConnection } from './shared/gatewayDirectConnection.js';
+import { findServerCostHardStop } from './shared/serverCostLedger.js';
+import { getGatewayCostLedgerWriter } from './shared/gatewayCostLedger.js';
 
 /** Log to stderr so messages appear in the terminal alongside the process. */
 function log(msg: string): void {
@@ -196,6 +201,25 @@ async function main(): Promise<void> {
 		}
 	}
 
+	// CreaEditor: on a CreaEditor Server, BYOK models run on the OpenRouter/LiteLLM keys delegated chats
+	// brought along, called from here (no window serves them).
+	const serverGatewayKeys = getServerGatewayKeys();
+	let byokBridgeRegistry: ByokLmBridgeRegistry | undefined;
+	if (serverGatewayKeys) {
+		byokBridgeRegistry = new ByokLmBridgeRegistry();
+		const ledger = getGatewayCostLedgerWriter();
+		const gatewayConnection = disposables.add(new GatewayDirectConnection({
+			getKeys: () => serverGatewayKeys.keys,
+			onDidChangeKeys: serverGatewayKeys.onDidChange,
+			findWorkContext: workingDirectory => serverGatewayKeys.findWorkContext(workingDirectory),
+			findHardStop: request => findServerCostHardStop(request),
+			recordCost: ledger ? entry => { ledger.record(entry); } : undefined,
+			fetch: (input, init) => fetch(input, init),
+			log: message => logService.info(message),
+		}));
+		disposables.add(byokBridgeRegistry.register('creaeditor-gateway-keys', gatewayConnection));
+	}
+
 	const runtime = await createAgentHostRuntime({
 		environmentService,
 		productService,
@@ -205,7 +229,7 @@ async function main(): Promise<void> {
 		transientProxyConfiguration: false,
 		hostLaunchKind: AgentHostLaunchKind.VSCodeCLI,
 		providerConfigurations: [createCodexProviderConfiguration(environmentService.userHome, process.env[AgentHostCodexAgentCodexHomeEnvVar])],
-		byok: { kind: 'unavailable' },
+		byok: byokBridgeRegistry ? { kind: 'renderer', bridgeRegistry: byokBridgeRegistry } : { kind: 'unavailable' },
 	});
 	disposables.add(runtime);
 	const { agentService, instantiationService } = runtime;

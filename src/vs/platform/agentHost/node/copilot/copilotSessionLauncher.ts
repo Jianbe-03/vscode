@@ -554,6 +554,7 @@ export async function resolveByokSessionConfig(
 	startProxy: () => Promise<IByokLmProxyHandle>,
 	logService: ILogService,
 	selectedModelId?: string,
+	workingDirectory?: string,
 ): Promise<{ providers?: NamedProviderConfig[]; models?: ProviderModelConfig[]; keyLock?: ICopilotSessionKeyLock }> {
 	// Surface the serving window's BYOK models. The registry does not union
 	// windows' model sets — all serving windows expose the same set, so it picks
@@ -603,6 +604,10 @@ export async function resolveByokSessionConfig(
 	}
 	if (keyLock) {
 		handle.lockSession(sessionId, keyLock);
+	}
+	// CreaEditor: the working directory goes along with the session's requests (the server's cost ledger).
+	if (workingDirectory) {
+		handle.describeSession?.(sessionId, workingDirectory);
 	}
 	const providers: NamedProviderConfig[] = [...new Set(byokModels.map(m => m.vendor))].map(vendor => ({
 		name: vendor,
@@ -886,7 +891,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 	 * active bridge registry and a `startProxy` thunk that memoizes the single
 	 * shared proxy handle for this launcher (started lazily on first use).
 	 */
-	private _resolveByokSessionConfig(sessionId: string, selectedModelId: string | undefined): Promise<{ providers?: NamedProviderConfig[]; models?: ProviderModelConfig[]; keyLock?: ICopilotSessionKeyLock }> {
+	private _resolveByokSessionConfig(sessionId: string, selectedModelId: string | undefined, workingDirectory: string | undefined): Promise<{ providers?: NamedProviderConfig[]; models?: ProviderModelConfig[]; keyLock?: ICopilotSessionKeyLock }> {
 		const rootConfigValue = this._configurationService.getRootValue(platformRootSchema, AgentHostByokModelsEnabledConfigKey);
 		const { enabled, trace } = resolveByokLmEnablement(rootConfigValue);
 		this._logService.trace(`[Copilot:${sessionId}] BYOK session configuration ${trace}`);
@@ -898,7 +903,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 				this._byokProxyHandle = this._byokLmProxyService.start();
 			}
 			return this._byokProxyHandle;
-		}, this._logService, selectedModelId);
+		}, this._logService, selectedModelId, workingDirectory);
 	}
 
 	/**
@@ -931,7 +936,7 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		// renderer reports no BYOK models), merged into the returned config so both
 		// createSession and resumeSession advertise the models to the runtime.
 		// CreaEditor: the selected model locks the session to its API key (provider group).
-		const { keyLock, ...byok } = await this._resolveByokSessionConfig(plan.sessionId, (plan.kind === 'create' ? plan.model : plan.fallback.model)?.id);
+		const { keyLock, ...byok } = await this._resolveByokSessionConfig(plan.sessionId, (plan.kind === 'create' ? plan.model : plan.fallback.model)?.id, plan.workingDirectory?.fsPath);
 		onKeyLock?.(keyLock);
 		const hydraFusionEnabled = this._configurationService.getRootValue(copilotCliConfigSchema, CopilotCliConfigKey.HydraFusion) === true;
 		const copilotConnectorsEnabled = this._configurationService.getRootValue(platformRootSchema, AgentHostMcpConnectorsEnabledConfigKey) === true;

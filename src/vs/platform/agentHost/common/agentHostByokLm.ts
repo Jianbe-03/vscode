@@ -257,13 +257,24 @@ export interface IAgentHostByokLmHandler {
 	listModels(token: CancellationToken): Promise<IByokLmModelInfo[]>;
 }
 
+/** CreaEditor: the session a BYOK request belongs to, for connections that call a gateway themselves. */
+export interface IByokLmChatContext {
+	/** The Copilot session id (subagents share their parent's). */
+	readonly sessionId: string;
+	/** The session's working directory, when the launcher reported it. */
+	readonly workingDirectory?: string;
+	/** Aborts the request (the client went away or the proxy shuts down). */
+	readonly signal?: AbortSignal;
+}
+
 /**
  * Node-side connection to a single renderer's {@link IAgentHostByokLmHandler}.
  * Mirrors `IRemoteFilesystemConnection` for the reverse FS bridge. The renderer
  * pushes its models over {@link onDidChangeModels}; `chat` stays a round-trip.
  */
 export interface IByokLmBridgeConnection {
-	chat(request: IByokLmChatRequest): Promise<IByokLmChatResult>;
+	/** CreaEditor: `context` says which session asks (a connection that calls a gateway itself records it). */
+	chat(request: IByokLmChatRequest, context?: IByokLmChatContext): Promise<IByokLmChatResult>;
 	/** Emits the renderer's current BYOK model snapshot on subscribe and on every change. */
 	readonly onDidChangeModels: Event<IByokLmModelInfo[]>;
 }

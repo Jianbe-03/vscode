@@ -9,7 +9,7 @@
 // process (with the server's private key) can open it. Secrets are never logged.
 
 import { join } from '../../../../base/common/path.js';
-import { CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, IDelegationAccountsPayload, IDelegationEnvelope } from '../../common/creaeditorDelegation.js';
+import { CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, IDelegationAccountsPayload, IDelegationEnvelope, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationWorkContext } from '../../common/creaeditorDelegation.js';
 import { AGENT_HOST_SECRETS_DIR_ENV_VAR, FileSecretStore } from '../shared/fileSecretStore.js';
 import { IDelegationKeyPair, openDelegationPayload } from './delegationCrypto.js';
 
@@ -48,5 +48,68 @@ export function openDelegationAccounts(delegationId: string, token: string, keyP
 	const claudeTokens = Array.isArray(payload.claudeTokens)
 		? payload.claudeTokens.filter(entry => entry && typeof entry.accountId === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(entry.accountId) && typeof entry.token === 'string' && typeof entry.label === 'string')
 		: [];
-	return { claudeTokens, ...(payload.gatewayKey && typeof payload.gatewayKey.key === 'string' ? { gatewayKey: payload.gatewayKey } : {}) };
+	const gatewayKey = parseGatewayKey(payload.gatewayKey);
+	const workContext = parseWorkContext(payload.workContext);
+	return { claudeTokens, ...(gatewayKey ? { gatewayKey } : {}), ...(workContext ? { workContext } : {}) };
+}
+
+function optionalString(value: unknown, max: number): string | undefined {
+	return typeof value === 'string' && value && value.length <= max ? value : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+	return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/** A gateway key from an opened envelope, or undefined when it is not a usable one. */
+function parseGatewayKey(value: IDelegationGatewayKey | undefined): IDelegationGatewayKey | undefined {
+	if (!value || typeof value !== 'object' || (value.providerId !== 'openrouter' && value.providerId !== 'litellm')
+		|| !optionalString(value.label, 200) || !optionalString(value.key, 4096)) {
+		return undefined;
+	}
+	const baseUrl = optionalString(value.baseUrl, 2048);
+	if (value.providerId === 'litellm' && !baseUrl) {
+		return undefined;
+	}
+	const models: IDelegationGatewayModel[] = [];
+	for (const model of Array.isArray(value.models) ? value.models : []) {
+		const id = optionalString(model?.id, 300);
+		if (!id) {
+			continue;
+		}
+		const name = optionalString(model.name, 300);
+		const maxInputTokens = optionalNumber(model.maxInputTokens);
+		const maxOutputTokens = optionalNumber(model.maxOutputTokens);
+		models.push({ id, ...(name ? { name } : {}), ...(maxInputTokens ? { maxInputTokens } : {}), ...(maxOutputTokens ? { maxOutputTokens } : {}), ...(model.supportsVision === true ? { supportsVision: true } : {}) });
+	}
+	return { providerId: value.providerId, label: value.label, key: value.key, models, ...(baseUrl ? { baseUrl } : {}) };
+}
+
+function parseWorkContext(value: IDelegationWorkContext | undefined): IDelegationWorkContext | undefined {
+	const worktree = optionalString(value?.worktree, 4096);
+	if (!value || !worktree) {
+		return undefined;
+	}
+	const title = optionalString(value.title, 512);
+	const repo = optionalString(value.repo, 512);
+	const branch = optionalString(value.branch, 512);
+	return { worktree, ...(title ? { title } : {}), ...(repo ? { repo } : {}), ...(branch ? { branch } : {}) };
+}
+
+/**
+ * Opens the accounts of an AHP `authenticate` call when it is a delegated chat's (on a CreaEditor
+ * Server): undefined for other resources, and when this is not a server or the envelope is not for it.
+ */
+export function tryOpenServerDelegationAccounts(resource: string, token: string, log?: (message: string) => void): { readonly delegationId: string; readonly payload: IDelegationAccountsPayload } | undefined {
+	const delegationId = parseDelegationAccountsResource(resource);
+	const keyPair = delegationId !== undefined && token ? readServerDelegationKeyPair() : undefined;
+	if (delegationId === undefined || !keyPair) {
+		return undefined;
+	}
+	try {
+		return { delegationId, payload: openDelegationAccounts(delegationId, token, keyPair) };
+	} catch (error) {
+		log?.(`The accounts of delegated chat ${delegationId} cannot be opened: ${error instanceof Error ? error.message : String(error)}`);
+		return undefined;
+	}
 }

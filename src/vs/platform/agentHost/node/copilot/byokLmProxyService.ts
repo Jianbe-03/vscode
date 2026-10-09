@@ -58,6 +58,8 @@ export interface IByokLmProxyHandle extends ILoopbackProxyHandle {
 	 * request for a grouped model.
 	 */
 	lockSession(sessionId: string, lock: IByokLmKeyLock): void;
+	/** CreaEditor: the working directory of a session, passed along with its requests (cost ledger). */
+	describeSession?(sessionId: string, workingDirectory: string): void;
 }
 
 export const IByokLmProxyService = createDecorator<IByokLmProxyService>('byokLmProxyService');
@@ -90,6 +92,7 @@ const RESPONSES_SUFFIX = '/responses';
  */
 interface IByokLmProxyState {
 	readonly sessionKeyLocks: Map<string, IByokLmKeyLock>;
+	readonly sessionWorkingDirectories: Map<string, string>;
 }
 type ByokLmProxyState = IByokLmProxyState;
 
@@ -119,7 +122,7 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 
 	protected createState(): ByokLmProxyState {
 		// The bridge is resolved from the registry per request; only the session key locks live here.
-		return { sessionKeyLocks: new Map() };
+		return { sessionKeyLocks: new Map(), sessionWorkingDirectories: new Map() };
 	}
 
 	async start(): Promise<IByokLmProxyHandle> {
@@ -132,6 +135,9 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 			providerBaseUrl: (vendor: string) => `${runtime.baseUrl}${VENDOR_PATH_PREFIX}${encodeURIComponent(vendor)}`,
 			lockSession: (sessionId: string, lock: IByokLmKeyLock) => {
 				runtime.state.sessionKeyLocks.set(sessionId, lock);
+			},
+			describeSession: (sessionId: string, workingDirectory: string) => {
+				runtime.state.sessionWorkingDirectories.set(sessionId, workingDirectory);
 			},
 			dispose: () => {
 				if (disposed) {
@@ -248,7 +254,9 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 		res.on('close', onClose);
 
 		try {
-			const result = await connection.chat(bridgeRequest);
+			// CreaEditor: the session goes along, for connections that call a gateway themselves (CreaEditor Server).
+			const workingDirectory = runtime.state.sessionWorkingDirectories.get(sessionId);
+			const result = await connection.chat(bridgeRequest, { sessionId, signal: entry.ac.signal, ...(workingDirectory ? { workingDirectory } : {}) });
 			if (entry.ac.signal.aborted || res.writableEnded) {
 				return;
 			}

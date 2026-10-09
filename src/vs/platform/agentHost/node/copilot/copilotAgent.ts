@@ -79,6 +79,8 @@ import { getSdkMcpServerEnablement, isCustomizationSdkEligible, resolveCustomiza
 import { McpServerStatus, type McpServerCustomization } from '../../common/state/protocol/channels-session/state.js';
 import { IAgentHostSessionTitleSignal } from '../agentHostSessionTitleSignal.js';
 import { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
+import { parseDelegationAccountsResource, tryOpenServerDelegationAccounts } from '../creaeditorDelegation/delegationAccounts.js';
+import { getServerGatewayKeys } from '../shared/serverGatewayKeys.js';
 import { IAgentHostWorktreeIsolation, type IAgentHostWorktreeResumeService, SessionWorkingDirectoryMissingError } from '../shared/worktreeIsolation.js';
 import { buildSessionEventLogFromTurns } from './buildSessionEvents.js';
 import { CopilotAgentSession, type ICopilotWorkingDirectoryChangeTransaction } from './copilotAgentSession.js';
@@ -2062,6 +2064,11 @@ export class CopilotAgent extends Disposable implements IAgent {
 	}
 
 	async handleAuthenticationToken(params: AuthenticateParams): Promise<boolean> {
+		// CreaEditor: a chat delegated to this server (Delegate to Server): keep its gateway key, and list
+		// its session files, which arrived just before, so the client can import the session.
+		if (parseDelegationAccountsResource(params.resource) !== undefined) {
+			return this._acceptDelegatedChat(params);
+		}
 		let handled = false;
 		const sessions = new Set([...this._sessionsPendingRegistration.values(), ...this._allLiveSessions()]);
 		for (const session of sessions) {
@@ -2069,6 +2076,21 @@ export class CopilotAgent extends Disposable implements IAgent {
 			handled ||= didHandle;
 		}
 		return handled;
+	}
+
+	/** CreaEditor: the accounts call of a delegated chat (see {@link handleAuthenticationToken}). */
+	private async _acceptDelegatedChat(params: AuthenticateParams): Promise<boolean> {
+		const opened = tryOpenServerDelegationAccounts(params.resource, params.token, message => this._logService.warn(`[Copilot] ${message}`));
+		if (!opened) {
+			return false;
+		}
+		await getServerGatewayKeys()?.addFromDelegation(opened.payload);
+		if (opened.payload.gatewayKey) {
+			this._logService.info(`[Copilot] Delegated chat ${opened.delegationId} brought the ${opened.payload.gatewayKey.providerId} key "${opened.payload.gatewayKey.label}"`);
+		}
+		this._copilotChatDiscovery = undefined;
+		await this._startCopilotChatDiscovery();
+		return true;
 	}
 
 	private _updateRestrictedTelemetry(githubToken: string | undefined): void {

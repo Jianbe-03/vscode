@@ -115,8 +115,46 @@ export interface IDelegationSessionFile {
 export interface IDelegationAccountsPayload {
 	/** Claude setup-token accounts (`CLAUDE_CODE_OAUTH_TOKEN`), added on the server as token accounts. */
 	readonly claudeTokens?: readonly { readonly accountId: string; readonly label: string; readonly token: string }[];
-	/** The OpenRouter/LiteLLM key of the chat's model; the chat on the server only uses this key. */
-	readonly gatewayKey?: { readonly providerId: string; readonly label: string; readonly baseUrl?: string; readonly key: string };
+	/**
+	 * The OpenRouter/LiteLLM key of the chat's model; the chat on the server only uses this key. The
+	 * server's agent host keeps it (encrypted, by `<providerId>/<label>`) and calls the gateway itself,
+	 * so the chat runs while this computer is off.
+	 */
+	readonly gatewayKey?: IDelegationGatewayKey;
+	/** What the server's cost ledger records for the chat's requests; added when the accounts are sealed. */
+	readonly workContext?: IDelegationWorkContext;
+}
+
+/** A gateway key (provider group) of a delegated chat. */
+export interface IDelegationGatewayKey {
+	/** The language model vendor: `openrouter` or `litellm`. */
+	readonly providerId: string;
+	/** The provider group's name (the key's name, e.g. "Work"). */
+	readonly label: string;
+	/** LiteLLM: the proxy's URL. OpenRouter: absent (`https://openrouter.ai/api/v1`). */
+	readonly baseUrl?: string;
+	readonly key: string;
+	/** The models of this key the chat may use, as the gateway names them. */
+	readonly models?: readonly IDelegationGatewayModel[];
+}
+
+export interface IDelegationGatewayModel {
+	readonly id: string;
+	readonly name?: string;
+	readonly maxInputTokens?: number;
+	readonly maxOutputTokens?: number;
+	readonly supportsVision?: boolean;
+}
+
+/** The repository and branch of a delegated chat, for the server's cost ledger and budgets. */
+export interface IDelegationWorkContext {
+	/** The chat's worktree on the server: requests of sessions in it belong to this chat. */
+	readonly worktree: string;
+	readonly title?: string;
+	/** `owner/repo`. */
+	readonly repo?: string;
+	/** The laptop's branch (the issue is read from it, like on the laptop). */
+	readonly branch?: string;
 }
 
 /** An encrypted payload (X25519 + HKDF-SHA256 + AES-256-GCM, see `node/creaeditorDelegation/delegationCrypto.ts`). */
@@ -281,7 +319,11 @@ export interface IDelegateResult {
 	readonly skippedSecretFiles: readonly string[];
 	/** Session files were sent: the agent resumes the same session. False: use the transcript fallback. */
 	readonly sessionFilesSent: boolean;
-	/** The accounts, encrypted for the server's agent host (see {@link CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}). */
+	/**
+	 * The accounts and the chat's work context, encrypted for the server's agent host (see
+	 * {@link CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}). Always sent: it also tells the server's
+	 * agents that session files arrived.
+	 */
 	readonly accountsEnvelope?: IDelegationEnvelope;
 }
 
@@ -357,4 +399,68 @@ export interface ICreaEditorDelegationService {
 
 	/** Files changed between the current HEAD and `branch`, for Compare. */
 	listBranchChanges(folder: string, branch: string): Promise<readonly { readonly path: string; readonly status: 'A' | 'M' | 'D' }[]>;
+}
+
+/** The agent of a chat (by its session type or resource scheme), for its session files. */
+export function getDelegationAgentKind(sessionType: string, resourceScheme: string): DelegationAgentKind {
+	const kinds: readonly [string, DelegationAgentKind][] = [['claude', DelegationAgentKind.Claude], ['codex', DelegationAgentKind.Codex], ['copilotcli', DelegationAgentKind.CopilotCli]];
+	for (const [id, kind] of kinds) {
+		if (sessionType === id || resourceScheme === `agent-host-${id}`) {
+			return kind;
+		}
+	}
+	return DelegationAgentKind.Transcript;
+}
+
+/**
+ * The agent's own session id from its state file (`getSessionStateFile`): Claude
+ * `<config>/projects/<project>/<id>.jsonl`, Copilot CLI `<home>/session-state/<id>/events.jsonl`,
+ * Codex `<home>/sessions/.../rollout-<time>-<threadId>.jsonl`.
+ */
+export function getAgentSessionIdFromStateFile(agent: DelegationAgentKind, path: string): string | undefined {
+	const parts = path.split(/[\\/]/);
+	const name = parts.at(-1) ?? '';
+	let id: string | undefined;
+	switch (agent) {
+		case DelegationAgentKind.Claude:
+			id = name.endsWith('.jsonl') ? name.slice(0, -'.jsonl'.length) : undefined;
+			break;
+		case DelegationAgentKind.CopilotCli:
+			id = name === 'events.jsonl' && parts.at(-3) === 'session-state' ? parts.at(-2) : undefined;
+			break;
+		case DelegationAgentKind.Codex:
+			id = /^rollout-.*-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(name)?.groups?.id;
+			break;
+	}
+	return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : undefined;
+}
+
+/** The provider (session URI scheme on the agent host) of an agent whose session resumes on the server. */
+export function getDelegationAgentProvider(agent: DelegationAgentKind): string | undefined {
+	switch (agent) {
+		case DelegationAgentKind.Claude: return 'claude';
+		case DelegationAgentKind.Codex: return 'codex';
+		case DelegationAgentKind.CopilotCli: return 'copilotcli';
+		default: return undefined;
+	}
+}
+
+/**
+ * The provider group (gateway key) of a BYOK model id as a chat holds it: `[<scheme>:]<vendor>/<group>/<model>`
+ * for OpenRouter and LiteLLM; undefined for other models.
+ */
+export function parseDelegationGatewayModel(modelId: string | undefined, groupNames: readonly { readonly vendor: string; readonly name: string }[]): { readonly vendor: string; readonly group: string; readonly model: string } | undefined {
+	if (!modelId) {
+		return undefined;
+	}
+	const colon = modelId.indexOf(':');
+	const id = colon >= 0 && colon < modelId.indexOf('/') ? modelId.slice(colon + 1) : modelId;
+	let best: { vendor: string; group: string; model: string } | undefined;
+	for (const { vendor, name } of groupNames) {
+		const prefix = `${vendor}/${name}/`;
+		if ((vendor === 'openrouter' || vendor === 'litellm') && id.startsWith(prefix) && id.length > prefix.length && (!best || name.length > best.group.length)) {
+			best = { vendor, group: name, model: id.slice(prefix.length) };
+		}
+	}
+	return best;
 }
