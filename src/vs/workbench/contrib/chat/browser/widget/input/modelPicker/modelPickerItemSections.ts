@@ -342,6 +342,11 @@ function appendOtherModels(context: IGroupedContext): boolean {
 		const addAction = options.addOpenRouterModelAction;
 		toolbarActions.unshift(toAction({ id: addAction.id, label: addAction.tooltip ?? addAction.label, class: ThemeIcon.asClassName(Codicon.add), run: () => addAction.run() }));
 	}
+	// CreaEditor: once a key shows its limit or spend, the AI Costs page with its keys and budgets is one click away.
+	if (toolbarActions && options.showAiCostsAction && otherModels.some(model => model.metadata.providerGroupDetail)) {
+		const costsAction = options.showAiCostsAction;
+		toolbarActions.unshift(toAction({ id: costsAction.id, label: costsAction.tooltip ?? costsAction.label, class: ThemeIcon.asClassName(Codicon.creditCard), run: () => costsAction.run() }));
+	}
 	items.push({
 		item: { id: 'otherModels', enabled: true, checked: false, class: undefined, tooltip: localize('chat.modelPicker.otherModels', "Other Models"), label: localize('chat.modelPicker.otherModels', "Other Models"), run: () => { } },
 		kind: ActionListItemKind.Action,
@@ -376,7 +381,7 @@ function appendOtherModels(context: IGroupedContext): boolean {
 				kind: ActionListItemKind.Separator,
 				label: group.groupName,
 				section: ModelPickerSection.Other,
-				additionalBadges: detail ? [{ label: detail, className: 'chat-model-picker-group-detail' }] : undefined,
+				additionalBadges: detail ? [{ label: detail, className: 'chat-model-picker-group-detail', tooltip: localize('chat.modelPicker.keyStatusHover', "As the gateway reports it for this key. Spend per chat and budgets are on the AI Costs page.") }] : undefined,
 			});
 		}
 		group.models.sort((left, right) => {

@@ -22,6 +22,8 @@ export interface IBuildModelPickerItemsOptions {
 	readonly manageModelsAction: IActionWidgetDropdownAction | undefined;
 	/** CreaEditor: quick "Add OpenRouter Preset or Model..." entry shown next to Manage Models. */
 	readonly addOpenRouterModelAction?: IActionWidgetDropdownAction;
+	/** CreaEditor: "Show AI Costs" next to Manage Models when a key shows its limit or spend. */
+	readonly showAiCostsAction?: IActionWidgetDropdownAction;
 	readonly chatEntitlementService: IChatEntitlementService;
 	readonly languageModelsService: ILanguageModelsService;
 	readonly openerService: IOpenerService | undefined;

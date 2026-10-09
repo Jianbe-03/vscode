@@ -72,6 +72,19 @@ export function createAddOpenRouterModelAction(commandService: ICommandService):
 	};
 }
 
+/** CreaEditor: opens the AI Costs page (see `SHOW_AI_COSTS_ACTION_ID` in `gatewayCost/chatGatewayCost.ts`). */
+export function createShowAiCostsAction(commandService: ICommandService): IActionWidgetDropdownAction {
+	return {
+		id: 'showAiCosts',
+		enabled: true,
+		checked: false,
+		class: ThemeIcon.asClassName(Codicon.creditCard),
+		tooltip: localize('chat.showAiCosts.tooltip', "Show AI Costs, Key Limits and Budgets"),
+		label: localize('chat.showAiCosts', "Show AI Costs"),
+		run: () => { commandService.executeCommand('workbench.action.chat.showAiCosts'); },
+	};
+}
+
 export function createManageModelsAction(commandService: ICommandService): IActionWidgetDropdownAction {
 	return {
 		id: 'manageModels',

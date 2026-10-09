@@ -44,7 +44,7 @@ import { getCompactCodicon } from '../../../chatIcons.js';
 import { withChatInputPickerMotion } from '../chatInputPickerActionItem.js';
 import { createSubscriptionAccountActions, getModelSubscriptionProvider, getPinnedModelLabel } from './modelPickerSubscriptionAccounts.js';
 import { ISubscriptionAccountsService } from '../../../../../../services/agentHost/browser/subscriptionAccountsService.js';
-import { buildModelPickerItems, createAddOpenRouterModelAction, createManageModelsAction, getModelPickerAccessibilityProvider, getModelPickerControlModels, ModelPickerSection, shouldShowManageModelsAction } from './modelPickerItems.js';
+import { buildModelPickerItems, createAddOpenRouterModelAction, createManageModelsAction, createShowAiCostsAction, getModelPickerAccessibilityProvider, getModelPickerControlModels, ModelPickerSection, shouldShowManageModelsAction } from './modelPickerItems.js';
 import { ModelPickerConfiguration } from './modelPickerConfiguration.js';
 import { getCompactModelPickerIcon } from './modelProviderIcons.js';
 import { ITabbedModelPickerContext, TabbedModelPicker } from './modelPickerTabbedWidget.js';
@@ -666,6 +666,7 @@ export class ModelPickerWidget extends Disposable {
 			manageSettingsUrl,
 			manageModelsAction,
 			addOpenRouterModelAction: manageModelsAction ? createAddOpenRouterModelAction(this._commandService) : undefined,
+			showAiCostsAction: manageModelsAction ? createShowAiCostsAction(this._commandService) : undefined,
 			chatEntitlementService: this._entitlementService,
 			languageModelsService: this._languageModelsService,
 			openerService: this._openerService,

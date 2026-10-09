@@ -146,6 +146,7 @@ function callBuild(
 		onRequestSetup?: () => void;
 		onSelect?: (model: ILanguageModelChatMetadataAndIdentifier) => void;
 		entitlementService?: IChatEntitlementService;
+		showAiCostsAction?: IActionWidgetDropdownAction;
 	} = {},
 ): IActionListItem<IActionWidgetDropdownAction>[] {
 	const onSelect = opts.onSelect ?? (() => { });
@@ -163,6 +164,7 @@ function callBuild(
 		updateStateType: opts.updateStateType ?? StateType.Idle,
 		manageSettingsUrl: opts.manageSettingsUrl,
 		manageModelsAction: stubManageModelsAction,
+		showAiCostsAction: opts.showAiCostsAction,
 		chatEntitlementService: entitlementService,
 		languageModelsService: opts.languageModelsService ?? stubLanguageModelsService,
 		openerService: undefined,
@@ -972,7 +974,7 @@ suite('buildModelPickerItems', () => {
 		assert.deepStrictEqual(labelledSeparators.map(s => s.label), ['AWS Bedrock', 'OpenAI Compatible']);
 	});
 
-	test('Other Models shows the status of a key next to its group header (CreaEditor)', () => {
+	test('Other Models shows the status of a key next to its group header, with AI Costs in the toolbar (CreaEditor)', () => {
 		const auto = createAutoModel();
 		const work = createModel('claude', 'Claude (Work key)', 'openrouter');
 		const personal = { ...createModel('gpt', 'GPT (Personal)', 'openrouter'), identifier: 'openrouter-gpt-personal' };
@@ -987,9 +989,15 @@ suite('buildModelPickerItems', () => {
 				],
 			},
 		]);
-		const items = callBuild([auto, workWithDetail, personal], { languageModelsService: lmService });
+		const showAiCostsAction: IActionWidgetDropdownAction = { id: 'showAiCosts', label: 'Show AI Costs', tooltip: 'Show AI Costs', enabled: true, class: undefined, run: () => { } };
+		const items = callBuild([auto, workWithDetail, personal], { languageModelsService: lmService, showAiCostsAction });
 		const headers = items.filter(i => i.kind === ActionListItemKind.Separator && i.label).map(i => [i.label, i.additionalBadges?.map(badge => badge.label)]);
-		assert.deepStrictEqual(headers, [['Personal', undefined], ['Work key', ['$12.40 left of $50']]]);
+		const toolbar = (models: ILanguageModelChatMetadataAndIdentifier[]) => getActionItems(callBuild(models, { languageModelsService: lmService, showAiCostsAction })).find(i => i.isSectionToggle)?.toolbarActions?.map(action => action.id);
+		assert.deepStrictEqual({ headers, withDetail: toolbar([auto, workWithDetail, personal]), withoutDetail: toolbar([auto, work, personal]) }, {
+			headers: [['Personal', undefined], ['Work key', ['$12.40 left of $50']]],
+			withDetail: ['showAiCosts', 'manageModels'],
+			withoutDetail: ['manageModels'],
+		});
 	});
 
 	test('Other Models keeps a single section when a vendor has only one group (BYOK)', () => {
