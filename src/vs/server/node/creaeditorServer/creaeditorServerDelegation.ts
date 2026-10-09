@@ -16,6 +16,7 @@ import { generateUuid } from '../../../base/common/uuid.js';
 import { join } from '../../../base/common/path.js';
 import { ILogService } from '../../../platform/log/common/log.js';
 import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationSessionRequest, IDelegationUploadResponse } from '../../../platform/agentHost/common/creaeditorDelegation.js';
+import { getDelegationSecretsDir } from '../../../platform/agentHost/node/creaeditorDelegation/delegationAccounts.js';
 import { generateDelegationKeyPair, IDelegationKeyPair } from '../../../platform/agentHost/node/creaeditorDelegation/delegationCrypto.js';
 import { DelegationError } from '../../../platform/agentHost/node/creaeditorDelegation/delegationPack.js';
 import { IDelegationProcessRunner, nodeDelegationProcessRunner } from '../../../platform/agentHost/node/creaeditorDelegation/delegationProcess.js';
@@ -48,14 +49,6 @@ export function getCreaEditorDelegationLayout(dataRoot: string, secretsDir: stri
 		delegations: join(dataRoot, 'delegations'),
 		secrets: getDelegationSecretsDir(secretsDir),
 	};
-}
-
-/**
- * The receiver's secret store: its own folder (and master key) next to the agent host's store, so the
- * two processes never write the same file.
- */
-export function getDelegationSecretsDir(secretsDir: string): string {
-	return join(secretsDir, 'delegation');
 }
 
 /** Reads the server's key pair from the receiver's secret store, creating it on first use. */

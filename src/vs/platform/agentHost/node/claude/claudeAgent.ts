@@ -14,6 +14,8 @@ import { Disposable, DisposableMap, DisposableStore, IDisposable } from '../../.
 import { IObservable, observableValue } from '../../../../base/common/observable.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
+import { openDelegationAccounts, parseDelegationAccountsResource, readServerDelegationKeyPair } from '../creaeditorDelegation/delegationAccounts.js';
+import { findClaudeSessionTranscript, getClaudeConfigDir } from '../creaeditorDelegation/delegationSessionFiles.js';
 import { localize } from '../../../../nls.js';
 import { IInstantiationService } from '../../../instantiation/common/instantiation.js';
 import { INativeEnvironmentService } from '../../../environment/common/environment.js';
@@ -2500,8 +2502,46 @@ export class ClaudeAgent extends Disposable implements IAgent {
 
 	/** CreaEditor: the setup-token of a `token` subscription account. */
 	async handleAuthenticationToken(params: AuthenticateParams): Promise<boolean> {
+		// CreaEditor: the Claude accounts of a chat delegated to this server, sealed for its key.
+		const delegationId = parseDelegationAccountsResource(params.resource);
+		if (delegationId !== undefined) {
+			return this._addDelegatedAccounts(delegationId, params.token);
+		}
 		const accountId = parseSubscriptionAccountTokenResource(params.resource);
 		return accountId !== undefined && this._accounts.setToken(accountId, params.token);
+	}
+
+	/** CreaEditor: adds the setup-token accounts of a delegated chat (Delegate to Server) to this server. */
+	private async _addDelegatedAccounts(delegationId: string, token: string): Promise<boolean> {
+		const keyPair = token ? readServerDelegationKeyPair() : undefined;
+		if (!keyPair) {
+			return false;
+		}
+		let payload;
+		try {
+			payload = openDelegationAccounts(delegationId, token, keyPair);
+		} catch (error) {
+			this._logService.warn(`[Claude] The accounts of delegated chat ${delegationId} cannot be opened: ${error instanceof Error ? error.message : String(error)}`);
+			return false;
+		}
+		for (const account of payload.claudeTokens ?? []) {
+			// The token first: the account the request then adds picks it up.
+			this._accounts.setToken(account.accountId, account.token);
+			await this._accounts.handleRequest({ id: generateUuid(), type: 'add', provider: 'claude', kind: 'token', label: account.label, accountId: account.accountId });
+		}
+		this._logService.info(`[Claude] Added ${payload.claudeTokens?.length ?? 0} account(s) of delegated chat ${delegationId}`);
+		return true;
+	}
+
+	/**
+	 * CreaEditor: the SDK transcript of a chat (`<config>/projects/<project>/<sdkSessionId>.jsonl`),
+	 * for Open Agent Host State File and Delegate to Server.
+	 */
+	async getSessionStateFile(session: URI, chat?: URI): Promise<URI | undefined> {
+		const chatKey = (chat ?? URI.parse(buildDefaultChatUri(session))).toString();
+		const sdkSessionId = this._chatBackings.get(chatKey)?.sdkSessionId ?? AgentSession.id(session);
+		const transcript = findClaudeSessionTranscript(getClaudeConfigDir(process.env, this._environmentService.userHome.fsPath), sdkSessionId);
+		return transcript ? URI.file(transcript) : undefined;
 	}
 
 	/** Builds the SDK user message for a send, addressed to `sdkSessionId`. */

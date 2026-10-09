@@ -9,6 +9,9 @@ import { tmpdir } from 'os';
 import { join } from '../../../../../base/common/path.js';
 import { getRandomTestPath } from '../../../../../base/test/node/testUtils.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
+import { CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME } from '../../../common/creaeditorDelegation.js';
+import { getDelegationSecretsDir, openDelegationAccounts, parseDelegationAccountsResource, readServerDelegationKeyPair } from '../../../node/creaeditorDelegation/delegationAccounts.js';
+import { AGENT_HOST_SECRETS_DIR_ENV_VAR, FileSecretStore } from '../../../node/shared/fileSecretStore.js';
 import { generateDelegationKeyPair, openDelegationPayload, sealDelegationPayload } from '../../../node/creaeditorDelegation/delegationCrypto.js';
 import { exportClaudeSession, getClaudeProjectDirName, installSessionFiles, rewriteSessionPaths } from '../../../node/creaeditorDelegation/delegationSessionFiles.js';
 
@@ -43,6 +46,29 @@ suite('CreaEditor Delegation - accounts encryption', () => {
 			tampered: 'failed',
 			freshKeyEachTime: true,
 		});
+	});
+
+	test('the server\'s agent host opens the accounts of a delegated chat with the key pair of the code receiver', async () => {
+		const secretsDir = getRandomTestPath(tmpdir(), 'vsctests', 'creaeditorDelegationAccounts');
+		try {
+			const keyPair = generateDelegationKeyPair();
+			const store = new FileSecretStore(getDelegationSecretsDir(secretsDir));
+			await store.set(CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, JSON.stringify(keyPair));
+			const payload = { claudeTokens: [{ accountId: 'acc1', label: 'Work', token: 'sk-ant-oat01-FAKE' }, { accountId: '../bad', label: 'x', token: 'y' }] };
+			const token = JSON.stringify(sealDelegationPayload(JSON.stringify(payload), keyPair.publicKey, 'd1'));
+			const serverKey = readServerDelegationKeyPair({ [AGENT_HOST_SECRETS_DIR_ENV_VAR]: secretsDir })!;
+			assert.deepStrictEqual({
+				resource: [parseDelegationAccountsResource(`${CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}d1`), parseDelegationAccountsResource('creaeditor-subscription-account:x')],
+				noServer: readServerDelegationKeyPair({}),
+				opened: openDelegationAccounts('d1', token, serverKey),
+			}, {
+				resource: ['d1', undefined],
+				noServer: undefined,
+				opened: { claudeTokens: [payload.claudeTokens[0]] },
+			});
+		} finally {
+			fs.rmSync(secretsDir, { recursive: true, force: true });
+		}
 	});
 });
 

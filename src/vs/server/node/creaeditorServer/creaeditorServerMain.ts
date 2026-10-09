@@ -28,6 +28,7 @@ import { RemoteAccessAuth, REMOTE_ACCESS_MIN_PASSWORD_LENGTH } from '../../../pl
 import { createSocketRelayConnector, startRemoteAccessServer } from '../../../platform/agentHost/node/remoteAccess/remoteAccessServer.js';
 import { callCreaEditorServerAdmin, createCreaEditorServerStatus, ICreaEditorServerStatus, readMachine, readOrCreateAdminToken, startCreaEditorServerAdmin } from './creaeditorServerAdmin.js';
 import { CreaEditorAgentHost } from './creaeditorServerAgentHost.js';
+import { CreaEditorDelegationApi, getCreaEditorDelegationLayout } from './creaeditorServerDelegation.js';
 import { ensureCreaEditorServerDataDir, getCreaEditorServerDataLayout, ICreaEditorServerDataLayout, ICreaEditorServerRuntimeInfo, readCreaEditorServerRuntimeInfo, writePrivateFile } from './creaeditorServerDataDir.js';
 import { CREAEDITOR_SERVER_USAGE, CreaEditorServerOptionsError, ICreaEditorServerOptions, parseCreaEditorServerOptions } from './creaeditorServerOptions.js';
 import { formatPairingText, getPairingLink, renderTerminalQrCode } from './creaeditorServerPairing.js';
@@ -90,6 +91,10 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 	const logService = new LogService(new ConsoleMainLogger(parseLogLevel(options.logLevel) ?? LogLevel.Info));
 	// Creates `secrets/master.key` on first run, before the agent host opens the store.
 	new FileSecretStore(layout.secrets);
+	// CreaEditor: the code receiver of Delegate to Server; its key pair exists before the agent host
+	// starts, which reads it to open the accounts of delegated chats.
+	const delegationApi = new CreaEditorDelegationApi({ layout: getCreaEditorDelegationLayout(layout.root, layout.secrets), serverName: os.hostname(), logService });
+	await delegationApi.getKeyPair();
 
 	log(`CreaEditor Server ${version()} starting; data in ${layout.root}`);
 	const startedAt = Date.now();
@@ -125,6 +130,7 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 			logService,
 			product: { name: PRODUCT_NAME, version: product.version, commit: product.commit },
 			hostName: os.hostname(),
+			apiHandlers: [delegationApi],
 		});
 	} catch (error) {
 		await agentHost.stop();
