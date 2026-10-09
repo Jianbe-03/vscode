@@ -48,6 +48,7 @@ import { buildDefaultChatUri, chatStorageUri, createErrorResponsePart, isDefault
 import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { ActiveClientToolSet } from '../activeClientState.js';
 import { CodexChatDiscovery } from './codexChatDiscovery.js';
+import { parseDelegationAccountsResource, tryOpenServerDelegationAccounts } from '../creaeditorDelegation/delegationAccounts.js';
 import { CodexChatHistory } from './codexChatHistory.js';
 import type { InitializeResponse } from './protocol/generated/InitializeResponse.js';
 import { applyMcpServerRuntimeStates, McpCustomizationController } from '../shared/mcpCustomizationController.js';
@@ -2436,6 +2437,16 @@ export class CodexAgent extends Disposable implements IAgent {
 	 * token flows through {@link authenticate} instead).
 	 */
 	async handleAuthenticationToken(params: AuthenticateParams): Promise<boolean> {
+		// CreaEditor: a chat delegated to this server brought its thread's rollout just before: scan the
+		// rollouts again (not only the state database), so the client can import the thread.
+		if (parseDelegationAccountsResource(params.resource) !== undefined) {
+			if (!tryOpenServerDelegationAccounts(params.resource, params.token, message => this._logService.warn(`[Codex] ${message}`))) {
+				return false;
+			}
+			this._codexChatListInitialized = false;
+			this._codexChatDiscovery.value?.invalidate();
+			return true;
+		}
 		const normalizedResource = normalizeCodexMcpResourceUrl(params.resource);
 		if (normalizedResource === undefined) {
 			return false;
@@ -7444,6 +7455,24 @@ export class CodexAgent extends Disposable implements IAgent {
 			});
 		} catch (err) {
 			this._logService.warn(`[Codex:${threadId}] thread/${isArchived ? 'archive' : 'unarchive'} failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}
+
+	/**
+	 * CreaEditor: the rollout of a session's thread (`<CODEX_HOME>/sessions/.../rollout-*-<threadId>.jsonl`),
+	 * for Open Agent Host State File and Delegate to Server.
+	 */
+	async getSessionStateFile(session: URI): Promise<URI | undefined> {
+		const threadId = await this._resolveThreadId(session);
+		if (threadId === undefined) {
+			return undefined;
+		}
+		try {
+			const path = await this._withOnDemandConnection(async client => (await client.request<'thread/read', ThreadReadResponse>('thread/read', { threadId, includeTurns: false })).thread.path);
+			return path ? URI.file(path) : undefined;
+		} catch (err) {
+			this._logService.warn(`[Codex:${threadId}] Reading the thread's rollout path failed: ${err instanceof Error ? err.message : String(err)}`);
+			return undefined;
 		}
 	}
 

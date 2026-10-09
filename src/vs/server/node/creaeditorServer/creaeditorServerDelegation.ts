@@ -20,7 +20,9 @@ import { getDelegationSecretsDir } from '../../../platform/agentHost/node/creaed
 import { generateDelegationKeyPair, IDelegationKeyPair } from '../../../platform/agentHost/node/creaeditorDelegation/delegationCrypto.js';
 import { DelegationError } from '../../../platform/agentHost/node/creaeditorDelegation/delegationPack.js';
 import { IDelegationProcessRunner, nodeDelegationProcessRunner } from '../../../platform/agentHost/node/creaeditorDelegation/delegationProcess.js';
-import { getClaudeConfigDir, installSessionFiles } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
+import { getClaudeConfigDir, getCopilotCliHome, installSessionFiles } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
+import { resolveDefaultCodexHome } from '../../../platform/agentHost/node/codex/codexAccountHomes.js';
+import { AgentHostCodexAgentCodexHomeEnvVar } from '../../../platform/agentHost/common/agentService.js';
 import { assertDelegationId, createResultBundle, IDelegationStoreLayout, listKnownCommits, openPullRequestFromServer, prepareDelegationWorktree } from '../../../platform/agentHost/node/creaeditorDelegation/delegationWorktrees.js';
 import { FileSecretStore } from '../../../platform/agentHost/node/shared/fileSecretStore.js';
 import type { IRemoteAccessApiHandler } from '../../../platform/agentHost/node/remoteAccess/remoteAccessServer.js';
@@ -71,6 +73,10 @@ export interface ICreaEditorDelegationApiOptions {
 	readonly runner?: IDelegationProcessRunner;
 	/** The Claude config folder of the agent host (default: `CLAUDE_CONFIG_DIR` or `~/.claude`). */
 	readonly claudeConfigDir?: string;
+	/** The CODEX_HOME of the agent host (default: its Codex home setting, `CODEX_HOME` or `~/.codex`). */
+	readonly codexHome?: string;
+	/** The Copilot CLI home of the agent host (default: `COPILOT_HOME` or `~/.copilot`). */
+	readonly copilotHome?: string;
 }
 
 class HttpError extends Error {
@@ -313,24 +319,39 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 	}
 
 	private async _installSession(record: IDelegationRecord, body: Partial<IDelegationSessionRequest>): Promise<IDelegationRecord> {
-		if (body.agent !== DelegationAgentKind.Claude) {
-			throw new HttpError(400, DelegationErrorCode.NotSupported, 'Only Claude sessions resume on the server; the chat continues with a transcript.');
-		}
 		if (typeof body.sessionId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(body.sessionId) || !Array.isArray(body.files)) {
 			throw new HttpError(400, DelegationErrorCode.InvalidRequest, 'Invalid session.');
 		}
-		if (record.resumeSessionId === body.sessionId) {
+		const sessionId = body.sessionId;
+		// Where each agent keeps its sessions, and the only folder a session's files may go into.
+		let agentDir: string;
+		let isOwnFile: (relativePath: string) => boolean;
+		switch (body.agent) {
+			case DelegationAgentKind.Claude:
+				agentDir = this._options.claudeConfigDir ?? getClaudeConfigDir();
+				isOwnFile = path => path.startsWith('projects/') && path.includes(sessionId);
+				break;
+			case DelegationAgentKind.Codex:
+				agentDir = this._options.codexHome ?? resolveDefaultCodexHome(process.env[AgentHostCodexAgentCodexHomeEnvVar], homedir());
+				isOwnFile = path => path.startsWith('sessions/') && path.endsWith(`-${sessionId}.jsonl`);
+				break;
+			case DelegationAgentKind.CopilotCli:
+				agentDir = this._options.copilotHome ?? getCopilotCliHome();
+				isOwnFile = path => path.startsWith(`session-state/${sessionId}/`);
+				break;
+			default:
+				throw new HttpError(400, DelegationErrorCode.NotSupported, 'This agent\'s sessions cannot resume on the server; the chat continues with a transcript.');
+		}
+		if (record.resumeSessionId === sessionId) {
 			return record;
 		}
-		const configDir = this._options.claudeConfigDir ?? getClaudeConfigDir();
-		// Every file belongs to this session and goes into the projects folder.
 		for (const file of body.files) {
-			if (typeof file?.relativePath !== 'string' || typeof file.content !== 'string' || !file.relativePath.startsWith('projects/') || !file.relativePath.includes(body.sessionId)) {
+			if (typeof file?.relativePath !== 'string' || typeof file.content !== 'string' || !isOwnFile(file.relativePath)) {
 				throw new HttpError(400, DelegationErrorCode.InvalidRequest, 'Invalid session file.');
 			}
 		}
-		installSessionFiles(configDir, body.files);
-		const updated: IDelegationRecord = { ...record, resumeSessionId: body.sessionId };
+		installSessionFiles(agentDir, body.files);
+		const updated: IDelegationRecord = { ...record, resumeSessionId: sessionId };
 		this._writeRecord(updated);
 		return updated;
 	}

@@ -52,6 +52,8 @@ suite('CreaEditor Server - Delegate to Server', function () {
 			serverName: 'Test Server',
 			logService: new NullLogService(),
 			claudeConfigDir: join(dir, 'server-claude'),
+			codexHome: join(dir, 'server-codex'),
+			copilotHome: join(dir, 'server-copilot'),
 		});
 		// Stands in for the Remote Access front, which checks the device key before the handler runs.
 		const { createServer } = await import('http');
@@ -113,7 +115,7 @@ suite('CreaEditor Server - Delegate to Server', function () {
 			resumeSessionId: sessionId,
 			sessionFilesSent: true,
 			transcriptCwd: true,
-			accounts,
+			accounts: { ...accounts, workContext: { worktree: record.worktree, title: 'Fix the bug', branch: 'main' } },
 			stages: ['packing', 'uploading', 'preparing', 'done'],
 			fetched: true,
 		});
@@ -141,6 +143,42 @@ suite('CreaEditor Server - Delegate to Server', function () {
 			log: ['Uncommitted changes from Test Server', 'server commit', 'first'],
 			laptopA: 'a2\n',
 			laptopHasB: false,
+		});
+	});
+
+	test('moves Codex threads and Copilot CLI sessions so they resume on the server', async () => {
+		const realLaptop = fs.realpathSync(laptop);
+		const threadId = '0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee';
+		const codexDay = join(dir, 'laptop-codex', 'sessions', '2026', '10', '09');
+		fs.mkdirSync(codexDay, { recursive: true });
+		fs.writeFileSync(join(codexDay, `rollout-2026-10-09T10-00-00-${threadId}.jsonl`), JSON.stringify({ type: 'session_meta', payload: { id: threadId, cwd: realLaptop } }) + '\n');
+		const copilotId = '11111111-2222-3333-4444-555555555555';
+		const copilotSession = join(dir, 'laptop-copilot', 'session-state', copilotId);
+		fs.mkdirSync(copilotSession, { recursive: true });
+		fs.writeFileSync(join(copilotSession, 'events.jsonl'), JSON.stringify({ type: 'session.start', data: { context: { cwd: realLaptop } } }) + '\n');
+		fs.writeFileSync(join(copilotSession, 'workspace.yaml'), `id: ${copilotId}\ncwd: ${realLaptop}\n`);
+		fs.writeFileSync(join(copilotSession, '.workspace-fork.lock'), '');
+
+		const target = { serverId: 's1', name: 'Test Server', serverUrl, deviceKey };
+		const base = { server: target, folder: laptop, title: 'T', resultsMode: DelegationResultsMode.BringBack, includeSecretFiles: false, maxUploadBytes: 1e9, sourceName: 'Laptop' };
+		const options = { codexHome: join(dir, 'laptop-codex'), copilotHome: join(dir, 'laptop-copilot') };
+		const codex = await delegateChat({ ...base, agent: DelegationAgentKind.Codex, agentSessionId: threadId }, options);
+		const copilot = await delegateChat({ ...base, agent: DelegationAgentKind.CopilotCli, agentSessionId: copilotId }, options);
+		const serverCopilot = join(dir, 'server-copilot', 'session-state', copilotId);
+		assert.deepStrictEqual({
+			codex: [codex.sessionFilesSent, codex.record.resumeSessionId],
+			codexCwd: JSON.parse(fs.readFileSync(join(dir, 'server-codex', 'sessions', '2026', '10', '09', `rollout-2026-10-09T10-00-00-${threadId}.jsonl`), 'utf8')).payload.cwd === codex.record.workingDirectory,
+			copilot: [copilot.sessionFilesSent, copilot.record.resumeSessionId],
+			copilotFiles: fs.readdirSync(serverCopilot).sort(),
+			copilotCwd: JSON.parse(fs.readFileSync(join(serverCopilot, 'events.jsonl'), 'utf8')).data.context.cwd === copilot.record.workingDirectory,
+			copilotYaml: fs.readFileSync(join(serverCopilot, 'workspace.yaml'), 'utf8') === `id: ${copilotId}\ncwd: ${copilot.record.workingDirectory}\n`,
+		}, {
+			codex: [true, threadId],
+			codexCwd: true,
+			copilot: [true, copilotId],
+			copilotFiles: ['events.jsonl', 'workspace.yaml'],
+			copilotCwd: true,
+			copilotYaml: true,
 		});
 	});
 

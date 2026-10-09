@@ -177,3 +177,110 @@ export function installSessionFiles(agentDir: string, files: readonly IDelegatio
 		fs.writeFileSync(target, Buffer.from(file.content, 'base64'), { mode: 0o600, flag: 'wx' });
 	}
 }
+
+/**
+ * Replaces the laptop's folder `from` by `to` in a YAML file where it is a whole plain or quoted value
+ * or the start of a path in one (`cwd: <from>`, `- "<from>/src"`), like Copilot CLI's `workspace.yaml`.
+ */
+export function rewriteYamlSessionPaths(content: string, from: string, to: string): string {
+	if (!from || from === to) {
+		return content;
+	}
+	const pattern = new RegExp(`(^[^\\S\\n]*(?:-[^\\S\\n]+)?(?:[\\w.-]+:[^\\S\\n]+)?["']?)${escapeRegExp(from)}(?=["']?$|/|${escapeRegExp(sep)})`, 'gm');
+	return content.replace(pattern, (_match, prefix: string) => `${prefix}${to}`);
+}
+
+/** Session files whose text is rewritten; everything else (e.g. `session.db`) goes as it is. */
+function rewriteSessionFile(path: string, content: Buffer, rewrites: readonly (readonly [string, string])[]): Buffer {
+	const json = path.endsWith('.jsonl') || path.endsWith('.json');
+	const yaml = path.endsWith('.yaml') || path.endsWith('.yml');
+	if (!json && !yaml) {
+		return content;
+	}
+	let text = content.toString('utf8');
+	for (const [from, to] of rewrites) {
+		text = json ? rewriteSessionPaths(text, from, to) : rewriteYamlSessionPaths(text, from, to);
+	}
+	return Buffer.from(text, 'utf8');
+}
+
+interface ISessionMoveOptions {
+	readonly fromCwd: string;
+	readonly toCwd: string;
+	readonly fromRoot?: string;
+	readonly toRoot?: string;
+	readonly maxBytes?: number;
+}
+
+function readSessionFiles(sources: readonly { readonly path: string; readonly relativePath: string }[], options: ISessionMoveOptions): IDelegationSessionFile[] {
+	const rewrites: [string, string][] = [[options.fromCwd, options.toCwd]];
+	if (options.fromRoot && options.toRoot) {
+		rewrites.push([options.fromRoot, options.toRoot]);
+	}
+	const maxBytes = options.maxBytes ?? MAX_SESSION_FILES_BYTES;
+	let bytes = 0;
+	const files: IDelegationSessionFile[] = [];
+	for (const source of sources) {
+		bytes += fs.statSync(source.path).size;
+		if (bytes > maxBytes) {
+			throw new DelegationError(DelegationErrorCode.TooLarge, 'This chat\'s session files are too large to send; it continues with a transcript instead.');
+		}
+		files.push({ relativePath: source.relativePath, content: rewriteSessionFile(source.path, fs.readFileSync(source.path), rewrites).toString('base64') });
+	}
+	return files;
+}
+
+/** The Copilot CLI home of a process environment (`COPILOT_HOME` or `~/.copilot`). */
+export function getCopilotCliHome(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+	return env.COPILOT_HOME || join(home, '.copilot');
+}
+
+/** Files of a Copilot CLI session folder that stay behind (locks of the running CLI). */
+function isCopilotSessionFileSent(path: string): boolean {
+	const name = path.split(sep).pop() ?? '';
+	return !name.endsWith('.lock');
+}
+
+/**
+ * Reads a Copilot CLI session for the server: `<copilot home>/session-state/<sessionId>/` (its
+ * `events.jsonl`, `workspace.yaml`, `session.db`, ...), rewritten from the laptop's folder to the
+ * worktree and placed relative to the server's Copilot home.
+ */
+export function exportCopilotSession(options: ISessionMoveOptions & { readonly copilotHome: string; readonly sessionId: string }): IClaudeSessionExport | undefined {
+	if (!/^[A-Za-z0-9_-]{1,128}$/.test(options.sessionId)) {
+		return undefined;
+	}
+	const sessionDir = join(options.copilotHome, 'session-state', options.sessionId);
+	if (!fs.existsSync(join(sessionDir, 'events.jsonl'))) {
+		return undefined;
+	}
+	const sources = listFiles(sessionDir).filter(isCopilotSessionFileSent).map(path => ({ path, relativePath: `session-state/${options.sessionId}/${relative(sessionDir, path).split(sep).join('/')}` }));
+	const files = readSessionFiles(sources, options);
+	return { sessionId: options.sessionId, files, bytes: files.reduce((total, file) => total + Math.floor(file.content.length * 3 / 4), 0) };
+}
+
+/** Finds the rollout of a Codex thread (`<CODEX_HOME>/sessions/YYYY/MM/DD/rollout-<time>-<threadId>.jsonl`). */
+export function findCodexRollout(codexHome: string, threadId: string): string | undefined {
+	if (!/^[A-Za-z0-9_-]{1,128}$/.test(threadId)) {
+		return undefined;
+	}
+	return listFiles(join(codexHome, 'sessions')).find(path => path.endsWith(`-${threadId}.jsonl`) && (path.split(sep).pop() ?? '').startsWith('rollout-'));
+}
+
+/** The thread id in a rollout's file name (the UUID at its end), or undefined. */
+export function getCodexThreadIdFromRollout(path: string): string | undefined {
+	return /-(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i.exec(path)?.groups?.id;
+}
+
+/**
+ * Reads a Codex thread for the server: its rollout, rewritten from the laptop's folder to the
+ * worktree and placed at the same `sessions/...` path relative to the server's CODEX_HOME.
+ */
+export function exportCodexSession(options: ISessionMoveOptions & { readonly codexHome: string; readonly threadId: string }): IClaudeSessionExport | undefined {
+	const rollout = findCodexRollout(options.codexHome, options.threadId);
+	if (!rollout) {
+		return undefined;
+	}
+	const files = readSessionFiles([{ path: rollout, relativePath: relative(options.codexHome, rollout).split(sep).join('/') }], options);
+	return { sessionId: options.threadId, files, bytes: files.reduce((total, file) => total + Math.floor(file.content.length * 3 / 4), 0) };
+}

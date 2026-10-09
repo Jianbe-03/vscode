@@ -14,7 +14,6 @@ import { raceTimeout, timeout } from '../../../../../base/common/async.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { autorun } from '../../../../../base/common/observable.js';
-import { basename } from '../../../../../base/common/path.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -22,7 +21,7 @@ import { Action2, registerAction2 } from '../../../../../platform/actions/common
 import { IAgentHostConnectionsService } from '../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import { remoteAgentHostSessionTypeId } from '../../../../../platform/agentHost/common/agentHostSessionType.js';
 import { agentHostAuthority, toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
-import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getBroughtBackBranchName, ICreaEditorDelegationService, IDelegateResult, IDelegationAccountsPayload, IDelegationServerTarget } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
+import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getDelegationAgentKind, getDelegationAgentProvider, ICreaEditorDelegationService, IDelegateResult, IDelegationAccountsPayload, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationServerTarget, parseDelegationGatewayModel } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { IRemoteAgentHostService } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -42,6 +41,8 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { buildDelegationTranscript, createDelegationTranscriptAttachment } from '../../../../../workbench/contrib/chat/browser/actions/chatContinueInAction.js';
 import { IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
+import { ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
+import { ILanguageModelsConfigurationService } from '../../../../../workbench/contrib/chat/common/languageModelsConfiguration.js';
 import { getSubscriptionAccountSecretKey, ISubscriptionAccountsService } from '../../../../../workbench/services/agentHost/browser/subscriptionAccountsService.js';
 import { Menus } from '../../../../browser/menus.js';
 import { LOCAL_AGENT_HOST_PROVIDER_ID, REMOTE_AGENT_HOST_PROVIDER_PREFIX } from '../../../../common/agentHostSessionsProvider.js';
@@ -169,14 +170,58 @@ async function readClaudeTokenAccounts(accessor: ServicesAccessor): Promise<IDel
 	return tokens;
 }
 
-/** The SDK session id of a local Claude chat (the name of its transcript file). */
-async function readClaudeSessionId(accessor: ServicesAccessor, session: ISession): Promise<string | undefined> {
+/** The agent's own session id of a local chat (Claude SDK session, Codex thread, Copilot CLI session), from its state file. */
+async function readAgentSessionId(accessor: ServicesAccessor, session: ISession, agent: DelegationAgentKind): Promise<string | undefined> {
 	const resolution = accessor.get(IAgentHostConnectionsService).resolveSessionResource(session.resource);
-	if (!resolution) {
+	if (!resolution || agent === DelegationAgentKind.Transcript) {
 		return undefined;
 	}
 	const stateFile = await resolution.connection.getSessionStateFile(resolution.backendSession).catch(() => undefined);
-	return stateFile && stateFile.path.endsWith('.jsonl') ? basename(stateFile.path).slice(0, -'.jsonl'.length) : undefined;
+	return stateFile ? getAgentSessionIdFromStateFile(agent, stateFile.path) : undefined;
+}
+
+/** The secret storage key in a provider group's `${input:<key>}` reference (see `LanguageModelsService`). */
+function decodeSecretReference(value: unknown): string | undefined {
+	return typeof value === 'string' && value.startsWith('${input:') && value.endsWith('}') ? value.slice('${input:'.length, -1) : undefined;
+}
+
+/**
+ * The OpenRouter/LiteLLM key a chat runs on (its model's provider group), with the group's models, so
+ * the chat runs on the server with that key only. Undefined for other models.
+ */
+async function readGatewayKey(accessor: ServicesAccessor, session: ISession): Promise<IDelegationGatewayKey | undefined> {
+	const configurationService = accessor.get(ILanguageModelsConfigurationService);
+	const languageModelsService = accessor.get(ILanguageModelsService);
+	const secretStorageService = accessor.get(ISecretStorageService);
+	const groups = configurationService.getLanguageModelsProviderGroups();
+	const parsed = parseDelegationGatewayModel(session.modelId.get(), groups);
+	const group = parsed && groups.find(candidate => candidate.vendor === parsed.vendor && candidate.name === parsed.group);
+	if (!parsed || !group) {
+		return undefined;
+	}
+	const secretKey = decodeSecretReference(group.apiKey);
+	const key = secretKey ? await secretStorageService.get(secretKey) : typeof group.apiKey === 'string' ? group.apiKey : undefined;
+	if (!key) {
+		return undefined;
+	}
+	const prefix = `${parsed.vendor}/${parsed.group}/`;
+	const models: IDelegationGatewayModel[] = [];
+	for (const identifier of languageModelsService.getLanguageModelIds()) {
+		const metadata = identifier.startsWith(prefix) ? languageModelsService.lookupLanguageModel(identifier) : undefined;
+		if (metadata) {
+			models.push({ id: identifier.slice(prefix.length), name: metadata.name, maxInputTokens: metadata.maxInputTokens, maxOutputTokens: metadata.maxOutputTokens, ...(metadata.capabilities?.vision ? { supportsVision: true } : {}) });
+		}
+	}
+	if (!models.some(model => model.id === parsed.model)) {
+		models.push({ id: parsed.model });
+	}
+	return {
+		providerId: parsed.vendor,
+		label: parsed.group,
+		key,
+		models,
+		...(parsed.vendor === 'litellm' && typeof group.url === 'string' ? { baseUrl: group.url } : {}),
+	};
 }
 
 /** Waits until a session shows up in the Agents window (the server lists a resumed one a moment later). */
@@ -322,9 +367,11 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		await sessionsManagementService.cancelCurrentRequest(session);
 	}
 
-	const isClaude = session.sessionType === 'claude' || session.resource.scheme === 'agent-host-claude';
-	const agentSessionId = isClaude ? await instantiationService.invokeFunction(innerAccessor => readClaudeSessionId(innerAccessor, session)) : undefined;
+	const agent = getDelegationAgentKind(session.sessionType, session.resource.scheme);
+	const isClaude = agent === DelegationAgentKind.Claude;
+	const agentSessionId = await instantiationService.invokeFunction(innerAccessor => readAgentSessionId(innerAccessor, session, agent));
 	const claudeTokens = isClaude ? await instantiationService.invokeFunction(readClaudeTokenAccounts) : [];
+	const gatewayKey = agent === DelegationAgentKind.CopilotCli ? await instantiationService.invokeFunction(innerAccessor => readGatewayKey(innerAccessor, session)) : undefined;
 	const maxUploadMb = configurationService.getValue<number>(DelegationMaxUploadSettingId) || CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB;
 	const title = session.title.get() || localize('delegation.untitled', "Delegated chat");
 
@@ -356,9 +403,9 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 					resultsMode: modePick.mode,
 					includeSecretFiles,
 					maxUploadBytes: maxUploadMb * 1024 * 1024,
-					agent: isClaude ? DelegationAgentKind.Claude : DelegationAgentKind.Transcript,
+					agent: agentSessionId ? agent : DelegationAgentKind.Transcript,
 					...(agentSessionId ? { agentSessionId } : {}),
-					...(isClaude ? { accounts: { claudeTokens } } : {}),
+					accounts: { ...(claudeTokens?.length ? { claudeTokens } : {}), ...(gatewayKey ? { gatewayKey } : {}) },
 					sourceName: '',
 				});
 			} finally {
@@ -402,16 +449,17 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 				logService.warn(`[Delegation] Sending the accounts to ${server.name} failed: ${errorMessage(error)}`);
 			}
 		}
-		if (result.sessionFilesSent && result.record.resumeSessionId && connected.connection.importSession) {
+		const provider = getDelegationAgentProvider(result.record.agent);
+		if (result.sessionFilesSent && result.record.resumeSessionId && provider && connected.connection.importSession) {
 			// The server lists the installed session a moment after the accounts call; try a few times.
-			const backendSession = URI.from({ scheme: 'claude', path: `/${result.record.resumeSessionId}` });
+			const backendSession = URI.from({ scheme: provider, path: `/${result.record.resumeSessionId}` });
 			for (let attempt = 1; attempt <= IMPORT_ATTEMPTS && !remoteResource; attempt++) {
 				try {
 					await connected.connection.importSession(backendSession);
-					remoteResource = URI.from({ scheme: remoteAgentHostSessionTypeId(connected.authority, 'claude'), path: `/${result.record.resumeSessionId}` });
+					remoteResource = URI.from({ scheme: remoteAgentHostSessionTypeId(connected.authority, provider), path: `/${result.record.resumeSessionId}` });
 				} catch (error) {
 					if (attempt === IMPORT_ATTEMPTS) {
-						logService.warn(`[Delegation] ${server.name} could not resume the Claude session: ${errorMessage(error)}`);
+						logService.warn(`[Delegation] ${server.name} could not resume the ${provider} session: ${errorMessage(error)}`);
 					} else {
 						await timeout(IMPORT_RETRY_MS);
 					}
@@ -433,7 +481,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 	await sessionsManagementService.archiveSession(session).catch(error => logService.warn(`[Delegation] Archiving the local chat failed: ${errorMessage(error)}`));
 
 	const sent = result.bytesSent ? localize('delegation.sentBytes', "{0} MB of code sent{1}.", formatMegabytes(result.bytesSent), result.incremental ? localize('delegation.incremental', " (only what the server lacked)") : '') : localize('delegation.nothingToSend', "The server had the code already.");
-	const how = transcriptOnly ? localize('delegation.transcriptNote', " It continues with a transcript of the conversation (this agent's session cannot move to another machine).") : '';
+	const how = transcriptOnly ? localize('delegation.transcriptNote', " It continues with a transcript of the conversation (this chat's session could not move to the server).") : '';
 	const actions = [
 		...(remoteResource ? [{ label: localize('delegation.openOnServer', "Open on Server"), run: () => sessionsService.openSession(remoteResource) }] : []),
 		...(modePick.mode === DelegationResultsMode.PullRequest && !serverInfo.hasGitHubToken ? [{ label: localize('delegation.setToken', "Set GitHub Token on Server"), run: () => commandService.executeCommand(CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, server.id) }] : []),

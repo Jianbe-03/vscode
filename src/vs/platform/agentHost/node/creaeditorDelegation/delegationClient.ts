@@ -8,15 +8,17 @@
 
 import * as fs from 'fs';
 import type * as http from 'http';
-import { tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { pipeline } from 'stream';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { join } from '../../../../base/common/path.js';
-import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, DelegationAgentKind, DelegationErrorCode, DelegationProgressStage, IBringBackRequest, IBringBackResult, IDelegateRequest, IDelegateResult, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationServerTarget, IDelegationSessionRequest, IDelegationUploadResponse } from '../../common/creaeditorDelegation.js';
+import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, DelegationAgentKind, DelegationErrorCode, DelegationProgressStage, IBringBackRequest, IBringBackResult, IDelegateRequest, IDelegateResult, IDelegationAccountsPayload, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationServerTarget, IDelegationSessionRequest, IDelegationUploadResponse } from '../../common/creaeditorDelegation.js';
 import { sealDelegationPayload } from './delegationCrypto.js';
 import { DelegationError, packWorkspace, readDelegationRepository } from './delegationPack.js';
 import { IDelegationProcessRunner, nodeDelegationProcessRunner } from './delegationProcess.js';
-import { exportClaudeSession, getClaudeConfigDir } from './delegationSessionFiles.js';
+import { exportClaudeSession, exportCodexSession, exportCopilotSession, getClaudeConfigDir, getCopilotCliHome } from './delegationSessionFiles.js';
+import { resolveDefaultCodexHome } from '../codex/codexAccountHomes.js';
+import { repoFromRemoteUrl } from '../shared/gatewayDirectConnection.js';
 import { importResultBundle } from './delegationWorktrees.js';
 
 /** How often a request that failed on the network is tried again. */
@@ -215,6 +217,10 @@ export interface IDelegateChatOptions {
 	readonly transport?: DelegationHttpTransport;
 	/** The Claude config folder of this machine (default `CLAUDE_CONFIG_DIR` or `~/.claude`). */
 	readonly claudeConfigDir?: string;
+	/** The CODEX_HOME of this machine (default `CODEX_HOME` or `~/.codex`). */
+	readonly codexHome?: string;
+	/** The Copilot CLI home of this machine (default `COPILOT_HOME` or `~/.copilot`). */
+	readonly copilotHome?: string;
 	readonly onProgress?: (progress: IDelegationProgressReport) => void;
 	readonly retryDelayMs?: number;
 }
@@ -263,26 +269,44 @@ export async function delegateChat(request: IDelegateRequest, options: IDelegate
 		});
 
 		let sessionFilesSent = false;
-		if (request.agent === DelegationAgentKind.Claude && request.agentSessionId) {
-			const exported = exportClaudeSession({
-				configDir: options.claudeConfigDir ?? getClaudeConfigDir(),
-				sessionId: request.agentSessionId,
+		if (request.agentSessionId && request.agent !== DelegationAgentKind.Transcript) {
+			const move = {
 				fromCwd: fs.realpathSync(request.folder),
 				toCwd: record.workingDirectory,
 				fromRoot: fs.realpathSync(packed.root),
 				toRoot: record.worktree,
-			});
+			};
+			let exported;
+			switch (request.agent) {
+				case DelegationAgentKind.Claude:
+					exported = exportClaudeSession({ ...move, configDir: options.claudeConfigDir ?? getClaudeConfigDir(), sessionId: request.agentSessionId });
+					break;
+				case DelegationAgentKind.Codex:
+					exported = exportCodexSession({ ...move, codexHome: options.codexHome ?? resolveDefaultCodexHome(process.env.CODEX_HOME, homedir()), threadId: request.agentSessionId });
+					break;
+				case DelegationAgentKind.CopilotCli:
+					exported = exportCopilotSession({ ...move, copilotHome: options.copilotHome ?? getCopilotCliHome(), sessionId: request.agentSessionId });
+					break;
+			}
 			if (exported) {
-				record = await client.installSession(delegationId, { agent: DelegationAgentKind.Claude, sessionId: exported.sessionId, files: exported.files });
+				record = await client.installSession(delegationId, { agent: request.agent, sessionId: exported.sessionId, files: exported.files });
 				sessionFilesSent = true;
 			}
 		}
 
-		// Sealed even without accounts: the envelope also tells the server's agent host that this chat's
-		// session files arrived (it lists them, so the session can be imported).
-		const accountsEnvelope = request.accounts
-			? sealDelegationPayload(JSON.stringify(request.accounts), serverKey.publicKey, delegationId)
-			: undefined;
+		// Always sealed: the envelope carries the accounts and the chat's work context (the server's
+		// cost ledger), and tells the server's agents that this chat's session files arrived (they list
+		// them, so the session can be imported).
+		const payload: IDelegationAccountsPayload = {
+			...request.accounts,
+			workContext: {
+				worktree: record.worktree,
+				title: request.title,
+				...(packed.branch ? { branch: packed.branch } : {}),
+				...(repoFromRemoteUrl(packed.remoteUrl) ? { repo: repoFromRemoteUrl(packed.remoteUrl) } : {}),
+			},
+		};
+		const accountsEnvelope = sealDelegationPayload(JSON.stringify(payload), serverKey.publicKey, delegationId);
 
 		report({ stage: DelegationProgressStage.Done });
 		return {
@@ -292,7 +316,7 @@ export async function delegateChat(request: IDelegateRequest, options: IDelegate
 			hasLocalChanges: packed.hasLocalChanges,
 			skippedSecretFiles: packed.skippedSecretFiles,
 			sessionFilesSent,
-			...(accountsEnvelope ? { accountsEnvelope } : {}),
+			accountsEnvelope,
 		};
 	} finally {
 		fs.rmSync(workDir, { recursive: true, force: true });
@@ -324,3 +348,4 @@ export async function bringBackChanges(request: IBringBackRequest, options: IDel
 		fs.rmSync(workDir, { recursive: true, force: true });
 	}
 }
+
