@@ -47,6 +47,19 @@ export interface IRemoteAccessServerOptions {
 	readonly product: { readonly name: string; readonly version: string; readonly commit?: string };
 	/** The name of this machine shown to devices, e.g. `os.hostname()`. */
 	readonly hostName: string;
+	/**
+	 * More authenticated routes (CreaEditor Server: Delegate to Server under `/api/delegation/`). A
+	 * request whose path starts with a prefix goes to its handler once its device key checks out;
+	 * without a valid key it gets 401. The handler reads the body itself (it may be large).
+	 */
+	readonly apiHandlers?: readonly IRemoteAccessApiHandler[];
+}
+
+/** An authenticated route group of {@link IRemoteAccessServerOptions.apiHandlers}. */
+export interface IRemoteAccessApiHandler {
+	/** Path prefix, e.g. `/api/delegation/`. */
+	readonly prefix: string;
+	handle(request: httpTypes.IncomingMessage, response: httpTypes.ServerResponse, path: string, url: URL, device: IRemoteAccessDevice): Promise<void>;
 }
 
 /** A running Remote Access server. Dispose (or {@link close}) to stop it and drop all connections. */
@@ -276,6 +289,17 @@ class RemoteAccessServer extends Disposable implements IRemoteAccessServerHandle
 			}
 			await this._options.auth.revokeDevice(device.id);
 			sendJson(response, 200, {});
+			return;
+		}
+
+		const apiHandler = this._options.apiHandlers?.find(candidate => path.startsWith(candidate.prefix));
+		if (apiHandler) {
+			const device = this._authenticateRequest(request);
+			if (!device) {
+				sendJson(response, 401, { error: 'unauthorized' });
+				return;
+			}
+			await apiHandler.handle(request, response, path.slice(apiHandler.prefix.length), url, device);
 			return;
 		}
 
