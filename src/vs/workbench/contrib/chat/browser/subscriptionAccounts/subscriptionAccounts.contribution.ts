@@ -72,7 +72,7 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			],
 			default: 'ask',
 			scope: ConfigurationScope.APPLICATION,
-			markdownDescription: localize('chat.subscriptionAccounts.whenNoAccountLeft', "What a chat does when its Claude or Codex account is used up and no other account of the pool is left."),
+			markdownDescription: localize('chat.subscriptionAccounts.whenNoAccountLeft', "What a chat does when its Claude or Codex account is used up and no other account of the pool is left. When it asks, its **Continue When Usage Resets** button waits for the reset. See the usage of every account with **Show Subscription Usage**."),
 		},
 	},
 });

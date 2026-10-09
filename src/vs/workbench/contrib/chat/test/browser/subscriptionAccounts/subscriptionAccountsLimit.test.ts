@@ -11,7 +11,7 @@ import { ISubscriptionAccount, SUBSCRIPTION_ACCOUNTS_META_KEY, SUBSCRIPTION_ACCO
 import type { IAgentConnection } from '../../../../../../platform/agentHost/common/agentService.js';
 import type { RootState } from '../../../../../../platform/agentHost/common/state/protocol/state.js';
 import type { IRootConfigChangedAction } from '../../../../../../platform/agentHost/common/state/sessionActions.js';
-import { ADD_CLAUDE_ACCOUNT_COMMAND_ID, SWITCH_SUBSCRIPTION_ACCOUNT_COMMAND_ID, getSubscriptionLimitErrorDetails, getSubscriptionSwitchData, getSubscriptionWaitData, readSubscriptionLimitErrorMeta } from '../../../browser/subscriptionAccounts/subscriptionAccountsLimit.js';
+import { ADD_CLAUDE_ACCOUNT_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SWITCH_SUBSCRIPTION_ACCOUNT_COMMAND_ID, getSubscriptionLimitErrorDetails, getSubscriptionSwitchData, getSubscriptionWaitData, readSubscriptionLimitErrorMeta } from '../../../browser/subscriptionAccounts/subscriptionAccountsLimit.js';
 import { checkResetWaitAccount, formatResetWaitMessage, getResetWaitEnd, waitForSubscriptionReset, type IResetWaitClock } from '../../../browser/subscriptionAccounts/subscriptionAccountsResetWait.js';
 import { getNewUsageWarnings, pruneShownUsageWarnings } from '../../../browser/subscriptionAccounts/subscriptionUsageWarnings.js';
 import { formatAccountHistorySummary, formatPoolHistorySummary, getAccountUsageSeries, getPoolUsageHistory, getUsageHistoryRange } from '../../../browser/subscriptionAccounts/subscriptionUsageHistoryChart.js';
@@ -66,7 +66,7 @@ suite('SubscriptionAccountsLimit', () => {
 			ignoresOtherErrors: readSubscriptionLimitErrorMeta({ errorType: 'x', message: 'x', _meta: { other: true } }),
 		}, {
 			message: 'All Claude accounts are used up; the first resets in 2h.',
-			buttons: [{ label: 'Continue When Usage Resets', commandId: undefined }, { label: 'Add Claude Account', commandId: ADD_CLAUDE_ACCOUNT_COMMAND_ID }],
+			buttons: [{ label: 'Continue When Usage Resets', commandId: undefined }, { label: 'Add Claude Account', commandId: ADD_CLAUDE_ACCOUNT_COMMAND_ID }, { label: 'Show Usage', commandId: SHOW_SUBSCRIPTION_USAGE_COMMAND_ID }],
 			wait: { agentHostResumeTurn: true, subscriptionWait: { provider: 'claude', accountId: 'a', accountLabel: 'Work', resetsAt: now + 2 * hour } },
 			ignoresOtherErrors: undefined,
 		});

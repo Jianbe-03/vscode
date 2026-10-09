@@ -92,7 +92,8 @@ export function getSubscriptionSwitchData(confirmationData: readonly unknown[] |
 
 /**
  * The error shown for a used-up account: with a next account, buttons to continue there (once, or
- * from now on without asking); without one, when the first account frees up and a button to add one.
+ * from now on without asking); without one, when the first account frees up and buttons to add one
+ * and to show the usage of every account.
  * `chat` is the agent host chat URI of the failed turn; without it (a read-only chat) the chat cannot
  * switch, so only the limit is shown.
  *
@@ -148,6 +149,10 @@ export function getSubscriptionLimitErrorDetails(meta: ISubscriptionLimitErrorMe
 			data: undefined,
 			label: meta.provider === 'claude' ? localize('subscriptionLimit.addClaude', "Add Claude Account") : localize('subscriptionLimit.addCodex', "Add Codex Account"),
 			commandId: meta.provider === 'claude' ? ADD_CLAUDE_ACCOUNT_COMMAND_ID : ADD_CODEX_ACCOUNT_COMMAND_ID,
+		}, {
+			data: undefined,
+			label: localize('subscriptionLimit.showUsage', "Show Usage"),
+			commandId: SHOW_SUBSCRIPTION_USAGE_COMMAND_ID,
 		}],
 	};
 }
