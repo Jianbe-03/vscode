@@ -13,62 +13,73 @@ export const CREAEDITOR_SERVER_DEFAULT_PORT = 31600;
 /** The path of the status endpoint; it needs no authentication and tells nothing secret. */
 export const CREAEDITOR_SERVER_HEALTH_PATH = '/health';
 
-/** What `GET /health` of a CreaEditor Server answers. */
+/** The path that exchanges a pairing code for a device key (`POST { code, deviceName, password? }`). */
+export const CREAEDITOR_SERVER_PAIR_PATH = '/api/pair';
+
+/** The path of the agent host WebSocket; it takes the device key as `?tkn=`. */
+export const CREAEDITOR_SERVER_WEBSOCKET_PATH = '/ahp';
+
+/**
+ * What `GET /health` of a CreaEditor Server (or of a desktop's Remote Access) answers, see
+ * `src/vs/platform/agentHost/node/remoteAccess/README.md`.
+ */
 export interface ICreaEditorServerHealth {
-	/** Always `creaeditor-server`, so a client knows it reached a CreaEditor Server. */
-	readonly product: 'creaeditor-server';
-	/** `true` while the agent host runs. */
-	readonly ok: boolean;
+	/** `CreaEditor Server`, or the desktop app's name for its Remote Access. */
+	readonly product: string;
 	readonly version: string;
 	readonly commit?: string;
-	/** `linux`, `darwin`, ... */
-	readonly platform: string;
-	readonly arch: string;
+	/** Whether pairing needs the password (the server is reachable from the internet). */
+	readonly publicMode: boolean;
+	/** Whether the server serves the web Agents window. */
+	readonly webUi: boolean;
 	readonly uptimeSeconds: number;
-	/** The agent host process the server supervises. */
-	readonly agentHost: 'starting' | 'running' | 'restarting' | 'stopped';
-	readonly cpu: {
-		readonly cores: number;
-		/** The 1-minute load average divided by the number of cores, 0-100 (capped). */
-		readonly percent: number;
-	};
-	readonly memory: {
-		readonly totalBytes: number;
-		readonly freeBytes: number;
-	};
-	/** Chats with a turn in progress, when the server knows. */
-	readonly runningChats?: number;
-	/** Clients connected to the agent host right now, when the server knows. */
-	readonly connectedClients?: number;
 }
 
-/** Reads a `/health` answer; undefined when it is not one of a CreaEditor Server. */
+/** Reads a `/health` answer; undefined when it is not one of a Remote Access server. */
 export function parseCreaEditorServerHealth(value: unknown): ICreaEditorServerHealth | undefined {
 	if (!value || typeof value !== 'object') {
 		return undefined;
 	}
-	const candidate = value as Partial<Record<keyof ICreaEditorServerHealth, unknown>>;
-	const cpu = candidate.cpu as Partial<ICreaEditorServerHealth['cpu']> | undefined;
-	const memory = candidate.memory as Partial<ICreaEditorServerHealth['memory']> | undefined;
-	if (candidate.product !== 'creaeditor-server' || typeof candidate.version !== 'string') {
+	const candidate = value as Partial<Record<keyof ICreaEditorServerHealth | 'status', unknown>>;
+	if (candidate.status !== 'ok' || typeof candidate.product !== 'string' || typeof candidate.version !== 'string') {
 		return undefined;
 	}
-	const number = (input: unknown) => typeof input === 'number' && Number.isFinite(input) ? input : undefined;
-	const agentHost = candidate.agentHost === 'starting' || candidate.agentHost === 'running' || candidate.agentHost === 'restarting' || candidate.agentHost === 'stopped' ? candidate.agentHost : 'stopped';
 	return {
-		product: 'creaeditor-server',
-		ok: candidate.ok === true,
+		product: candidate.product,
 		version: candidate.version,
 		...(typeof candidate.commit === 'string' ? { commit: candidate.commit } : {}),
-		platform: typeof candidate.platform === 'string' ? candidate.platform : '',
-		arch: typeof candidate.arch === 'string' ? candidate.arch : '',
-		uptimeSeconds: number(candidate.uptimeSeconds) ?? 0,
-		agentHost,
-		cpu: { cores: number(cpu?.cores) ?? 0, percent: number(cpu?.percent) ?? 0 },
-		memory: { totalBytes: number(memory?.totalBytes) ?? 0, freeBytes: number(memory?.freeBytes) ?? 0 },
-		...(number(candidate.runningChats) !== undefined ? { runningChats: number(candidate.runningChats) } : {}),
-		...(number(candidate.connectedClients) !== undefined ? { connectedClients: number(candidate.connectedClients) } : {}),
+		publicMode: candidate.publicMode === true,
+		webUi: candidate.webUi === true,
+		uptimeSeconds: typeof candidate.uptimeSeconds === 'number' && Number.isFinite(candidate.uptimeSeconds) ? candidate.uptimeSeconds : 0,
 	};
+}
+
+/** Why a pairing attempt failed, as `POST /api/pair` answers it. */
+export type CreaEditorServerPairError = 'invalidCode' | 'expiredCode' | 'passwordRequired' | 'wrongPassword' | 'noPasswordSet' | 'lockedOut' | 'unreachable' | 'unexpected';
+
+export type CreaEditorServerPairResult =
+	| { readonly ok: true; readonly deviceId: string; readonly deviceKey: string }
+	| { readonly ok: false; readonly error: CreaEditorServerPairError; readonly retryAfterSeconds?: number };
+
+/** Reads the answer of `POST /api/pair` with HTTP status `status`. */
+export function parseCreaEditorServerPairResponse(status: number, body: unknown): CreaEditorServerPairResult {
+	const value = (body && typeof body === 'object' ? body : {}) as { deviceId?: unknown; deviceKey?: unknown; error?: unknown; retryAfterSeconds?: unknown };
+	if (status === 200 && typeof value.deviceKey === 'string' && value.deviceKey && typeof value.deviceId === 'string') {
+		return { ok: true, deviceId: value.deviceId, deviceKey: value.deviceKey };
+	}
+	const known: readonly CreaEditorServerPairError[] = ['invalidCode', 'expiredCode', 'passwordRequired', 'wrongPassword', 'noPasswordSet', 'lockedOut'];
+	const error = known.find(candidate => candidate === value.error) ?? 'unexpected';
+	return { ok: false, error, ...(typeof value.retryAfterSeconds === 'number' ? { retryAfterSeconds: value.retryAfterSeconds } : {}) };
+}
+
+/**
+ * The agent host address of a server in the form remote agent host addresses are kept in: `host:port/ahp`
+ * over plain WebSocket, `wss://host/ahp` over TLS.
+ */
+export function getCreaEditorServerAgentHostAddress(baseUrl: string): string {
+	const url = new URL(baseUrl);
+	const address = `${url.host}${CREAEDITOR_SERVER_WEBSOCKET_PATH}`;
+	return url.protocol === 'https:' ? `wss://${address}` : address;
 }
 
 /** A server address the user typed or pasted, read by {@link parseCreaEditorServerInput}. */
@@ -120,7 +131,7 @@ export function parseCreaEditorServerInput(input: string): ICreaEditorServerInpu
 	return { baseUrl, ...(pairingCode ? { pairingCode } : {}), suggestedName: url.hostname };
 }
 
-/** A pairing code as typed: spaces dropped and upper case, so `abcd 1234` and `ABCD-1234` match. */
+/** A pairing code as typed, in upper case without spaces (the server also ignores dashes). */
 export function normalizePairingCode(code: string): string {
 	return code.replace(/\s+/g, '').toUpperCase();
 }

@@ -4,28 +4,25 @@
  *--------------------------------------------------------------------------------------------*/
 
 // CreaEditor: the CreaEditor Server runs the standalone agent host (`agentHostServerMain`) as a child
-// process on 127.0.0.1 with a private connection token, and restarts it when it stops. The server's
-// front (web page, pairing, device keys) is the only way in from the network.
+// process listening on a unix socket in the private data folder, and restarts it when it stops. The
+// server's Remote Access front (web page, pairing, device keys) relays authenticated clients to it and
+// is the only way in from the network.
 
 import { ChildProcess, spawn } from 'child_process';
-import { randomBytes } from 'crypto';
 import * as fs from 'fs';
+import { tmpdir } from 'os';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { join } from '../../../base/common/path.js';
 import { AGENT_HOST_SECRETS_DIR_ENV_VAR } from '../../../platform/agentHost/node/shared/fileSecretStore.js';
 import { AGENT_HOST_HEADLESS_SIGN_IN_ENV_VAR } from '../../../platform/agentHost/node/shared/subscriptionAccountsService.js';
 import { AgentHostCodexAgentEnabledEnvVar } from '../../../platform/agentHost/common/agentService.js';
-import { ICreaEditorServerDataLayout, writePrivateFile } from './creaeditorServerDataDir.js';
+import { ICreaEditorServerDataLayout } from './creaeditorServerDataDir.js';
 
 export type CreaEditorAgentHostState = 'starting' | 'running' | 'restarting' | 'stopped';
 
-/** Where the running agent host listens, for the server's front. */
-export interface ICreaEditorAgentHostEndpoint {
-	readonly host: '127.0.0.1';
-	readonly port: number;
-	readonly connectionToken: string;
-}
+/** The longest unix socket path every platform accepts (macOS: 104 bytes with the terminator). */
+const MAX_SOCKET_PATH_LENGTH = 100;
 
 export interface ICreaEditorAgentHostOptions {
 	/** The `out` folder with `bootstrap-fork.js`. */
@@ -57,25 +54,36 @@ export class CreaEditorAgentHost extends Disposable {
 
 	private _state: CreaEditorAgentHostState = 'stopped';
 	private _child: ChildProcess | undefined;
-	private _endpoint: ICreaEditorAgentHostEndpoint | undefined;
 	private _quickRestarts = 0;
 	private _disposed = false;
 	private _restartTimer: ReturnType<typeof setTimeout> | undefined;
-	private readonly _connectionToken: string;
+	private _running: Promise<void> | undefined;
+	private _resolveRunning: (() => void) | undefined;
+	/**
+	 * The agent host's unix socket. Only the owner can enter the folder it is in, so the socket needs
+	 * no token: in the data folder, or a private temporary folder when that path is too long.
+	 */
+	readonly socketPath: string;
+	private readonly _tempSocketDir: string | undefined;
 
 	constructor(private readonly _options: ICreaEditorAgentHostOptions) {
 		super();
-		this._connectionToken = randomBytes(32).toString('base64url');
-		writePrivateFile(_options.layout.agentHostTokenFile, this._connectionToken);
+		const inDataDir = _options.layout.agentHostSocket;
+		this._tempSocketDir = inDataDir.length <= MAX_SOCKET_PATH_LENGTH ? undefined : fs.mkdtempSync(join(tmpdir(), 'ce-'));
+		this.socketPath = this._tempSocketDir ? join(this._tempSocketDir, 'ah.sock') : inDataDir;
 	}
 
 	get state(): CreaEditorAgentHostState {
 		return this._state;
 	}
 
-	/** Where the agent host listens while it runs. */
-	get endpoint(): ICreaEditorAgentHostEndpoint | undefined {
-		return this._state === 'running' ? this._endpoint : undefined;
+	/** Resolves when the agent host runs (now, or after the restart in progress). */
+	whenRunning(): Promise<void> {
+		if (this._state === 'running') {
+			return Promise.resolve();
+		}
+		this._running ??= new Promise<void>(resolve => this._resolveRunning = resolve);
+		return this._running;
 	}
 
 	/** Process id of the agent host while it runs. */
@@ -84,12 +92,12 @@ export class CreaEditorAgentHost extends Disposable {
 	}
 
 	/** Starts the agent host; resolves once it listens (or rejects when its first start fails). */
-	start(): Promise<ICreaEditorAgentHostEndpoint> {
+	start(): Promise<void> {
 		this._setState('starting');
 		return this._spawn();
 	}
 
-	private _spawn(): Promise<ICreaEditorAgentHostEndpoint> {
+	private _spawn(): Promise<void> {
 		const { outDir, repoRoot, layout, logLevel, enableCodex, enableMockAgent, log } = this._options;
 		const bootstrap = join(outDir, 'bootstrap-fork.js');
 		const nlsMessages = join(outDir, 'nls.messages.json');
@@ -110,11 +118,12 @@ export class CreaEditorAgentHost extends Disposable {
 		} else {
 			env['VSCODE_NLS_CONFIG'] = JSON.stringify({ userLocale: 'en', osLocale: 'en', resolvedLanguage: 'en', defaultMessagesFile: nlsMessages, locale: 'en', availableLanguages: {} });
 		}
+		// A socket left behind by a crash would make the listen fail.
+		fs.rmSync(this.socketPath, { force: true });
 		const args = [
 			bootstrap,
-			'--host', '127.0.0.1',
-			'--port', '0',
-			'--connection-token-file', layout.agentHostTokenFile,
+			'--socket-path', this.socketPath,
+			'--without-connection-token',
 			'--user-data-dir', layout.agentHost,
 			'--log', logLevel,
 			...(enableMockAgent ? ['--enable-mock-agent'] : []),
@@ -123,18 +132,16 @@ export class CreaEditorAgentHost extends Disposable {
 		this._child = child;
 		const startedAt = Date.now();
 
-		return new Promise<ICreaEditorAgentHostEndpoint>((resolve, reject) => {
+		return new Promise<void>((resolve, reject) => {
 			let ready = false;
 			let stdout = '';
 			child.stdout?.on('data', (data: Buffer) => {
 				stdout += data.toString();
-				const match = /READY:(?<port>\d+)/.exec(stdout);
-				if (!ready && match?.groups) {
+				if (!ready && stdout.includes('READY:')) {
 					ready = true;
-					this._endpoint = { host: '127.0.0.1', port: Number(match.groups.port), connectionToken: this._connectionToken };
 					this._setState('running');
 					log(`Agent host running (pid ${child.pid}).`);
-					resolve(this._endpoint);
+					resolve();
 				}
 				if (stdout.length > 4096) {
 					stdout = stdout.slice(-256);
@@ -153,7 +160,6 @@ export class CreaEditorAgentHost extends Disposable {
 			child.on('exit', (code, signal) => {
 				if (this._child === child) {
 					this._child = undefined;
-					this._endpoint = undefined;
 				}
 				if (this._disposed) {
 					this._setState('stopped');
@@ -186,6 +192,11 @@ export class CreaEditorAgentHost extends Disposable {
 	private _setState(state: CreaEditorAgentHostState): void {
 		if (this._state !== state) {
 			this._state = state;
+			if (state === 'running' && this._resolveRunning) {
+				this._resolveRunning();
+				this._running = undefined;
+				this._resolveRunning = undefined;
+			}
 			this._onDidChangeState.fire(state);
 		}
 	}
@@ -200,6 +211,7 @@ export class CreaEditorAgentHost extends Disposable {
 		const child = this._child;
 		if (!child || child.exitCode !== null) {
 			this._setState('stopped');
+			this._removeSocket();
 			return;
 		}
 		const exited = new Promise<void>(resolve => child.once('exit', () => resolve()));
@@ -208,6 +220,11 @@ export class CreaEditorAgentHost extends Disposable {
 		const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
 		await exited;
 		clearTimeout(timer);
+		this._removeSocket();
+	}
+
+	private _removeSocket(): void {
+		fs.rmSync(this._tempSocketDir ?? this.socketPath, { recursive: true, force: true });
 	}
 
 	override dispose(): void {
@@ -216,6 +233,9 @@ export class CreaEditorAgentHost extends Disposable {
 			clearTimeout(this._restartTimer);
 		}
 		this._child?.kill('SIGTERM');
+		if (!this._child) {
+			this._removeSocket();
+		}
 		super.dispose();
 	}
 }

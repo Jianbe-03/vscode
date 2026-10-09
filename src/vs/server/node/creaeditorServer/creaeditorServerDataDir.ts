@@ -26,8 +26,10 @@ export interface ICreaEditorServerDataLayout {
 	readonly pairingFile: string;
 	/** Where a running server writes its pid, address and version, for `creaeditor-server status`. */
 	readonly runtimeFile: string;
-	/** The token the server and its agent host share on 127.0.0.1. */
-	readonly agentHostTokenFile: string;
+	/** The unix socket of the agent host (in the private `agent-host` folder). */
+	readonly agentHostSocket: string;
+	/** The token of the server's admin endpoint on 127.0.0.1, for `creaeditor-server pair` and `password`. */
+	readonly adminTokenFile: string;
 }
 
 export function getCreaEditorServerDataLayout(root: string): ICreaEditorServerDataLayout {
@@ -40,7 +42,8 @@ export function getCreaEditorServerDataLayout(root: string): ICreaEditorServerDa
 		logs: join(root, 'logs'),
 		pairingFile: join(root, 'pairing.txt'),
 		runtimeFile: join(root, 'server.json'),
-		agentHostTokenFile: join(root, 'agent-host', 'connection-token'),
+		agentHostSocket: join(root, 'agent-host', 'agent-host.sock'),
+		adminTokenFile: join(root, 'remote-access', 'admin-token'),
 	};
 }
 
@@ -63,12 +66,14 @@ export interface ICreaEditorServerRuntimeInfo {
 	readonly version: string;
 	readonly startedAt: number;
 	readonly publicUrl?: string;
+	/** The port of the admin endpoint on 127.0.0.1. */
+	readonly adminPort: number;
 }
 
 export function readCreaEditorServerRuntimeInfo(layout: ICreaEditorServerDataLayout): ICreaEditorServerRuntimeInfo | undefined {
 	try {
 		const value = JSON.parse(fs.readFileSync(layout.runtimeFile, 'utf8')) as Partial<ICreaEditorServerRuntimeInfo>;
-		if (typeof value.pid === 'number' && typeof value.port === 'number' && typeof value.host === 'string') {
+		if (typeof value.pid === 'number' && typeof value.port === 'number' && typeof value.host === 'string' && typeof value.adminPort === 'number') {
 			return value as ICreaEditorServerRuntimeInfo;
 		}
 	} catch {

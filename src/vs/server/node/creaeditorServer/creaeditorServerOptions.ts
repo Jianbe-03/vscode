@@ -8,7 +8,7 @@
 import { join } from '../../../base/common/path.js';
 import { CREAEDITOR_SERVER_DEFAULT_PORT } from '../../../platform/agentHost/common/creaeditorServer.js';
 
-export type CreaEditorServerCommand = 'serve' | 'pair' | 'status' | 'help' | 'version';
+export type CreaEditorServerCommand = 'serve' | 'pair' | 'password' | 'status' | 'help' | 'version';
 
 export interface ICreaEditorServerOptions {
 	readonly command: CreaEditorServerCommand;
@@ -21,6 +21,11 @@ export interface ICreaEditorServerOptions {
 	readonly logLevel: string;
 	/** The address people reach the server at (a public domain or a Tailscale name), for pairing links. */
 	readonly publicUrl?: string;
+	/**
+	 * Whether the server is reachable from the internet (a public domain or Tailscale Funnel): pairing
+	 * then needs the password too.
+	 */
+	readonly public: boolean;
 	/** Whether the Codex agent is offered (Claude always is). */
 	readonly enableCodex: boolean;
 	/** Development: a scripted agent instead of Claude and Codex, for tests. */
@@ -53,12 +58,13 @@ export function getDefaultDataDir(environment: ICreaEditorServerEnvironment): st
  * {@link CREAEDITOR_SERVER_DEFAULT_PORT}.
  */
 export function parseCreaEditorServerOptions(argv: readonly string[], environment: ICreaEditorServerEnvironment): ICreaEditorServerOptions {
-	const { env } = environment;
+	// An empty variable (such as `VAR=` in a compose file) counts as unset.
+	const env = (name: string) => environment.env[name] || undefined;
 	let command: CreaEditorServerCommand | undefined;
 	const values = new Map<string, string>();
 	const flags = new Set<string>();
 	const valueOptions = new Set(['host', 'port', 'data-dir', 'public-url', 'log']);
-	const flagOptions = new Set(['enable-codex', 'disable-codex', 'enable-mock-agent', 'help', 'version']);
+	const flagOptions = new Set(['public', 'enable-codex', 'disable-codex', 'enable-mock-agent', 'help', 'version']);
 
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index];
@@ -90,18 +96,18 @@ export function parseCreaEditorServerOptions(argv: readonly string[], environmen
 		command = 'version';
 	}
 
-	const portText = values.get('port') ?? env['CREAEDITOR_SERVER_PORT'];
+	const portText = values.get('port') ?? env('CREAEDITOR_SERVER_PORT');
 	const port = portText === undefined ? CREAEDITOR_SERVER_DEFAULT_PORT : Number(portText);
 	if (!Number.isInteger(port) || port < 0 || port > 65535) {
 		throw new CreaEditorServerOptionsError(`--port must be a number from 0 to 65535, not '${portText}'.`);
 	}
 
-	const logLevel = values.get('log') ?? env['CREAEDITOR_SERVER_LOG'] ?? 'info';
+	const logLevel = values.get('log') ?? env('CREAEDITOR_SERVER_LOG') ?? 'info';
 	if (!LOG_LEVELS.includes(logLevel)) {
 		throw new CreaEditorServerOptionsError(`--log must be one of ${LOG_LEVELS.join(', ')}.`);
 	}
 
-	const publicUrl = values.get('public-url') ?? env['CREAEDITOR_SERVER_PUBLIC_URL'] ?? (env['CREAEDITOR_PUBLIC_DOMAIN'] ? `https://${env['CREAEDITOR_PUBLIC_DOMAIN']}` : undefined);
+	const publicUrl = values.get('public-url') ?? env('CREAEDITOR_SERVER_PUBLIC_URL') ?? (env('CREAEDITOR_PUBLIC_DOMAIN') ? `https://${env('CREAEDITOR_PUBLIC_DOMAIN')}` : undefined);
 	if (publicUrl !== undefined && !/^https?:\/\/[^\s/]+/i.test(publicUrl)) {
 		throw new CreaEditorServerOptionsError(`--public-url must start with http:// or https://, not '${publicUrl}'.`);
 	}
@@ -109,15 +115,16 @@ export function parseCreaEditorServerOptions(argv: readonly string[], environmen
 	if (flags.has('enable-codex') && flags.has('disable-codex')) {
 		throw new CreaEditorServerOptionsError('--enable-codex and --disable-codex cannot be used together.');
 	}
-	const enableCodex = flags.has('enable-codex') || (!flags.has('disable-codex') && env['CREAEDITOR_SERVER_CODEX'] !== '0');
+	const enableCodex = flags.has('enable-codex') || (!flags.has('disable-codex') && env('CREAEDITOR_SERVER_CODEX') !== '0');
 
 	return {
 		command: command ?? 'serve',
-		host: values.get('host') ?? env['CREAEDITOR_SERVER_HOST'] ?? (environment.inDocker ? '0.0.0.0' : '127.0.0.1'),
+		host: values.get('host') ?? env('CREAEDITOR_SERVER_HOST') ?? (environment.inDocker ? '0.0.0.0' : '127.0.0.1'),
 		port,
-		dataDir: values.get('data-dir') ?? env['CREAEDITOR_SERVER_DATA_DIR'] ?? getDefaultDataDir(environment),
+		dataDir: values.get('data-dir') ?? env('CREAEDITOR_SERVER_DATA_DIR') ?? getDefaultDataDir(environment),
 		logLevel,
 		...(publicUrl ? { publicUrl: publicUrl.replace(/\/+$/, '') } : {}),
+		public: flags.has('public') || env('CREAEDITOR_SERVER_PUBLIC') === '1' || !!env('CREAEDITOR_PUBLIC_DOMAIN'),
 		enableCodex,
 		enableMockAgent: flags.has('enable-mock-agent'),
 	};
@@ -129,7 +136,7 @@ function splitOption(option: string): [string, string | undefined] {
 }
 
 function isCommand(value: string): value is CreaEditorServerCommand {
-	return value === 'serve' || value === 'pair' || value === 'status' || value === 'help' || value === 'version';
+	return value === 'serve' || value === 'pair' || value === 'password' || value === 'status' || value === 'help' || value === 'version';
 }
 
 /** The `creaeditor-server help` text. */
@@ -140,6 +147,7 @@ Usage: creaeditor-server [command] [options]
 Commands:
   serve        Start the server (default).
   pair         Print a new one-time pairing code for a laptop or phone.
+  password     Set the password that pairing needs when the server is public.
   status       Show whether the server runs, its address and its agents.
   version      Print the version.
   help         Show this help.
@@ -152,6 +160,8 @@ Options (environment variable in brackets):
                        (default ~/.creaeditor-server; /data in Docker)
   --public-url <url>   Address people reach this server at, used in pairing links
                        [CREAEDITOR_SERVER_PUBLIC_URL, or https://$CREAEDITOR_PUBLIC_DOMAIN]
+  --public             Reachable from the internet: pairing also needs the password
+                       [CREAEDITOR_SERVER_PUBLIC=1; on when CREAEDITOR_PUBLIC_DOMAIN is set]
   --log <level>        trace, debug, info, warn, error or off [CREAEDITOR_SERVER_LOG] (default info)
   --disable-codex      Do not offer the Codex agent [CREAEDITOR_SERVER_CODEX=0]
 `;

@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { parseCreaEditorServerHealth, parseCreaEditorServerInput } from '../../common/creaeditorServer.js';
+import { getCreaEditorServerAgentHostAddress, parseCreaEditorServerHealth, parseCreaEditorServerInput, parseCreaEditorServerPairResponse } from '../../common/creaeditorServer.js';
 
 suite('CreaEditor Server address', () => {
 
@@ -39,15 +39,38 @@ suite('CreaEditor Server address', () => {
 		assert.deepStrictEqual(['', '   ', 'ftp://example.com', 'two words', 'https://user:pw@example.com', 'http://'].map(parseCreaEditorServerInput), Array(6).fill(undefined));
 	});
 
-	test('reads only CreaEditor Server health answers', () => {
-		assert.deepStrictEqual([
-			parseCreaEditorServerHealth({ product: 'creaeditor-server', ok: true, version: '1.0.0', agentHost: 'running', cpu: { cores: 2, percent: 10 }, memory: { totalBytes: 4, freeBytes: 1 }, runningChats: 3 }),
-			parseCreaEditorServerHealth({ status: 'ok' }),
-			parseCreaEditorServerHealth('ok'),
-		], [
-			{ product: 'creaeditor-server', ok: true, version: '1.0.0', platform: '', arch: '', uptimeSeconds: 0, agentHost: 'running', cpu: { cores: 2, percent: 10 }, memory: { totalBytes: 4, freeBytes: 1 }, runningChats: 3 },
-			undefined,
-			undefined,
-		]);
+	test('reads health and pairing answers and the agent host address', () => {
+		assert.deepStrictEqual({
+			health: [
+				parseCreaEditorServerHealth({ status: 'ok', product: 'CreaEditor Server', version: '1.140.0', commit: 'abc', publicMode: true, webUi: true, uptimeSeconds: 12 }),
+				parseCreaEditorServerHealth({ status: 'ok', product: 'CreaEditor Server', version: '1.140.0' }),
+				parseCreaEditorServerHealth({ status: 'down' }),
+				parseCreaEditorServerHealth('ok'),
+			],
+			pair: [
+				parseCreaEditorServerPairResponse(200, { deviceId: 'd1', deviceName: 'Laptop', deviceKey: 'd1.secret' }),
+				parseCreaEditorServerPairResponse(403, { error: 'passwordRequired' }),
+				parseCreaEditorServerPairResponse(429, { error: 'lockedOut', retryAfterSeconds: 900 }),
+				parseCreaEditorServerPairResponse(500, 'oops'),
+			],
+			address: [
+				getCreaEditorServerAgentHostAddress('https://agents.example.com'),
+				getCreaEditorServerAgentHostAddress('http://100.64.0.2:31600'),
+			],
+		}, {
+			health: [
+				{ product: 'CreaEditor Server', version: '1.140.0', commit: 'abc', publicMode: true, webUi: true, uptimeSeconds: 12 },
+				{ product: 'CreaEditor Server', version: '1.140.0', publicMode: false, webUi: false, uptimeSeconds: 0 },
+				undefined,
+				undefined,
+			],
+			pair: [
+				{ ok: true, deviceId: 'd1', deviceKey: 'd1.secret' },
+				{ ok: false, error: 'passwordRequired' },
+				{ ok: false, error: 'lockedOut', retryAfterSeconds: 900 },
+				{ ok: false, error: 'unexpected' },
+			],
+			address: ['wss://agents.example.com/ahp', '100.64.0.2:31600/ahp'],
+		});
 	});
 });
