@@ -212,7 +212,8 @@ class RemoteAccessServer extends Disposable implements IRemoteAccessServerHandle
 	private async _handleRequest(request: httpTypes.IncomingMessage, response: httpTypes.ServerResponse): Promise<void> {
 		response.setHeader('X-Content-Type-Options', 'nosniff');
 		response.setHeader('Referrer-Policy', 'no-referrer');
-		response.setHeader('X-Frame-Options', 'DENY');
+		// The web worker extension host runs in a same-origin iframe.
+		response.setHeader('X-Frame-Options', 'SAMEORIGIN');
 
 		const url = parseRequestUrl(request);
 		if (!url) {
