@@ -204,6 +204,14 @@ export interface ISSHRemoteAgentHostService {
 	resolveSSHConfig(host: string): Promise<ISSHResolvedConfig>;
 
 	/**
+	 * CreaEditor: runs `script` (POSIX shell, in a login shell) on the SSH host of `config`, first copying
+	 * `upload.localPath` (a file on this computer) to `upload.remotePath` when given, and returns its
+	 * output. Uses the same SSH config, keys, password prompts and host key checks as `connect`, and
+	 * closes the connection afterwards. Used to install a CreaEditor Server over SSH.
+	 */
+	runScript?(config: ISSHAgentHostConfig, script: string, upload?: ISSHScriptUpload): Promise<ISSHScriptResult>;
+
+	/**
 	 * Re-establish an SSH tunnel on startup for a previously connected host.
 	 * Resolves once the service-owned protocol connection is ready.
 	 *
@@ -214,6 +222,19 @@ export interface ISSHRemoteAgentHostService {
 	 */
 	reconnect(sshConfigHost: string, name: string, userInitiated?: boolean): Promise<ISSHAgentHostConnection>;
 }
+/** CreaEditor: a file {@link ISSHRemoteAgentHostService.runScript} copies to the SSH host first. */
+export interface ISSHScriptUpload {
+	readonly localPath: string;
+	readonly remotePath: string;
+}
+
+/** CreaEditor: the output of {@link ISSHRemoteAgentHostService.runScript}. */
+export interface ISSHScriptResult {
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly code: number;
+}
+
 /**
  * Serializable result from a successful SSH connect operation.
  * Returned over IPC from the main process.
@@ -591,6 +612,9 @@ export interface ISSHRemoteAgentHostMainService {
 
 	/** Resolve full SSH config for a host via `ssh -G`. */
 	resolveSSHConfig(host: string): Promise<ISSHResolvedConfig>;
+
+	/** CreaEditor: see {@link ISSHRemoteAgentHostService.runScript}. */
+	runScript(config: ISSHAgentHostConfig, script: string, upload?: ISSHScriptUpload): Promise<ISSHScriptResult>;
 
 	/**
 	 * Re-establish an SSH tunnel for a previously connected host.

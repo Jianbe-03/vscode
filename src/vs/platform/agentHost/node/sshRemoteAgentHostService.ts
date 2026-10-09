@@ -5,7 +5,7 @@
 
 import type WebSocket from 'ws';
 import type { AnyAuthMethod, AuthenticationType, ConnectConfig } from 'ssh2';
-import { promises as fsp } from 'fs';
+import { createReadStream, promises as fsp } from 'fs';
 import * as os from 'os';
 import * as cp from 'child_process';
 import { dirname, join, isAbsolute, basename } from '../../../base/common/path.js';
@@ -34,6 +34,8 @@ import {
 	type ISSHKeyboardInteractivePrompt,
 	type ISSHKeyboardInteractiveRequest,
 	type ISSHResolvedConfig,
+	type ISSHScriptResult,
+	type ISSHScriptUpload,
 	type SSHAgentHostLifecycle,
 	type SSHStrictHostKeyChecking,
 	SSHHostKeyDeniedError,
@@ -377,6 +379,28 @@ function sshExec(client: SSHClient, command: string, opts?: { ignoreExitCode?: b
 			stream.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
 			stream.on('error', (streamErr: Error) => finish(streamErr, undefined));
 			stream.on('close', (code: number) => finish(undefined, code));
+		});
+	});
+}
+
+/** CreaEditor: copies a local file to `remotePath` on the SSH host (through `cat`, no SFTP needed). */
+function sshUploadFile(client: SSHClient, localPath: string, remotePath: string): Promise<void> {
+	return new Promise<void>((resolve, reject) => {
+		client.exec(`cat > ${shellEscape(remotePath)}`, (err: Error | undefined, stream: SSHChannel) => {
+			if (err) {
+				reject(err);
+				return;
+			}
+			let stderr = '';
+			stream.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
+			stream.on('error', (streamErr: Error) => reject(streamErr));
+			stream.on('close', (code: number) => code === 0 ? resolve() : reject(new Error(`Copying to ${remotePath} failed (exit ${code}): ${stderr}`)));
+			const file = createReadStream(localPath);
+			file.on('error', fileErr => {
+				stream.close();
+				reject(fileErr);
+			});
+			file.pipe(stream);
 		});
 	});
 }
@@ -1284,6 +1308,20 @@ export class SSHRemoteAgentHostMainService extends Disposable implements ISSHRem
 			// system config file does not exist — skip
 		}
 		return result;
+	}
+
+	// CreaEditor: install a CreaEditor Server over SSH.
+	async runScript(config: ISSHAgentHostConfig, script: string, upload?: ISSHScriptUpload): Promise<ISSHScriptResult> {
+		const client = await this._connectSSH(config, computeSSHConnectionKey(config));
+		try {
+			if (upload) {
+				await sshUploadFile(client, upload.localPath, upload.remotePath);
+			}
+			// A login shell, so the script finds what the user's profile puts on the PATH (docker, tailscale).
+			return await sshExec(client, `bash -l -c ${shellEscape(script)}`, { ignoreExitCode: true });
+		} finally {
+			client.end();
+		}
 	}
 
 	async resolveSSHConfig(host: string): Promise<ISSHResolvedConfig> {

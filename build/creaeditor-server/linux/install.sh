@@ -123,7 +123,8 @@ $RUN_AS "$DEST/bin/creaeditor-server" status --data-dir "$DATA_DIR" || {
 	exit 1
 }
 echo
-echo "To pair a laptop or phone, run: $RUN_AS creaeditor-server pair --data-dir \"$DATA_DIR\""
+$RUN_AS "$DEST/bin/creaeditor-server" pair --data-dir "$DATA_DIR"
+echo "For another code later: $RUN_AS creaeditor-server pair --data-dir \"$DATA_DIR\""
 if [ "$(id -u)" -ne 0 ]; then
 	echo "To keep the server running after you log out: loginctl enable-linger $USER"
 fi

@@ -112,5 +112,6 @@ done
 	exit 1
 }
 echo
-echo "To pair a laptop or phone, run: creaeditor-server pair --data-dir \"$DATA_DIR\""
+"$DEST/bin/creaeditor-server" pair --data-dir "$DATA_DIR"
+echo "For another code later: creaeditor-server pair --data-dir \"$DATA_DIR\""
 echo "Logs: $LOG_DIR/server.log"

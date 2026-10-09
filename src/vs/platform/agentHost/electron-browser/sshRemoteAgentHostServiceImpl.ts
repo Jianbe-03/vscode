@@ -50,6 +50,8 @@ import {
 	type ISSHHostKeysAnnouncement,
 	type ISSHKeyboardInteractiveRequest,
 	type ISSHRemoteAgentHostMainService,
+	type ISSHScriptResult,
+	type ISSHScriptUpload,
 	type ISSHResolvedConfig,
 	type ISSHConnectProgress,
 } from '../common/sshRemoteAgentHost.js';
@@ -558,6 +560,11 @@ export class SSHRemoteAgentHostService extends Disposable implements ISSHRemoteA
 
 	async resolveSSHConfig(host: string): Promise<ISSHResolvedConfig> {
 		return this._mainService.resolveSSHConfig(host);
+	}
+
+	// CreaEditor: install a CreaEditor Server over SSH.
+	runScript(config: ISSHAgentHostConfig, script: string, upload?: ISSHScriptUpload): Promise<ISSHScriptResult> {
+		return this._mainService.runScript(config, script, upload);
 	}
 
 	async reconnect(sshConfigHost: string, _name: string, userInitiated?: boolean): Promise<ISSHAgentHostConnection> {
