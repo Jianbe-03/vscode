@@ -12,8 +12,9 @@
 import '../../../../../platform/agentHost/electron-browser/creaeditorDelegationService.js';
 import { raceTimeout, timeout } from '../../../../../base/common/async.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
-import { Disposable, DisposableStore } from '../../../../../base/common/lifecycle.js';
-import { autorun } from '../../../../../base/common/observable.js';
+import { Emitter } from '../../../../../base/common/event.js';
+import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
+import { autorun, observableSignalFromEvent } from '../../../../../base/common/observable.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -21,7 +22,7 @@ import { Action2, registerAction2 } from '../../../../../platform/actions/common
 import { IAgentHostConnectionsService } from '../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import { remoteAgentHostSessionTypeId } from '../../../../../platform/agentHost/common/agentHostSessionType.js';
 import { agentHostAuthority, toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
-import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getDelegationAgentKind, getDelegationAgentProvider, ICreaEditorDelegationService, IDelegateResult, IDelegationAccountsPayload, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationServerTarget, parseDelegationGatewayModel } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
+import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_DELEGATE_REQUEST_KEY, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getDelegationAgentKind, getDelegationAgentProvider, ICreaEditorDelegationService, IDelegateResult, IDelegateToServerRequest, IDelegationAccountsPayload, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationServerTarget, parseDelegationGatewayModel } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { IRemoteAgentHostService } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -37,9 +38,10 @@ import { IQuickInputService, IQuickPickItem } from '../../../../../platform/quic
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { IWorkspaceTrustManagementService } from '../../../../../platform/workspace/common/workspaceTrust.js';
 import { ISecretStorageService } from '../../../../../platform/secrets/common/secrets.js';
+import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
 import { buildDelegationTranscript, createDelegationTranscriptAttachment } from '../../../../../workbench/contrib/chat/browser/actions/chatContinueInAction.js';
-import { IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
+import { IChatWidget, IChatWidgetService } from '../../../../../workbench/contrib/chat/browser/chat.js';
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
 import { ILanguageModelsConfigurationService } from '../../../../../workbench/contrib/chat/common/languageModelsConfiguration.js';
@@ -60,6 +62,7 @@ const ActiveSessionDelegatedContext = new RawContextKey<boolean>('creaeditorActi
 const SHOW_DELEGATED_CHATS_COMMAND_ID = 'creaeditor.delegation.showDelegatedChats';
 const OPEN_ON_SERVER_COMMAND_ID = 'creaeditor.delegation.openOnServer';
 const CHANGE_RESULTS_MODE_COMMAND_ID = 'creaeditor.delegation.changeResultsMode';
+const TAKE_BACK_HERE_COMMAND_ID = 'creaeditor.delegation.takeBackHere';
 
 /** How long the server's agent host connection is waited for after the code went up. */
 const CONNECTION_TIMEOUT_MS = 30_000;
@@ -684,6 +687,55 @@ async function changeResultsModeAction(accessor: ServicesAccessor, context: Dele
 	}
 }
 
+/**
+ * Take Back Here: the delegated chat stops on its server (its turn is cancelled and the server's chat
+ * archived) and the local chat can be sent to again. The server's conversation stays there; its code
+ * comes back with Bring Back Changes.
+ */
+async function takeBackHereAction(accessor: ServicesAccessor, context: DelegationActionContext): Promise<void> {
+	const dialogService = accessor.get(IDialogService);
+	const notificationService = accessor.get(INotificationService);
+	const sessionsManagementService = accessor.get(ISessionsManagementService);
+	const sessionsService = accessor.get(ISessionsService);
+	const logService = accessor.get(ILogService);
+	const store = getDelegatedChats(accessor);
+	const chat = await pickDelegatedChat(accessor, context, localize('delegation.pickTakeBack', "Take back which chat?"));
+	if (!chat) {
+		return;
+	}
+	const { confirmed } = await dialogService.confirm({
+		message: localize('delegation.takeBackConfirm', "Take \"{0}\" back from {1}?", chat.title, chat.serverName),
+		detail: chat.resultsMode === DelegationResultsMode.BringBack && !chat.broughtBackBranch
+			? localize('delegation.takeBackDetailBringBack', "The chat stops on {0} and continues here from where it was delegated. Its work on the server stays on the server: use Bring Back Changes first to get its code.", chat.serverName)
+			: localize('delegation.takeBackDetail', "The chat stops on {0} and continues here from where it was delegated. The conversation on the server stays there.", chat.serverName),
+		primaryButton: localize({ key: 'delegation.takeBackButton', comment: ['&& denotes a mnemonic'] }, "&&Take Back Here"),
+	});
+	if (!confirmed) {
+		return;
+	}
+	const remote = chat.remoteSessionResource ? sessionsManagementService.getSession(URI.parse(chat.remoteSessionResource)) : undefined;
+	if (remote) {
+		try {
+			if (remote.status.get() === SessionStatus.InProgress || remote.status.get() === SessionStatus.NeedsInput) {
+				await sessionsManagementService.cancelCurrentRequest(remote);
+			}
+			await sessionsManagementService.archiveSession(remote);
+		} catch (error) {
+			logService.warn(`[Delegation] Stopping the chat on ${chat.serverName} failed: ${errorMessage(error)}`);
+		}
+	} else if (chat.remoteSessionResource) {
+		notificationService.info(localize('delegation.takeBackOffline', "{0} is not connected, so the chat could not be stopped there. Archive it on the server when it is back.", chat.serverName));
+	}
+	store.remove(chat.delegationId);
+	const local = chat.localSessionResource ? sessionsManagementService.getSession(URI.parse(chat.localSessionResource)) : undefined;
+	if (local) {
+		if (local.isArchived.get()) {
+			await sessionsManagementService.unarchiveSession(local).catch(error => logService.warn(`[Delegation] Unarchiving the local chat failed: ${errorMessage(error)}`));
+		}
+		await sessionsService.openSession(local.resource).catch(() => undefined);
+	}
+}
+
 async function showDelegatedChatsAction(accessor: ServicesAccessor): Promise<void> {
 	const quickInputService = accessor.get(IQuickInputService);
 	const commandService = accessor.get(ICommandService);
@@ -714,6 +766,7 @@ async function showDelegatedChatsAction(accessor: ServicesAccessor): Promise<voi
 			? { id: CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, label: localize('delegation.openPrFromServer', "Open PR from the Server") }
 			: { id: CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, label: localize('delegation.bringBackChanges', "Bring Back Changes") },
 		{ id: CHANGE_RESULTS_MODE_COMMAND_ID, label: localize('delegation.changeMode', "Change How Results Come Back") },
+		{ id: TAKE_BACK_HERE_COMMAND_ID, label: localize('delegation.takeBack', "Take Back Here") },
 	], { placeHolder: picked.chat.title });
 	if (action) {
 		await commandService.executeCommand(action.id, picked.chat.delegationId);
@@ -804,6 +857,21 @@ registerAction2(class extends Action2 {
 registerAction2(class extends Action2 {
 	constructor() {
 		super({
+			id: TAKE_BACK_HERE_COMMAND_ID,
+			title: localize2('delegation.takeBack', "Take Back Here"),
+			category: localize2('delegation.category', "Chat"),
+			f1: true,
+			menu: [{ id: Menus.SessionHeaderContext, group: '2_edit', order: 15, when: ActiveSessionDelegatedContext }],
+		});
+	}
+	run(accessor: ServicesAccessor, context?: DelegationActionContext): Promise<void> {
+		return takeBackHereAction(accessor, context);
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
 			id: CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID,
 			title: localize2('delegation.setToken', "Set GitHub Token on Server"),
 			category: localize2('delegation.category', "Chat"),
@@ -830,8 +898,9 @@ registerAction2(class extends Action2 {
 });
 
 /**
- * Marks delegated chats: the context key for the header actions, a placeholder in the local chat's
- * input that says where it continues, and a notification when a delegated chat finishes on its server.
+ * Marks delegated chats: the context key for the header actions, a lock on the local chat (no input,
+ * a notice with Open on Server, Bring Back Changes and Take Back Here), and a notification when a
+ * delegated chat finishes on its server.
  */
 class DelegatedChatsContribution extends Disposable implements IWorkbenchContribution {
 
@@ -849,19 +918,45 @@ class DelegatedChatsContribution extends Disposable implements IWorkbenchContrib
 		super();
 		const store = instantiationService.invokeFunction(getDelegatedChats);
 		const delegated = ActiveSessionDelegatedContext.bindTo(contextKeyService);
+		const storeChanged = observableSignalFromEvent(this, store.onDidChange);
+		// A chat view binds its widget to a chat a moment after the chat is opened.
+		const widgetsChanged = this._register(new Emitter<void>());
+		const widgetListeners = this._register(new DisposableMap<IChatWidget>());
+		const watchWidget = (widget: IChatWidget) => widgetListeners.set(widget, widget.onDidChangeViewModel(() => widgetsChanged.fire()));
+		chatWidgetService.getAllWidgets().forEach(watchWidget);
+		this._register(chatWidgetService.onDidAddWidget(widget => {
+			watchWidget(widget);
+			widgetsChanged.fire();
+		}));
+		this._register(chatWidgetService.onDidRemoveWidget(widget => widgetListeners.deleteAndDispose(widget)));
+		const widgetSignal = observableSignalFromEvent(this, widgetsChanged.event);
+		// A delegated chat runs in one place: here it is locked (no input) until it is taken back.
+		let lockedWidget: IChatWidget | undefined;
 		this._register(autorun(reader => {
+			storeChanged.read(reader);
+			widgetSignal.read(reader);
 			const session = sessionsService.activeSession.read(reader);
 			const chat = session ? store.find(session.resource.toString()) : undefined;
 			delegated.set(!!chat);
-			if (session && chat && chat.localSessionResource === session.resource.toString()) {
-				const widget = chatWidgetService.getWidgetBySessionResource(session.mainChat.read(reader).resource);
-				widget?.setInputPlaceholder(localize('delegation.placeholder', "Delegated to {0}: this chat continues there. Use Open on Server.", chat.serverName));
+			const widget = session && chat && chat.localSessionResource === session.resource.toString()
+				? chatWidgetService.getWidgetBySessionResource(session.mainChat.read(reader).resource)
+				: undefined;
+			if (lockedWidget && lockedWidget !== widget) {
+				lockedWidget.setLockNotice?.(undefined);
 			}
+			lockedWidget = widget;
+			widget?.setLockNotice?.(chat && {
+				message: localize('delegation.locked', "This chat continues on {0}.", chat.serverName),
+				actions: [
+					{ label: localize('delegation.openOnServer', "Open on Server"), run: () => commandService.executeCommand(OPEN_ON_SERVER_COMMAND_ID, chat.delegationId) },
+					chat.resultsMode === DelegationResultsMode.PullRequest
+						? { label: localize('delegation.openPrFromServer', "Open PR from the Server"), run: () => commandService.executeCommand(CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, chat.delegationId) }
+						: { label: localize('delegation.bringBackChanges', "Bring Back Changes"), run: () => commandService.executeCommand(CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, chat.delegationId) },
+					{ label: localize('delegation.takeBack', "Take Back Here"), run: () => commandService.executeCommand(TAKE_BACK_HERE_COMMAND_ID, chat.delegationId) },
+				],
+			});
 		}));
-		this._register(store.onDidChange(() => {
-			const session = sessionsService.activeSession.get();
-			delegated.set(!!session && !!store.find(session.resource.toString()));
-		}));
+		this._register(toDisposable(() => lockedWidget?.setLockNotice?.(undefined)));
 
 		// A delegated chat that finishes (or waits for approval) on its server.
 		const lastStatus = new Map<string, SessionStatus>();
@@ -893,3 +988,73 @@ class DelegatedChatsContribution extends Disposable implements IWorkbenchContrib
 }
 
 registerWorkbenchContribution2(DelegatedChatsContribution.ID, DelegatedChatsContribution, WorkbenchPhase.AfterRestored);
+
+/** How long a request of the editor window to delegate a chat stays valid. */
+const DELEGATE_REQUEST_LIFETIME_MS = 2 * 60 * 1000;
+
+/** The session of the Agents window that shows a chat of the editor window. */
+function findSessionForChat(sessionsManagementService: ISessionsManagementService, resource: URI): ISession | undefined {
+	return sessionsManagementService.getSession(resource)
+		?? sessionsManagementService.getSessions().find(session => session.mainChat.get().resource.toString() === resource.toString());
+}
+
+/** Runs Delegate to Server for a chat of the editor window (see `CREAEDITOR_OPEN_DELEGATE_TO_SERVER_COMMAND_ID`). */
+class DelegateRequestContribution extends Disposable implements IWorkbenchContribution {
+
+	static readonly ID = 'workbench.contrib.creaeditorDelegateRequest';
+
+	private readonly _waiting = this._register(new DisposableStore());
+
+	constructor(
+		@IStorageService private readonly _storageService: IStorageService,
+		@ICommandService private readonly _commandService: ICommandService,
+		@INotificationService private readonly _notificationService: INotificationService,
+		@ISessionsManagementService private readonly _sessionsManagementService: ISessionsManagementService,
+	) {
+		super();
+		this._register(this._storageService.onDidChangeValue(StorageScope.APPLICATION, CREAEDITOR_DELEGATE_REQUEST_KEY, this._store)(() => this._handleRequest()));
+		this._handleRequest();
+	}
+
+	private _handleRequest(): void {
+		const raw = this._storageService.get(CREAEDITOR_DELEGATE_REQUEST_KEY, StorageScope.APPLICATION);
+		if (!raw) {
+			return;
+		}
+		this._storageService.remove(CREAEDITOR_DELEGATE_REQUEST_KEY, StorageScope.APPLICATION);
+		let request: IDelegateToServerRequest;
+		try {
+			request = JSON.parse(raw);
+		} catch {
+			return;
+		}
+		if (typeof request?.sessionResource !== 'string' || typeof request.requestedAt !== 'number' || Date.now() - request.requestedAt > DELEGATE_REQUEST_LIFETIME_MS) {
+			return;
+		}
+		const resource = URI.parse(request.sessionResource);
+		const run = (session: ISession) => {
+			this._waiting.clear();
+			void this._commandService.executeCommand(CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, session);
+		};
+		const found = findSessionForChat(this._sessionsManagementService, resource);
+		if (found) {
+			run(found);
+			return;
+		}
+		// The Agents window may still be loading its chats.
+		this._waiting.clear();
+		this._waiting.add(this._sessionsManagementService.onDidChangeSessions(() => {
+			const session = findSessionForChat(this._sessionsManagementService, resource);
+			if (session) {
+				run(session);
+			}
+		}));
+		const timer = setTimeout(() => {
+			this._waiting.clear();
+			this._notificationService.info(localize('delegation.notAnAgentChat', "This chat cannot be delegated: only agent chats (Copilot CLI, Claude and Codex) that run on this computer move to a server."));
+		}, SESSION_APPEAR_TIMEOUT_MS);
+		this._waiting.add(toDisposable(() => clearTimeout(timer)));
+	}
+}
+
+registerWorkbenchContribution2(DelegateRequestContribution.ID, DelegateRequestContribution, WorkbenchPhase.AfterRestored);

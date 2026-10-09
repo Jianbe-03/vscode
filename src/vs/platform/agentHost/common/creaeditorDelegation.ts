@@ -54,6 +54,20 @@ export const CREAEDITOR_DELEGATION_SECRET_FILE_GLOBS: readonly string[] = [
 
 /** The command that starts Delegate to Server (from the chat panel's Continue Chat in... and the Agents window). */
 export const CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID = 'creaeditor.delegation.delegateToServer';
+/**
+ * Delegate to Server in the editor window: opens the Agents window (where the servers are), which
+ * delegates the chat named in {@link CREAEDITOR_DELEGATE_REQUEST_KEY}.
+ */
+export const CREAEDITOR_OPEN_DELEGATE_TO_SERVER_COMMAND_ID = 'creaeditor.delegation.openDelegateToServer';
+/** Application storage key the editor window sets to `{ sessionResource, requestedAt }` for the Agents window. */
+export const CREAEDITOR_DELEGATE_REQUEST_KEY = 'creaeditor.delegation.delegateRequested';
+
+/** A request of the editor window to delegate one of its chats. */
+export interface IDelegateToServerRequest {
+	readonly sessionResource: string;
+	readonly requestedAt: number;
+}
+
 /** Bring Back Changes of a delegated chat. */
 export const CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID = 'creaeditor.delegation.bringBackChanges';
 /** Open PR from the Server for a delegated chat. */
