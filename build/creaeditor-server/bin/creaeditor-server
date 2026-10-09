@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+#
+# Copyright (c) Microsoft Corporation. All rights reserved.
+#
+# CreaEditor Server command: creaeditor-server [serve|pair|status|version|help] [options]
+# Runs the bundled server main through bootstrap-fork, which loads the English messages (NLS).
+
+# Follow a symlink such as /usr/local/bin/creaeditor-server to the installed folder.
+SELF="$0"
+while [ -L "$SELF" ]; do
+	LINK="$(readlink "$SELF")"
+	case "$LINK" in
+		/*) SELF="$LINK" ;;
+		*) SELF="$(dirname "$SELF")/$LINK" ;;
+	esac
+done
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+
+export VSCODE_ESM_ENTRYPOINT="vs/server/node/creaeditorServer/creaeditorServerMain"
+export VSCODE_HANDLES_UNCAUGHT_ERRORS=true
+export VSCODE_NLS_CONFIG="{\"userLocale\":\"en\",\"osLocale\":\"en\",\"resolvedLanguage\":\"en\",\"defaultMessagesFile\":\"$ROOT/out/nls.messages.json\",\"locale\":\"en\",\"availableLanguages\":{}}"
+unset ELECTRON_RUN_AS_NODE
+
+exec "$ROOT/node" "$ROOT/out/bootstrap-fork.js" "$@"

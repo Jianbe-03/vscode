@@ -1,0 +1,23 @@
+# CreaEditor Server systemd unit. install.sh fills in the @@...@@ values and writes it to
+# /etc/systemd/system/creaeditor-server.service (as root) or ~/.config/systemd/user/ (as a user).
+[Unit]
+Description=CreaEditor Server (agents for CreaEditor on your laptop and phone)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+@@USER_LINE@@
+Environment="HOME=@@HOME@@"
+ExecStart="@@ROOT@@/bin/creaeditor-server" serve --data-dir "@@DATA_DIR@@" --host @@HOST@@ --port @@PORT@@
+WorkingDirectory=@@DATA_DIR@@
+Restart=always
+RestartSec=5
+# Give the agents time to save their chats.
+TimeoutStopSec=20
+KillMode=mixed
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=@@WANTED_BY@@

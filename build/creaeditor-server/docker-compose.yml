@@ -1,0 +1,74 @@
+# CreaEditor Server with Docker Compose. From this folder:
+#
+#   docker compose up -d --build                         # the server only, on 127.0.0.1:31600
+#   docker compose --profile public up -d --build        # + Caddy: https://$CREAEDITOR_PUBLIC_DOMAIN
+#   docker compose --profile tailscale up -d --build     # + Tailscale: https://creaeditor-server.<tailnet>.ts.net
+#
+#   docker compose exec creaeditor-server creaeditor-server pair     # a pairing code for a laptop or phone
+#   docker compose exec creaeditor-server creaeditor-server status
+#
+# Settings go in a .env file next to this one, for example:
+#   CREAEDITOR_PUBLIC_DOMAIN=agents.example.com   # public profile: a DNS name pointing at this machine
+#   TS_AUTHKEY=tskey-auth-...                     # tailscale profile: an auth key from the Tailscale admin console
+#
+# Public access (Caddy or Tailscale Funnel) needs a password for pairing: set one with
+#   docker compose exec creaeditor-server creaeditor-server password
+# All data is in the creaeditor-data volume; see CREAEDITOR.md for backups and updates.
+
+services:
+  creaeditor-server:
+    build:
+      context: ../..
+      dockerfile: build/creaeditor-server/Dockerfile
+    image: creaeditor-server:latest
+    restart: unless-stopped
+    # Only this machine. Caddy and Tailscale reach the server over the compose network; to reach it
+    # directly from your network, change this to "31600:31600".
+    ports:
+      - "127.0.0.1:31600:31600"
+    volumes:
+      - creaeditor-data:/data
+    environment:
+      # The address people reach the server at, used in pairing links. With the public profile:
+      CREAEDITOR_PUBLIC_DOMAIN: ${CREAEDITOR_PUBLIC_DOMAIN:-}
+      # With the tailscale profile: https://creaeditor-server.<tailnet>.ts.net
+      CREAEDITOR_SERVER_PUBLIC_URL: ${CREAEDITOR_SERVER_PUBLIC_URL:-}
+      # Do not offer the Codex agent:
+      # CREAEDITOR_SERVER_CODEX: "0"
+
+  # A public domain with automatic HTTPS (Let's Encrypt). Ports 80 and 443 must reach this machine.
+  caddy:
+    image: caddy:2
+    profiles: ["public"]
+    restart: unless-stopped
+    depends_on:
+      - creaeditor-server
+    command: caddy reverse-proxy --from ${CREAEDITOR_PUBLIC_DOMAIN:?set CREAEDITOR_PUBLIC_DOMAIN} --to creaeditor-server:31600
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # The server on your tailnet as https://creaeditor-server.<tailnet>.ts.net (Tailscale Serve). For
+  # access from the internet, set "AllowFunnel" to true in tailscale-serve.json (Tailscale Funnel).
+  tailscale:
+    image: tailscale/tailscale:latest
+    profiles: ["tailscale"]
+    hostname: creaeditor-server
+    restart: unless-stopped
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:?set TS_AUTHKEY}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/tailscale-serve.json
+      TS_USERSPACE: "true"
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./tailscale-serve.json:/config/tailscale-serve.json:ro
+
+volumes:
+  creaeditor-data:
+  caddy-data:
+  caddy-config:
+  tailscale-state:

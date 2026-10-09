@@ -136,6 +136,9 @@ const serverEntryPoints = [
 	'vs/platform/terminal/node/ptyHostMain',
 	'vs/platform/agentHost/node/agentHostMain',
 	'vs/platform/agentHost/node/diffWorkerMain',
+	// CreaEditor: the CreaEditor Server and the standalone agent host it supervises.
+	'vs/server/node/creaeditorServer/creaeditorServerMain',
+	'vs/platform/agentHost/node/agentHostServerMain',
 ];
 
 /**

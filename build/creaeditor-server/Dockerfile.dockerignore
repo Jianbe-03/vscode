@@ -1,0 +1,11 @@
+# Build context of build/creaeditor-server/Dockerfile (BuildKit reads <Dockerfile>.dockerignore).
+# Keep the sources and a prebuilt Linux tarball; leave out everything built for this machine.
+**/node_modules
+.build
+out
+out-*
+.git
+.tools
+.vscode-test
+dist/*
+!dist/creaeditor-server-linux-*.tar.gz
