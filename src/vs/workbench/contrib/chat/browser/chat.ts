@@ -31,6 +31,7 @@ import { ChatAttachmentModel } from './attachments/chatAttachmentModel.js';
 import { IChatEditorOptions } from './widgetHosts/editor/chatEditor.js';
 import { ChatInputPart } from './widget/input/chatInputPart.js';
 import { IChatWidgetContrib } from './widget/chatWidget.js';
+import type { IChatLockNotice } from './widget/chatReadOnlyBanner.js';
 import { ICodeBlockActionContext, ICodeBlockRenderOptions } from './widget/chatContentParts/codeBlockPart.js';
 import { AgentSessionTarget } from './agentSessions/agentSessions.js';
 
@@ -493,6 +494,8 @@ export interface IChatWidget {
 	rerunLastRequest(): Promise<void>;
 	setInputPlaceholder(placeholder: string): void;
 	resetInputPlaceholder(): void;
+	/** CreaEditor: locks the chat (read-only, no input) with a notice, e.g. while it continues on a server; `undefined` unlocks it. */
+	setLockNotice?(notice: IChatLockNotice | undefined): void;
 	/**
 	 * Focuses the response item in the list.
 	 * @param lastFocused Focuses the most recently focused response. Otherwise, focuses the last response.

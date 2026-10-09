@@ -106,7 +106,7 @@ import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js'
 import { IChatDebugService } from '../../common/chatDebugService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { ICustomizationHarnessService } from '../../common/customizationHarnessService.js';
-import { CHAT_READ_ONLY_BANNER_HEIGHT, ChatReadOnlyBanner } from './chatReadOnlyBanner.js';
+import { CHAT_READ_ONLY_BANNER_HEIGHT, ChatReadOnlyBanner, IChatLockNotice } from './chatReadOnlyBanner.js';
 import { IChatSubmitRequestHandlerService } from '../chatSubmitRequestHandlerService.js';
 import { getChatPetListPadding } from './chatPetWidget.js';
 import { IChatPetWidgetService } from './chatPetWidgetService.js';
@@ -462,6 +462,9 @@ export class ChatWidget extends Disposable implements IChatWidget {
 
 	private _inputVisible = true;
 	private _readOnly = false;
+	/** CreaEditor: what {@link setReadOnly} was last asked for, applied again when the lock notice changes. */
+	private _requestedReadOnly: { readonly readOnly: boolean; readonly keepInputVisible: boolean } = { readOnly: false, keepInputVisible: false };
+	private _lockNotice: IChatLockNotice | undefined;
 
 	private _instructionFilesCheckPromise: Promise<boolean> | undefined;
 	private _instructionFilesExist: boolean | undefined;
@@ -634,12 +637,11 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		super();
 		this._persistentContentHeight = viewOptions.persistentContentHeight ?? 0;
 
-		this.readOnlyBanner = viewOptions.isSessionsWindow
-			? undefined
-			: this._register(instantiationService.createInstance(
-				ChatReadOnlyBanner,
-				viewOptions.readOnlyBannerAtTop ? localize('chatReadOnlyBanner.message', "This chat is read-only") : undefined,
-			));
+		// CreaEditor: the Agents window has the banner too, but only shows it for a lock notice (see `setLockNotice`).
+		this.readOnlyBanner = this._register(instantiationService.createInstance(
+			ChatReadOnlyBanner,
+			viewOptions.readOnlyBannerAtTop ? localize('chatReadOnlyBanner.message', "This chat is read-only") : undefined,
+		));
 		this._lockedToCodingAgentContextKey = ChatContextKeys.lockedToCodingAgent.bindTo(this.contextKeyService);
 		this._lockedCodingAgentIdContextKey = ChatContextKeys.lockedCodingAgentId.bindTo(this.contextKeyService);
 		this._readOnlyContextKey = ChatContextKeys.readOnly.bindTo(this.contextKeyService);
@@ -2087,6 +2089,12 @@ export class ChatWidget extends Disposable implements IChatWidget {
 	 * actions (e.g. Start Over, Restore Checkpoint) are not offered.
 	 */
 	setReadOnly(readOnly: boolean, keepInputVisible = false): void {
+		// CreaEditor: a locked chat stays read-only, without its input, whatever its model says.
+		this._requestedReadOnly = { readOnly, keepInputVisible };
+		if (this._lockNotice) {
+			readOnly = true;
+			keepInputVisible = false;
+		}
 		const wasReadOnly = this._readOnly;
 		this._readOnly = readOnly;
 		this._readOnlyContextKey.set(readOnly || this.isTranscriptProgressActive);
@@ -2103,7 +2111,7 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		} else if (wasReadOnly) {
 			this.renderChatSuggestNextWidget();
 		}
-		this.readOnlyBanner?.setVisible(readOnly && !keepInputVisible);
+		this.readOnlyBanner?.setVisible(readOnly && !keepInputVisible && (!this.viewOptions.isSessionsWindow || !!this._lockNotice));
 		this.setInputVisible(!readOnly || keepInputVisible);
 		// Authoritative over the lock/unlock `editable` toggles below.
 		this._applyRendererEditable(!readOnly);
@@ -3060,6 +3068,19 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		}
 
 		this.listWidget.focusItem(item);
+	}
+
+	/**
+	 * CreaEditor: locks the chat (no input, read-only) with a notice that says why and what to do,
+	 * e.g. a chat that continues on a CreaEditor Server; `undefined` unlocks it.
+	 */
+	setLockNotice(notice: IChatLockNotice | undefined): void {
+		this._lockNotice = notice;
+		this.readOnlyBanner?.setNotice(notice);
+		this.setReadOnly(this._requestedReadOnly.readOnly, this._requestedReadOnly.keepInputVisible);
+		if (this.visible && this.bodyDimension) {
+			this.layout(this.bodyDimension.height, this.bodyDimension.width);
+		}
 	}
 
 	setInputPlaceholder(placeholder: string): void {
