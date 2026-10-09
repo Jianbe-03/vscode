@@ -3,128 +3,62 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-// CreaEditor: the AI cost ledger of a CreaEditor Server (see `common/creaeditorCosts.ts`). The agent
-// host appends every OpenRouter/LiteLLM request it makes itself to `<costs>/ledger.jsonl` (an update
-// appends the entry again; the last line of an id wins) and refuses requests once a hard-stop budget
-// the laptop pushed (`<costs>/budgets.json`) is used up. The server's front reads the file for
-// `GET /api/server/costs`; it never writes it, so the two processes do not race.
+// CreaEditor: reading the AI cost ledger of a CreaEditor Server (see `common/creaeditorCosts.ts`) and
+// deciding its hard stops. The agent host's server-side gateway path writes
+// `<costs>/creaeditor-gateway-costs.jsonl` (`gatewayCostLedger.ts`; one JSON entry per line like the
+// copilot extension's ledger, either appended or rewritten; the last line of an id wins). The laptop
+// pushes its budgets to `<costs>/budgets.json`. The server's front serves the ledger for
+// `GET /api/server/costs` and writes the budgets; it never writes the ledger.
 
 import * as fs from 'fs';
-import { generateUuid } from '../../../../base/common/uuid.js';
 import { join } from '../../../../base/common/path.js';
 import { findServerHardStop, ICostBudgetRequest, ICreaEditorServerCostsResponse, IGatewayCostEntryLike, IServerCostBudgets, IServerHardStop, parseServerCostBudgets } from '../../common/creaeditorCosts.js';
 
 /** Set by the CreaEditor Server: the folder of its cost ledger and the budgets the laptop pushed. */
 export const AGENT_HOST_COSTS_DIR_ENV_VAR = 'CREAEDITOR_AGENT_HOST_COSTS_DIR';
 
-export const SERVER_COST_LEDGER_FILE = 'ledger.jsonl';
+/** The ledger file in the costs folder (same name as the copilot extension's ledger). */
+export const SERVER_COST_LEDGER_FILE = 'creaeditor-gateway-costs.jsonl';
 export const SERVER_COST_BUDGETS_FILE = 'budgets.json';
 
-/** At most this many entries are answered per request; the client asks again with the new cursor. */
+/** At most this many entries are answered per request; the client asks again from the new cursor. */
 const MAX_ENTRIES_PER_READ = 5000;
 
-/** The ledger file of a server; see the top of this file. */
-export class ServerCostLedger {
-
-	private readonly _entries = new Map<string, IGatewayCostEntryLike>();
-	private _budgets: { readonly mtimeMs: number; readonly value: IServerCostBudgets | undefined } | undefined;
-
-	constructor(private readonly _dir: string, private readonly _now: () => number = Date.now) {
-		fs.mkdirSync(_dir, { recursive: true, mode: 0o700 });
-		const { entries } = readServerCostEntries(_dir, 0, Number.MAX_SAFE_INTEGER);
-		for (const entry of entries) {
-			this._entries.set(entry.id, entry);
-		}
-	}
-
-	get entries(): readonly IGatewayCostEntryLike[] {
-		return [...this._entries.values()];
-	}
-
-	/**
-	 * Records a request (fields like the copilot extension's `IGatewayCostEntry`: `chatId`,
-	 * `rootChatId`, `chatTitle`, `repo`, `branch`, `gateway`, `gatewayHost`, `providerGroup`, `model`,
-	 * token counts, `cost`, `costSource`). Returns its id.
-	 */
-	record(entry: Omit<IGatewayCostEntryLike, 'id' | 'time'>): string {
-		const recorded: IGatewayCostEntryLike = { ...entry, id: generateUuid(), time: this._now() };
-		this._append(recorded);
-		return recorded.id;
-	}
-
-	/** Updates a recorded request, e.g. with the cost the gateway reported later. */
-	update(id: string, update: Partial<Omit<IGatewayCostEntryLike, 'id' | 'time'>>): void {
-		const existing = this._entries.get(id);
-		if (!existing) {
-			return;
-		}
-		const defined = Object.fromEntries(Object.entries(update).filter(([, value]) => value !== undefined));
-		this._append({ ...existing, ...defined, id, time: existing.time });
-	}
-
-	/** The used up hard-stop budget that refuses a request with this scope, if any. */
-	findHardStop(request: ICostBudgetRequest): IServerHardStop | undefined {
-		return findServerHardStop(this._readBudgets(), this.entries, request, this._now());
-	}
-
-	private _append(entry: IGatewayCostEntryLike): void {
-		this._entries.set(entry.id, entry);
-		fs.appendFileSync(join(this._dir, SERVER_COST_LEDGER_FILE), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
-	}
-
-	private _readBudgets(): IServerCostBudgets | undefined {
-		const file = join(this._dir, SERVER_COST_BUDGETS_FILE);
-		let mtimeMs: number;
-		try {
-			mtimeMs = fs.statSync(file).mtimeMs;
-		} catch {
-			return undefined;
-		}
-		if (this._budgets?.mtimeMs !== mtimeMs) {
-			let value: IServerCostBudgets | undefined;
-			try {
-				value = parseServerCostBudgets(JSON.parse(fs.readFileSync(file, 'utf8')));
-			} catch {
-				value = undefined;
-			}
-			this._budgets = { mtimeMs, value };
-		}
-		return this._budgets.value;
-	}
-}
-
-/**
- * Reads the ledger from byte offset `after` (a cursor of an earlier read): only whole lines, at most
- * `limit` entries. A cursor past the end means the file was replaced: everything is read again.
- */
-export function readServerCostEntries(dir: string, after: number, limit = MAX_ENTRIES_PER_READ): ICreaEditorServerCostsResponse {
-	const file = join(dir, SERVER_COST_LEDGER_FILE);
-	let content: Buffer;
+/** Every entry of the ledger, the latest line of each id, oldest first. */
+export function readServerCostLedger(dir: string): IGatewayCostEntryLike[] {
+	let content: string;
 	try {
-		content = fs.readFileSync(file);
+		content = fs.readFileSync(join(dir, SERVER_COST_LEDGER_FILE), 'utf8');
 	} catch {
-		return { entries: [], cursor: 0, reset: after > 0 };
+		return [];
 	}
-	const reset = !Number.isInteger(after) || after < 0 || after > content.length;
-	let offset = reset ? 0 : after;
-	const entries: IGatewayCostEntryLike[] = [];
-	while (offset < content.length && entries.length < limit) {
-		const end = content.indexOf(0x0a, offset);
-		if (end === -1) {
-			break; // A line being written.
+	const byId = new Map<string, IGatewayCostEntryLike>();
+	for (const line of content.split('\n')) {
+		if (!line.trim()) {
+			continue;
 		}
-		const line = content.subarray(offset, end).toString('utf8');
-		offset = end + 1;
 		try {
 			const entry = JSON.parse(line) as IGatewayCostEntryLike;
 			if (entry && typeof entry.id === 'string' && typeof entry.time === 'number') {
-				entries.push(entry);
+				byId.delete(entry.id);
+				byId.set(entry.id, entry);
 			}
 		} catch {
-			// Skip a corrupt line rather than losing the ledger.
+			// A corrupt or half-written line.
 		}
 	}
-	return { entries, cursor: offset, reset };
+	return [...byId.values()].sort((a, b) => a.time - b.time);
+}
+
+/**
+ * The entries with a `time` of at least `after` (epoch milliseconds), at most `limit`, oldest first.
+ * `cursor` is the latest time answered; a client asks again from a bit before it (costs that arrive
+ * later update an entry without changing its time) and keeps the latest version of each id.
+ */
+export function readServerCostEntries(dir: string, after: number, limit = MAX_ENTRIES_PER_READ): ICreaEditorServerCostsResponse {
+	const from = Number.isFinite(after) && after > 0 ? after : 0;
+	const entries = readServerCostLedger(dir).filter(entry => entry.time >= from).slice(0, limit);
+	return { entries, cursor: entries.length ? entries[entries.length - 1].time : from, reset: false };
 }
 
 /** Writes the budgets the laptop pushed (atomically, 0600). */
@@ -136,19 +70,27 @@ export function writeServerCostBudgets(dir: string, budgets: IServerCostBudgets)
 	fs.renameSync(temp, file);
 }
 
-let serverCostLedger: ServerCostLedger | null | undefined;
+/** The budgets the laptop pushed last; undefined before the first push. */
+export function readServerCostBudgets(dir: string): IServerCostBudgets | undefined {
+	try {
+		return parseServerCostBudgets(JSON.parse(fs.readFileSync(join(dir, SERVER_COST_BUDGETS_FILE), 'utf8')));
+	} catch {
+		return undefined;
+	}
+}
 
 /**
- * The ledger of this agent host when it runs on a CreaEditor Server ({@link AGENT_HOST_COSTS_DIR_ENV_VAR}),
- * else undefined: the desktop records gateway costs in the copilot extension.
- *
- * A request path that calls a gateway directly on the server records it here and checks
- * {@link ServerCostLedger.findHardStop} first, refusing with the same message the laptop shows.
+ * The used up hard-stop budget that refuses a gateway request on this server, if any: call it before
+ * every OpenRouter/LiteLLM request the server makes itself, and refuse with the budget's name like the
+ * laptop does. `dir` defaults to {@link AGENT_HOST_COSTS_DIR_ENV_VAR}; outside a server there is none.
  */
-export function getServerCostLedger(): ServerCostLedger | undefined {
-	if (serverCostLedger === undefined) {
-		const dir = process.env[AGENT_HOST_COSTS_DIR_ENV_VAR];
-		serverCostLedger = dir ? new ServerCostLedger(dir) : null;
+export function findServerCostHardStop(request: ICostBudgetRequest, dir: string | undefined = process.env[AGENT_HOST_COSTS_DIR_ENV_VAR], now = Date.now()): IServerHardStop | undefined {
+	if (!dir) {
+		return undefined;
 	}
-	return serverCostLedger ?? undefined;
+	const budgets = readServerCostBudgets(dir);
+	if (!budgets?.budgets.some(budget => budget.hardStop)) {
+		return undefined;
+	}
+	return findServerHardStop(budgets, readServerCostLedger(dir), request, now);
 }

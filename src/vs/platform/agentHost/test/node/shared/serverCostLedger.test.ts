@@ -10,7 +10,7 @@ import { join } from '../../../../../base/common/path.js';
 import { getRandomTestPath } from '../../../../../base/test/node/testUtils.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { createServerCostBudgets, findServerHardStop, getBudgetPeriodRange, IGatewayCostEntryLike, mergeCostEntries, parseCostBudgets } from '../../../common/creaeditorCosts.js';
-import { readServerCostEntries, SERVER_COST_LEDGER_FILE, ServerCostLedger, writeServerCostBudgets } from '../../../node/shared/serverCostLedger.js';
+import { findServerCostHardStop, readServerCostEntries, readServerCostLedger, SERVER_COST_LEDGER_FILE, writeServerCostBudgets } from '../../../node/shared/serverCostLedger.js';
 
 suite('ServerCostLedger', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -24,29 +24,27 @@ suite('ServerCostLedger', () => {
 
 	teardown(() => fs.rm(dir, { recursive: true, force: true }));
 
-	test('appends records and updates; reads whole lines from a cursor and starts over after a rewrite', async () => {
-		let now = 100;
-		const ledger = new ServerCostLedger(dir, () => now++);
-		const first = ledger.record({ model: 'm', cost: 0.1, providerGroup: 'Team' });
-		ledger.update(first, { cost: 0.2 });
+	test('reads the latest line of each id, from a time, and tolerates a half-written line', async () => {
+		const file = join(dir, SERVER_COST_LEDGER_FILE);
+		const line = (entry: object) => `${JSON.stringify(entry)}\n`;
+		await fs.writeFile(file, line({ id: 'a', time: 100, cost: 0.1 }) + line({ id: 'b', time: 200, cost: 1 }) + line({ id: 'a', time: 100, cost: 0.2 }) + '{"id":"partial"');
 		const all = readServerCostEntries(dir, 0);
-		// A half-written line is left for the next read.
-		await fs.appendFile(join(dir, SERVER_COST_LEDGER_FILE), '{"id":"partial"');
-		const tail = readServerCostEntries(dir, all.cursor);
-		const reopened = new ServerCostLedger(dir);
-		await fs.writeFile(join(dir, SERVER_COST_LEDGER_FILE), `${JSON.stringify({ id: 'x', time: 1, cost: 1 })}\n`);
-		const afterRewrite = readServerCostEntries(dir, all.cursor);
+		const later = readServerCostEntries(dir, 150);
+		const limited = readServerCostEntries(dir, 0, 1);
+		const missing = readServerCostEntries(join(dir, 'none'), 0);
 
 		assert.deepStrictEqual({
-			all: all.entries.map(entry => [entry.id === first, entry.cost, entry.time]),
-			tail: [tail.entries.length, tail.cursor === all.cursor],
-			reopened: reopened.entries.map(entry => entry.cost),
-			afterRewrite: [afterRewrite.reset, afterRewrite.entries.map(entry => entry.id)],
+			all: [all.entries.map(entry => [entry.id, entry.cost]), all.cursor],
+			later: later.entries.map(entry => entry.id),
+			limited: [limited.entries.map(entry => entry.id), limited.cursor],
+			missing: [missing.entries.length, missing.cursor],
+			ledger: readServerCostLedger(dir).length,
 		}, {
-			all: [[true, 0.1, 100], [true, 0.2, 100]],
-			tail: [0, true],
-			reopened: [0.2],
-			afterRewrite: [true, ['x']],
+			all: [[['a', 0.2], ['b', 1]], 200],
+			later: ['b'],
+			limited: [['a'], 100],
+			missing: [0, 0],
+			ledger: 2,
 		});
 	});
 
@@ -89,11 +87,10 @@ suite('ServerCostLedger', () => {
 		});
 	});
 
-	test('the ledger refuses with the budgets the laptop pushed', () => {
-		const ledger = new ServerCostLedger(dir, () => 50);
-		ledger.record({ cost: 4, providerGroup: 'Team' });
-		const before = ledger.findHardStop({ providerGroup: 'Team' });
+	test('the server refuses with the budgets the laptop pushed', async () => {
+		await fs.writeFile(join(dir, SERVER_COST_LEDGER_FILE), `${JSON.stringify({ id: 'a', time: 50, cost: 4, providerGroup: 'Team' })}\n`);
+		const before = findServerCostHardStop({ providerGroup: 'Team' }, dir, 50);
 		writeServerCostBudgets(dir, { updatedAt: 1, budgets: [{ id: 'team', scope: 'key', value: 'Team', amount: 5, period: 'day', hardStop: true, from: 0, to: 100, spentElsewhere: 1 }] });
-		assert.deepStrictEqual([before, ledger.findHardStop({ providerGroup: 'Team' })?.spent], [undefined, 5]);
+		assert.deepStrictEqual([before, findServerCostHardStop({ providerGroup: 'Team' }, dir, 50)?.spent, findServerCostHardStop({ providerGroup: 'Team' }, undefined, 50)], [undefined, 5, undefined]);
 	});
 });

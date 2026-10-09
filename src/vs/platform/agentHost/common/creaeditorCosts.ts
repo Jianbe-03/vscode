@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 // CreaEditor: AI costs of CreaEditor Servers. A server records the OpenRouter/LiteLLM requests it makes
-// itself in its own ledger (`node/shared/serverCostLedger.ts`); the laptop pulls new entries over the
+// itself in its own ledger (`<data>/costs/creaeditor-gateway-costs.jsonl`, written by the agent host's
+// server-side gateway path, read by `node/shared/serverCostLedger.ts`); the laptop pulls new entries over the
 // server's HTTP API (`GET /api/server/costs`, device key) into a cache next to the copilot extension's
 // ledger, and the AI Costs page shows them with the server as the machine. The laptop also pushes its
 // budgets with what was spent elsewhere in each budget's period (`PUT /api/server/costs/budgets`), so
@@ -35,6 +36,12 @@ export interface ICreaEditorServerPairingResponse {
 export const CREAEDITOR_SERVER_COSTS_CACHE_FOLDER = 'creaeditor-server-costs';
 
 /**
+ * The copilot extension's own ledger, relative to the global storage folder (read, never written, here:
+ * the spend of this computer counts toward the budgets pushed to servers).
+ */
+export const COPILOT_GATEWAY_LEDGER_PATH: readonly string[] = ['github.copilot-chat', 'creaeditor-gateway-costs.jsonl'];
+
+/**
  * One gateway request, as the copilot extension's ledger keeps it (`IGatewayCostEntry`). Only the
  * fields this layer needs are typed; the rest are carried along as they are.
  */
@@ -49,14 +56,17 @@ export interface IGatewayCostEntryLike {
 	readonly [field: string]: unknown;
 }
 
-/** What `GET /api/server/costs?after=<cursor>` answers. */
+/** What `GET /api/server/costs?after=<time>` answers: entries with a time of at least `after`, oldest first. */
 export interface ICreaEditorServerCostsResponse {
 	readonly entries: readonly IGatewayCostEntryLike[];
-	/** Pass as `after` next time. */
+	/** The latest entry time answered. Ask from a bit before it next time: a cost reported later updates an entry without changing its time. */
 	readonly cursor: number;
-	/** The ledger was rewritten since `after`: these are all entries, drop what you kept. */
+	/** Reserved: the client should drop what it kept. */
 	readonly reset: boolean;
 }
+
+/** How far before the cursor the laptop asks again, for costs the gateway reported late. */
+export const CREAEDITOR_SERVER_COSTS_OVERLAP_MS = 60 * 60 * 1000;
 
 /** A pulled server's entries, as cached on the laptop (`<cache folder>/<serverId>.json`). */
 export interface ICreaEditorServerCostsCache {

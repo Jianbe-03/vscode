@@ -12,7 +12,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../base/test/comm
 import { NullLogService } from '../../../platform/log/common/log.js';
 import { RemoteAccessAuth } from '../../../platform/agentHost/node/remoteAccess/remoteAccessAuth.js';
 import { IRemoteAccessServerHandle, RemoteAccessProtocolServer, startRemoteAccessServer } from '../../../platform/agentHost/node/remoteAccess/remoteAccessServer.js';
-import { ServerCostLedger } from '../../../platform/agentHost/node/shared/serverCostLedger.js';
+import { findServerCostHardStop, SERVER_COST_LEDGER_FILE } from '../../../platform/agentHost/node/shared/serverCostLedger.js';
 import { createCreaEditorServerApi } from '../../node/creaeditorServer/creaeditorServerApi.js';
 
 suite('CreaEditor Server API', () => {
@@ -21,14 +21,14 @@ suite('CreaEditor Server API', () => {
 	let dir: string;
 	let auth: RemoteAccessAuth;
 	let server: IRemoteAccessServerHandle;
-	let ledger: ServerCostLedger;
+	let costsDir: string;
 
 	setup(async () => {
 		dir = getRandomTestPath(tmpdir(), 'vsctests', 'creaeditorServerApi');
 		await fs.mkdir(dir, { recursive: true });
 		auth = store.add(await RemoteAccessAuth.create(join(dir, 'auth'), new NullLogService(), { scryptCost: 1024 }));
-		const costsDir = join(dir, 'costs');
-		ledger = new ServerCostLedger(costsDir, () => 1000);
+		costsDir = join(dir, 'costs');
+		await fs.mkdir(costsDir, { recursive: true });
 		server = store.add(await startRemoteAccessServer({
 			hosts: ['127.0.0.1'],
 			port: 0,
@@ -90,10 +90,11 @@ suite('CreaEditor Server API', () => {
 	test('serves new ledger entries incrementally and keeps pushed budgets', async () => {
 		const deviceKey = await pairDevice();
 		const headers = { Authorization: `Bearer ${deviceKey}` };
-		const first = ledger.record({ model: 'a', cost: 0.5, providerGroup: 'Team' });
+		const append = (entry: object) => fs.appendFile(join(costsDir, SERVER_COST_LEDGER_FILE), `${JSON.stringify(entry)}\n`);
+		await append({ id: 'a', time: 1000, model: 'a', cost: 0.5, providerGroup: 'Team' });
 		const page1 = JSON.parse((await request(server.port, '/api/server/costs?after=0', { headers })).body);
-		ledger.update(first, { cost: 0.75 });
-		ledger.record({ model: 'b', cost: 1, providerGroup: 'Team' });
+		await append({ id: 'a', time: 1000, model: 'a', cost: 0.75, providerGroup: 'Team' });
+		await append({ id: 'b', time: 1001, model: 'b', cost: 1, providerGroup: 'Team' });
 		const page2 = JSON.parse((await request(server.port, `/api/server/costs?after=${page1.cursor}`, { headers })).body);
 		const unauthorized = await request(server.port, '/api/server/costs?after=0');
 		const badBudgets = await request(server.port, '/api/server/costs/budgets', { method: 'PUT', headers, body: '{"budgets":5}' });
@@ -107,17 +108,17 @@ suite('CreaEditor Server API', () => {
 		assert.deepStrictEqual({
 			page1: page1.entries.map((entry: { model: string; cost: number }) => [entry.model, entry.cost]),
 			page2: page2.entries.map((entry: { model: string; cost: number }) => [entry.model, entry.cost]),
-			reset: [page1.reset, page2.reset],
+			cursors: [page1.cursor, page2.cursor],
 			unauthorized: unauthorized.status,
 			badBudgets: badBudgets.status,
 			budgets: budgets.status,
 			// 0.5 elsewhere + 0.75 + 1 here = 2.25 >= 2
-			hardStop: ledger.findHardStop({ providerGroup: 'Team' })?.budget.id,
-			otherKey: ledger.findHardStop({ providerGroup: 'Other' }),
+			hardStop: findServerCostHardStop({ providerGroup: 'Team' }, costsDir, 1000)?.budget.id,
+			otherKey: findServerCostHardStop({ providerGroup: 'Other' }, costsDir, 1000),
 		}, {
 			page1: [['a', 0.5]],
 			page2: [['a', 0.75], ['b', 1]],
-			reset: [false, false],
+			cursors: [1000, 1001],
 			unauthorized: 401,
 			badBudgets: 400,
 			budgets: 200,
