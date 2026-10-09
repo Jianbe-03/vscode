@@ -5,7 +5,8 @@
 
 // CreaEditor: the accounts of a pooled Claude or Codex model in the model picker. A provider with more
 // than one subscription account still has one entry per model; the entry opens a list with
-// "Pool (Automatic)" and every account, and choosing an account pins the current chat to it.
+// "Pool (Automatic)" and every account, and choosing an account pins the current chat to it. Below the
+// accounts, "Show Subscription Usage" and "Add ... Account" lead to where the accounts are managed.
 
 import { IAction, SubmenuAction, toAction } from '../../../../../../../base/common/actions.js';
 import { localize } from '../../../../../../../nls.js';
@@ -15,6 +16,13 @@ import { ISubscriptionAccount, SubscriptionProvider, getRemainingPercent } from 
 import { formatAccountState, getSubscriptionProviderLabel } from '../../../../../../services/agentHost/browser/subscriptionAccountsService.js';
 import { SessionType } from '../../../../common/chatSessionsService.js';
 import { ILanguageModelChatMetadataAndIdentifier } from '../../../../common/languageModels.js';
+import { ADD_CLAUDE_ACCOUNT_COMMAND_ID, ADD_CODEX_ACCOUNT_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID } from '../../../subscriptionAccounts/subscriptionAccountsLimit.js';
+
+/**
+ * An action of a submenu that only runs itself: choosing it does not also choose the entry the
+ * submenu belongs to (see `selectsParent` in the action list).
+ */
+type ISubmenuOnlyAction = IAction & { readonly selectsParent: false };
 
 /** The subscription a model of the local agent host runs on: Claude or Codex, or none (Copilot, a key). */
 export function getModelSubscriptionProvider(model: ILanguageModelChatMetadataAndIdentifier): SubscriptionProvider | undefined {
@@ -35,8 +43,10 @@ export function canAccountTakeWork(account: ISubscriptionAccount): boolean {
 
 /**
  * The account list of a pooled model: "Pool (Automatic)" and one entry per account of `provider`
- * (with what is left; disabled when used up or signed out), checked where the chat is pinned. Undefined
- * when the provider has fewer than two accounts, so a single account needs no list.
+ * (with what is left; disabled when used up or signed out), checked where the chat is pinned, and
+ * below them "Show Subscription Usage" and "Add ... Account", which run `onCommand` and leave the
+ * model as it is. Undefined when the provider has fewer than two accounts, so a single account needs
+ * no list.
  */
 export function createSubscriptionAccountActions(
 	accounts: readonly ISubscriptionAccount[],
@@ -44,6 +54,7 @@ export function createSubscriptionAccountActions(
 	pinnedAccountId: string | undefined,
 	now: number,
 	onPin: (accountId: string | undefined) => void,
+	onCommand: (commandId: string) => void,
 ): IAction[] | undefined {
 	const own = accounts.filter(account => account.provider === provider);
 	if (own.length < 2) {
@@ -67,7 +78,17 @@ export function createSubscriptionAccountActions(
 			run: () => onPin(account.id),
 		})),
 	];
-	return [new SubmenuAction('subscriptionAccounts', localize('modelPicker.subscriptionAccounts', "{0} Account", getSubscriptionProviderLabel(provider)), actions)];
+	const commandAction = (id: string, label: string, commandId: string): ISubmenuOnlyAction => ({ ...toAction({ id, label, run: () => onCommand(commandId) }), selectsParent: false });
+	const manageActions = [
+		commandAction('subscriptionAccounts.showUsage', localize('modelPicker.showSubscriptionUsage', "Show Subscription Usage"), SHOW_SUBSCRIPTION_USAGE_COMMAND_ID),
+		provider === 'claude'
+			? commandAction('subscriptionAccounts.add', localize('modelPicker.addClaudeAccount', "Add Claude Account"), ADD_CLAUDE_ACCOUNT_COMMAND_ID)
+			: commandAction('subscriptionAccounts.add', localize('modelPicker.addCodexAccount', "Add Codex Account"), ADD_CODEX_ACCOUNT_COMMAND_ID),
+	];
+	return [
+		new SubmenuAction('subscriptionAccounts', localize('modelPicker.subscriptionAccounts', "{0} Account", getSubscriptionProviderLabel(provider)), actions),
+		new SubmenuAction('subscriptionAccounts.manage', '', manageActions),
+	];
 }
 
 /** The picker label of a model whose chat is pinned to an account, e.g. "Claude Opus 5.5 · Work". */

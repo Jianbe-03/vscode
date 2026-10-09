@@ -784,7 +784,7 @@ export class ModelPickerWidget extends Disposable {
 		return items.map(item => {
 			const model = item.kind === ActionListItemKind.Action ? models.find(candidate => candidate.identifier === item.item?.id) : undefined;
 			const provider = model && getModelSubscriptionProvider(model);
-			const actions = provider && createSubscriptionAccountActions(accounts, provider, pinned, now, accountId => service.pinChat(sessionResource, accountId));
+			const actions = provider && createSubscriptionAccountActions(accounts, provider, pinned, now, accountId => service.pinChat(sessionResource, accountId), commandId => this._commandService.executeCommand(commandId));
 			return actions ? { ...item, submenuActions: actions, hover: item.hover ? { ...item.hover, expandable: true } : undefined } : item;
 		});
 	}

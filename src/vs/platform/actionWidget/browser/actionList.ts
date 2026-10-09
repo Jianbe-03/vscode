@@ -2679,7 +2679,9 @@ export class ActionListWidget<T> extends Disposable {
 					action.run();
 					const parentItem = this._currentSubmenuElement?.item;
 					this._hideSubmenu();
-					if (parentItem) {
+					// CreaEditor: an action marked `selectsParent: false` (such as "Show Subscription Usage" under the
+					// accounts of a model) only runs itself and leaves the entry it belongs to unchosen.
+					if (parentItem && (action as IAction & { readonly selectsParent?: boolean }).selectsParent !== false) {
 						this._delegate.onSelect(parentItem);
 					}
 					this.hide();

@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
-import { SubmenuAction } from '../../../../../../../../base/common/actions.js';
+import { IAction, SubmenuAction } from '../../../../../../../../base/common/actions.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../../../base/test/common/utils.js';
 import { ISubscriptionAccount } from '../../../../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import { createSubscriptionAccountActions, getModelSubscriptionProvider, getPinnedModelLabel } from '../../../../../browser/widget/input/modelPicker/modelPickerSubscriptionAccounts.js';
@@ -23,11 +23,12 @@ suite('Model picker subscription accounts', () => {
 		return { id, provider: 'claude', label: id, kind: 'login', status: 'signedIn', usage: [{ kind: 'five_hour', label: '5-hour', usedPercent: 40 }], ...overrides };
 	}
 
-	test('lists the pool and every account of a pooled model, and pins the chat to the chosen one', () => {
+	test('lists the pool and every account of a pooled model, pins the chat to the chosen one and links to the usage page', () => {
 		const pins: (string | undefined)[] = [];
+		const commands: string[] = [];
 		const accounts = [account('Work'), account('Home', { status: 'limited', usage: [{ kind: 'five_hour', label: '5-hour', usedPercent: 100 }] }), account('Old', { status: 'signedOut', usage: undefined }), account('Codex', { provider: 'codex' })];
-		const [group] = createSubscriptionAccountActions(accounts, 'claude', 'Work', now, accountId => pins.push(accountId)) as SubmenuAction[];
-		for (const action of group.actions) {
+		const [group, manage] = createSubscriptionAccountActions(accounts, 'claude', 'Work', now, accountId => pins.push(accountId), commandId => commands.push(commandId)) as SubmenuAction[];
+		for (const action of [...group.actions, ...manage.actions]) {
 			void action.run();
 		}
 
@@ -41,7 +42,9 @@ suite('Model picker subscription accounts', () => {
 			title: group.label,
 			actions: group.actions.map(action => `${action.label} | ${action.tooltip} | ${action.checked ? 'checked' : ''} | ${action.enabled ? 'enabled' : 'disabled'}`),
 			pins,
-			oneAccount: createSubscriptionAccountActions([account('Work'), account('Codex', { provider: 'codex' })], 'claude', undefined, now, () => { }),
+			manage: manage.actions.map(action => `${action.label} | ${(action as IAction & { selectsParent?: boolean }).selectsParent}`),
+			commands,
+			oneAccount: createSubscriptionAccountActions([account('Work'), account('Codex', { provider: 'codex' })], 'claude', undefined, now, () => { }, () => { }),
 			labels: [
 				getPinnedModelLabel('Claude Opus 5.5', accounts, 'claude', 'Work'),
 				getPinnedModelLabel('Claude Opus 5.5', accounts, 'claude', undefined),
@@ -57,6 +60,8 @@ suite('Model picker subscription accounts', () => {
 				'Old | signed out |  | disabled',
 			],
 			pins: [undefined, 'Work', 'Home', 'Old'],
+			manage: ['Show Subscription Usage | false', 'Add Claude Account | false'],
+			commands: ['workbench.action.chat.showSubscriptionUsage', 'workbench.action.chat.addClaudeAccount'],
 			oneAccount: undefined,
 			labels: ['Claude Opus 5.5 · Work', 'Claude Opus 5.5', 'Claude Opus 5.5'],
 		});
