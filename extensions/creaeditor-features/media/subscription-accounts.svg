@@ -1,38 +1,84 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
-	<rect width="960" height="600" rx="16" fill="#16152D"/>
+	<clipPath id="frame"><rect width="960" height="600" rx="16"/></clipPath>
+	<g clip-path="url(#frame)">
+	<rect width="960" height="600" fill="#16152D"/>
 	<text x="40" y="58" fill="#F8F7FA" font-size="26" font-weight="600">Subscription Usage</text>
-	<text x="40" y="88" fill="#BCBBCA" font-size="16">Your Claude and Codex accounts work as one pool.</text>
+	<text x="40" y="86" fill="#BCBBCA" font-size="15">Your Claude and Codex accounts work as one pool.</text>
 
-	<text x="40" y="136" fill="#F8F7FA" font-size="20" font-weight="600">Claude</text>
-	<rect x="40" y="152" width="880" height="96" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="64" y="200" fill="#F8F7FA" font-size="34" font-weight="600">62%</text>
-	<text x="64" y="226" fill="#BCBBCA" font-size="14">left on average</text>
-	<rect x="200" y="186" width="690" height="8" rx="4" fill="#2F2C55"/>
-	<rect x="200" y="186" width="428" height="8" rx="4" fill="#00BD8B"/>
-	<text x="200" y="222" fill="#BCBBCA" font-size="14">2 of 3 accounts available     First reset in 2h</text>
+	<!-- The Claude pool -->
+	<rect x="40" y="108" width="880" height="84" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="148" fill="#F8F7FA" font-size="30" font-weight="600">62%</text>
+	<text x="64" y="174" fill="#BCBBCA" font-size="13">left on average</text>
+	<text x="200" y="136" fill="#F8F7FA" font-size="15" font-weight="600">Claude</text>
+	<rect x="200" y="148" width="690" height="8" rx="4" fill="#2F2C55"/>
+	<rect x="200" y="148" width="428" height="8" rx="4" fill="#00BD8B"/>
+	<text x="200" y="178" fill="#BCBBCA" font-size="13">2 of 3 accounts available · First reset in 2h</text>
 
-	<rect x="40" y="262" width="880" height="64" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="64" y="292" fill="#F8F7FA" font-size="16" font-weight="600">Work</text>
-	<circle cx="120" cy="287" r="4" fill="#00EC95"/>
-	<text x="130" y="292" fill="#BCBBCA" font-size="13">Available</text>
-	<text x="64" y="314" fill="#8E8CA8" font-size="13">me@work.com · Max</text>
-	<text x="400" y="292" fill="#BCBBCA" font-size="13">5-hour   60% left · resets in 3h</text>
-	<rect x="400" y="302" width="480" height="6" rx="3" fill="#2F2C55"/>
-	<rect x="400" y="302" width="288" height="6" rx="3" fill="#00BD8B"/>
+	<rect x="40" y="200" width="880" height="52" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="232" fill="#F8F7FA" font-size="15" font-weight="600">Work</text>
+	<circle cx="118" cy="227" r="4" fill="#00EC95"/>
+	<text x="128" y="232" fill="#BCBBCA" font-size="13">Available</text>
+	<text x="400" y="224" fill="#BCBBCA" font-size="13">5-hour   18% left · resets in 1h 20m</text>
+	<rect x="400" y="234" width="480" height="6" rx="3" fill="#2F2C55"/>
+	<rect x="400" y="234" width="86" height="6" rx="3" fill="#F2B24C"/>
 
-	<rect x="40" y="334" width="880" height="64" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="64" y="364" fill="#F8F7FA" font-size="16" font-weight="600">Personal</text>
-	<circle cx="146" cy="359" r="4" fill="#F5B83D"/>
-	<text x="156" y="364" fill="#BCBBCA" font-size="13">Limit Reached</text>
-	<text x="64" y="386" fill="#8E8CA8" font-size="13">me@home.com · Pro</text>
-	<text x="400" y="364" fill="#BCBBCA" font-size="13">5-hour   0% left · resets in 2h</text>
-	<rect x="400" y="374" width="480" height="6" rx="3" fill="#4A2C3A"/>
+	<rect x="40" y="260" width="880" height="52" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="292" fill="#F8F7FA" font-size="15" font-weight="600">Personal</text>
+	<circle cx="144" cy="287" r="4" fill="#F2B24C"/>
+	<text x="154" y="292" fill="#BCBBCA" font-size="13">Limit Reached</text>
+	<text x="400" y="284" fill="#BCBBCA" font-size="13">5-hour   0% left · resets in 2h</text>
+	<rect x="400" y="294" width="480" height="6" rx="3" fill="#4A2C3A"/>
 
-	<text x="40" y="450" fill="#F8F7FA" font-size="20" font-weight="600">Codex</text>
-	<rect x="40" y="466" width="880" height="96" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="64" y="514" fill="#F8F7FA" font-size="34" font-weight="600">80%</text>
-	<text x="64" y="540" fill="#BCBBCA" font-size="14">left on average</text>
-	<rect x="200" y="500" width="690" height="8" rx="4" fill="#2F2C55"/>
-	<rect x="200" y="500" width="552" height="8" rx="4" fill="#00BD8B"/>
-	<text x="200" y="536" fill="#BCBBCA" font-size="14">1 of 1 account available</text>
+	<!-- Usage history -->
+	<rect x="40" y="328" width="500" height="180" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="356" fill="#F8F7FA" font-size="14" font-weight="600">Usage over the past weeks</text>
+	<line x1="64" y1="488" x2="516" y2="488" stroke="#2F2C55"/>
+	<g fill="#00BD8B">
+		<rect x="64" y="452" width="10" height="36" rx="2"/>
+		<rect x="80" y="430" width="10" height="58" rx="2"/>
+		<rect x="96" y="440" width="10" height="48" rx="2"/>
+		<rect x="112" y="414" width="10" height="74" rx="2"/>
+		<rect x="128" y="470" width="10" height="18" rx="2"/>
+		<rect x="176" y="444" width="10" height="44" rx="2"/>
+		<rect x="192" y="420" width="10" height="68" rx="2"/>
+		<rect x="208" y="434" width="10" height="54" rx="2"/>
+		<rect x="240" y="460" width="10" height="28" rx="2"/>
+		<rect x="288" y="438" width="10" height="50" rx="2"/>
+		<rect x="304" y="426" width="10" height="62" rx="2"/>
+		<rect x="320" y="448" width="10" height="40" rx="2"/>
+		<rect x="336" y="430" width="10" height="58" rx="2"/>
+		<rect x="400" y="436" width="10" height="52" rx="2"/>
+		<rect x="416" y="424" width="10" height="64" rx="2"/>
+		<rect x="448" y="442" width="10" height="46" rx="2"/>
+		<rect x="464" y="418" width="10" height="70" rx="2"/>
+	</g>
+	<g fill="#F2B24C">
+		<rect x="224" y="378" width="10" height="110" rx="2"/>
+		<rect x="352" y="390" width="10" height="98" rx="2"/>
+		<rect x="432" y="384" width="10" height="104" rx="2"/>
+		<rect x="480" y="372" width="10" height="116" rx="2"/>
+	</g>
+	<text x="64" y="502" fill="#8E8CA8" font-size="11">4 weeks ago</text>
+	<text x="516" y="502" fill="#8E8CA8" font-size="11" text-anchor="end">Today</text>
+
+	<!-- The usage warning -->
+	<rect x="560" y="328" width="360" height="132" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
+	<circle cx="586" cy="356" r="9" fill="none" stroke="#8E8CA8" stroke-width="2"/>
+	<rect x="585" y="352" width="2" height="2" fill="#8E8CA8"/>
+	<rect x="585" y="355" width="2" height="6" fill="#8E8CA8"/>
+	<text x="606" y="361" fill="#F8F7FA" font-size="14">The Claude account Work has used 82%</text>
+	<text x="606" y="381" fill="#F8F7FA" font-size="14">of its 5-hour limit (resets in 1h 20m).</text>
+	<rect x="676" y="412" width="96" height="32" rx="6" fill="#00BD8B"/>
+	<text x="724" y="433" fill="#0F0E13" font-size="13" font-weight="600" text-anchor="middle">Show Usage</text>
+	<rect x="780" y="412" width="124" height="32" rx="6" fill="#2F2C55"/>
+	<text x="842" y="433" fill="#F8F7FA" font-size="13" text-anchor="middle">Don't Warn Again</text>
+	<text x="560" y="488" fill="#8E8CA8" font-size="13">At 80% and again at 95% of a limit.</text>
+
+	<!-- The status bar -->
+	<rect x="0" y="560" width="960" height="40" fill="#1C1A37"/>
+	<line x1="0" y1="560" x2="960" y2="560" stroke="#2F2C55"/>
+	<path d="M736 581 h6 l3 -7 l5 14 l3 -7 h6" fill="none" stroke="#F8F7FA" stroke-width="1.6" stroke-linejoin="round"/>
+	<text x="766" y="586" fill="#F8F7FA" font-size="13">Claude 62% · Codex 80%</text>
+	<text x="40" y="586" fill="#8E8CA8" font-size="13">Status bar: hover for every account, click for this page</text>
+	</g>
 </svg>

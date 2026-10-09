@@ -192,15 +192,40 @@
             ]
           },
           {
+            "id": "stopAllChats",
+            "title": "%step.stopAllChats.title%",
+            "description": "%step.stopAllChats.description%",
+            "media": {
+              "image": "media/stop-all-chats.svg",
+              "altText": "%step.stopAllChats.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.stopAllChats"
+            ]
+          },
+          {
             "id": "costs",
             "title": "%step.costs.title%",
             "description": "%step.costs.description%",
             "media": {
-              "image": "media/costs.png",
+              "image": "media/ai-costs.svg",
               "altText": "%step.costs.title%"
             },
             "completionEvents": [
+              "onCommand:workbench.action.chat.showAiCosts",
               "onCommand:creaeditor.showAiCosts"
+            ]
+          },
+          {
+            "id": "budgets",
+            "title": "%step.budgets.title%",
+            "description": "%step.budgets.description%",
+            "media": {
+              "image": "media/budgets.svg",
+              "altText": "%step.budgets.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.aiCosts.addBudget"
             ]
           },
           {
@@ -214,6 +239,18 @@
             "completionEvents": [
               "onCommand:workbench.action.chat.addClaudeAccount",
               "onCommand:workbench.action.chat.addCodexAccount"
+            ]
+          },
+          {
+            "id": "subscriptionPicker",
+            "title": "%step.subscriptionPicker.title%",
+            "description": "%step.subscriptionPicker.description%",
+            "media": {
+              "image": "media/account-picker.svg",
+              "altText": "%step.subscriptionPicker.title%"
+            },
+            "completionEvents": [
+              "onStepSelected"
             ]
           },
           {

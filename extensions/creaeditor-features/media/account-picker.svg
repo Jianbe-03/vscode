@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="600" rx="16" fill="#16152D"/>
+
+	<!-- The model picker -->
+	<rect x="40" y="40" width="380" height="300" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<rect x="56" y="56" width="348" height="34" rx="6" fill="#16152D" stroke="#3B3866"/>
+	<text x="70" y="78" fill="#8E8CA8" font-size="14">Search models</text>
+	<text x="60" y="120" fill="#8E8CA8" font-size="12" font-weight="600" letter-spacing="1">CLAUDE</text>
+	<rect x="52" y="130" width="356" height="36" rx="6" fill="#2A2850"/>
+	<text x="68" y="154" fill="#00EC95" font-size="14">✓</text>
+	<text x="90" y="154" fill="#F8F7FA" font-size="15">Claude Opus 5.5</text>
+	<text x="392" y="154" fill="#BCBBCA" font-size="14" text-anchor="end">›</text>
+	<text x="90" y="194" fill="#F8F7FA" font-size="15">Claude Sonnet 5</text>
+	<text x="392" y="194" fill="#8E8CA8" font-size="14" text-anchor="end">›</text>
+	<text x="60" y="236" fill="#8E8CA8" font-size="12" font-weight="600" letter-spacing="1">CODEX</text>
+	<text x="90" y="268" fill="#F8F7FA" font-size="15">GPT-5.6 Codex</text>
+	<text x="392" y="268" fill="#8E8CA8" font-size="14" text-anchor="end">›</text>
+	<text x="90" y="306" fill="#F8F7FA" font-size="15">GPT-5.6 Codex Mini</text>
+	<text x="392" y="306" fill="#8E8CA8" font-size="14" text-anchor="end">›</text>
+
+	<!-- The account list of Claude Opus 5.5 -->
+	<rect x="428" y="112" width="380" height="270" rx="12" fill="#1C1A37" stroke="#3B3866"/>
+	<text x="446" y="140" fill="#8E8CA8" font-size="13" font-weight="600">Claude Account</text>
+	<text x="474" y="174" fill="#F8F7FA" font-size="15">Pool (Automatic)</text>
+	<text x="598" y="174" fill="#8E8CA8" font-size="13">Next free account</text>
+	<rect x="436" y="186" width="364" height="34" rx="6" fill="#2A2850"/>
+	<text x="450" y="208" fill="#00EC95" font-size="14">✓</text>
+	<text x="474" y="208" fill="#F8F7FA" font-size="15">Work</text>
+	<text x="520" y="208" fill="#8E8CA8" font-size="13">60% left · resets in 3h</text>
+	<text x="474" y="242" fill="#F8F7FA" font-size="15">Personal</text>
+	<text x="546" y="242" fill="#8E8CA8" font-size="13">85% left</text>
+	<text x="474" y="276" fill="#6E6C88" font-size="15">Home</text>
+	<text x="522" y="276" fill="#6E6C88" font-size="13">0% left · resets in 2h</text>
+	<line x1="446" y1="296" x2="790" y2="296" stroke="#2F2C55"/>
+	<text x="474" y="328" fill="#F8F7FA" font-size="15">Show Subscription Usage</text>
+	<text x="474" y="362" fill="#F8F7FA" font-size="15">Add Claude Account</text>
+
+	<!-- The chat input with the pinned account -->
+	<rect x="40" y="436" width="880" height="72" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="466" fill="#8E8CA8" font-size="15">Describe what to build next</text>
+	<rect x="60" y="476" width="190" height="24" rx="6" fill="#2A2850"/>
+	<text x="72" y="493" fill="#F8F7FA" font-size="13">Claude Opus 5.5 · Work  ▾</text>
+
+	<text x="40" y="546" fill="#BCBBCA" font-size="15">With two or more accounts, a pooled model lists them. Pick one to keep this chat on it,</text>
+	<text x="40" y="570" fill="#BCBBCA" font-size="15">or Pool (Automatic) to let it move to the next free account.</text>
+</svg>

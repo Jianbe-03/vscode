@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="600" rx="16" fill="#16152D"/>
+
+	<!-- The Sessions list of the Agents window -->
+	<rect x="40" y="40" width="380" height="440" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="76" fill="#BCBBCA" font-size="12" font-weight="600" letter-spacing="1">SESSIONS</text>
+	<g fill="none" stroke="#BCBBCA" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+		<!-- New -->
+		<path d="M190 71 h12 M196 65 v12"/>
+		<!-- Filter -->
+		<path d="M218 66 h14 l-5 6 v5 l-4 2 v-7 z"/>
+		<!-- Find -->
+		<circle cx="250" cy="70" r="4.5"/><path d="M253.5 73.5 l4 4"/>
+		<!-- Agents tree -->
+		<path d="M272 65 h6 M275 65 v10 h5 M275 70 h5"/>
+		<!-- AI Costs -->
+		<rect x="294" y="65" width="15" height="11" rx="2"/><path d="M294 69 h15"/>
+		<!-- Subscription Usage -->
+		<path d="M320 71 h3 l2.5 -5 l4 10 l2.5 -5 h3"/>
+	</g>
+	<!-- Stop All Chats, hovered -->
+	<rect x="344" y="60" width="22" height="22" rx="5" fill="#2F2C55"/>
+	<rect x="350" y="66" width="10" height="10" rx="1.5" fill="none" stroke="#F28B8B" stroke-width="1.6"/>
+	<path d="M355 86 l-6 8 h12 z" fill="#2F2C55"/>
+	<rect x="200" y="94" width="300" height="32" rx="6" fill="#2F2C55"/>
+	<text x="350" y="115" fill="#F8F7FA" font-size="13" text-anchor="middle">Stop All Running Chats in Every Window</text>
+
+	<g font-size="14">
+		<rect x="52" y="146" width="356" height="56" rx="8" fill="#16152D"/>
+		<circle cx="72" cy="174" r="6" fill="none" stroke="#00EC95" stroke-width="2" stroke-dasharray="20 10"/>
+		<text x="90" y="170" fill="#F8F7FA">Fix login redirect</text>
+		<text x="90" y="190" fill="#8E8CA8" font-size="12">Running · Claude Opus 5.5</text>
+		<rect x="52" y="210" width="356" height="56" rx="8" fill="#16152D"/>
+		<circle cx="72" cy="238" r="6" fill="none" stroke="#00EC95" stroke-width="2" stroke-dasharray="20 10"/>
+		<text x="90" y="234" fill="#F8F7FA">Upgrade the payment SDK</text>
+		<text x="90" y="254" fill="#8E8CA8" font-size="12">Running · GPT-5.6 Codex</text>
+		<rect x="52" y="274" width="356" height="56" rx="8" fill="#16152D"/>
+		<circle cx="72" cy="302" r="6" fill="none" stroke="#00EC95" stroke-width="2" stroke-dasharray="20 10"/>
+		<text x="90" y="298" fill="#F8F7FA">Write release notes</text>
+		<text x="90" y="318" fill="#8E8CA8" font-size="12">Running · 1 message queued</text>
+		<rect x="52" y="338" width="356" height="56" rx="8" fill="#16152D"/>
+		<circle cx="72" cy="366" r="6" fill="#8E8CA8"/>
+		<text x="90" y="362" fill="#BCBBCA">Review the checkout PR</text>
+		<text x="90" y="382" fill="#8E8CA8" font-size="12">Done</text>
+	</g>
+
+	<!-- The confirmation -->
+	<rect x="460" y="160" width="460" height="230" rx="12" fill="#1C1A37" stroke="#3B3866"/>
+	<circle cx="496" cy="200" r="12" fill="none" stroke="#F2B24C" stroke-width="2"/>
+	<rect x="495" y="193" width="2" height="8" fill="#F2B24C"/>
+	<rect x="495" y="204" width="2" height="2" fill="#F2B24C"/>
+	<text x="522" y="206" fill="#F8F7FA" font-size="17" font-weight="600">Stop 3 running chats?</text>
+	<text x="522" y="238" fill="#BCBBCA" font-size="14">Every running request is cancelled in every</text>
+	<text x="522" y="258" fill="#BCBBCA" font-size="14">window, and queued messages are dropped.</text>
+	<text x="522" y="278" fill="#BCBBCA" font-size="14">The chats keep what they did so far.</text>
+	<rect x="694" y="326" width="98" height="36" rx="6" fill="#2F2C55"/>
+	<text x="743" y="349" fill="#F8F7FA" font-size="14" text-anchor="middle">Cancel</text>
+	<rect x="802" y="326" width="98" height="36" rx="6" fill="#00BD8B"/>
+	<text x="851" y="349" fill="#0F0E13" font-size="14" font-weight="600" text-anchor="middle">Stop All</text>
+
+	<text x="40" y="530" fill="#F8F7FA" font-size="20" font-weight="600">Stop All Chats</text>
+	<text x="40" y="560" fill="#BCBBCA" font-size="15">One click stops every running chat and subagent, in this window and every other one.</text>
+</svg>
