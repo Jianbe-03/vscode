@@ -8,13 +8,13 @@
 
 import './media/remoteAccess.css';
 import * as DOM from '../../../../base/browser/dom.js';
+import { createQrCodeSvg } from '../../../../base/browser/qrCodeElement.js';
 import { Button } from '../../../../base/browser/ui/button/button.js';
 import { Dialog } from '../../../../base/browser/ui/dialog/dialog.js';
 import { InputBox } from '../../../../base/browser/ui/inputbox/inputBox.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { fromNow } from '../../../../base/common/date.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
-import { encodeQrCode, qrCodeToSvgPath } from '../../../../base/common/qrCode.js';
 import { ThemeIcon } from '../../../../base/common/themables.js';
 import { URI } from '../../../../base/common/uri.js';
 import { localize } from '../../../../nls.js';
@@ -30,7 +30,6 @@ import { createWorkbenchDialogOptions } from '../../../browser/parts/dialogs/dia
 import { IHostService } from '../../../services/host/browser/host.js';
 
 const $ = DOM.$;
-const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 /** Shows the Remote Access dialog until the user closes it. */
 export class RemoteAccessDialog {
@@ -304,21 +303,7 @@ export class RemoteAccessDialog {
 
 	private _renderQrCode(text: string): HTMLElement {
 		const container = $('.remote-access-qr', { role: 'img', 'aria-label': localize('remoteAccess.qrAria', "QR code of the pairing link") });
-		const code = encodeQrCode(text);
-		const quietZone = 4;
-		const size = code.size + quietZone * 2;
-		const svg = document.createElementNS(SVG_NAMESPACE, 'svg');
-		svg.setAttribute('viewBox', `0 0 ${size} ${size}`);
-		svg.setAttribute('shape-rendering', 'crispEdges');
-		const background = document.createElementNS(SVG_NAMESPACE, 'rect');
-		background.setAttribute('width', String(size));
-		background.setAttribute('height', String(size));
-		background.setAttribute('fill', '#ffffff');
-		const modules = document.createElementNS(SVG_NAMESPACE, 'path');
-		modules.setAttribute('d', qrCodeToSvgPath(code, quietZone));
-		modules.setAttribute('fill', '#000000');
-		svg.append(background, modules);
-		container.appendChild(svg);
+		container.appendChild(createQrCodeSvg(text));
 		return container;
 	}
 
