@@ -59,9 +59,9 @@ function localUrl(info: Pick<ICreaEditorServerRuntimeInfo, 'host' | 'port'>): st
 	return `http://${host.includes(':') ? `[${host}]` : host}:${info.port}`;
 }
 
-/** The web Agents window build: `web/` in a packaged server, else a build in the repository. */
+/** The web Agents window build: `out-sessions-web/` in a packaged server, else a build in the repository. */
 function findWebRoot(): string | undefined {
-	const candidates = [process.env['CREAEDITOR_SERVER_WEB_ROOT'], join(ROOT_DIR, 'web'), join(ROOT_DIR, 'out-creaeditor-server-web'), join(ROOT_DIR, 'out-sessions-web')];
+	const candidates = [process.env['CREAEDITOR_SERVER_WEB_ROOT'], join(ROOT_DIR, 'out-sessions-web'), join(ROOT_DIR, '.build', 'out-sessions-web')];
 	return candidates.find((candidate): candidate is string => !!candidate && fs.existsSync(candidate));
 }
 

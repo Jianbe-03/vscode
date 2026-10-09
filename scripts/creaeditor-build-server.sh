@@ -11,13 +11,13 @@
 #   node                      the Node.js runtime the server was built for
 #   out/                      the bundled server and agent host (build/next, target "server")
 #   node_modules/             production dependencies with native modules for the target
-#   web/                      the web Agents window (build/next, target "web"), when built
+#   out-sessions-web/         the web Agents window (build/next, target "web")
 #   agent-sdks/<id>/          the Claude and Codex agent SDKs for the target
 #   install/                  macOS (launchd) and Linux (systemd) installers
 #
 # The server reuses the standard remote server packaging (gulp `vscode-reh-<os>-<arch>-min`). Native
 # modules are compiled for the machine that builds, so build each OS on that OS: the Linux tarballs on
-# Linux (or in Docker, see build/creaeditor-server/README.md), the macOS one on a Mac. The architecture
+# Linux (or in Docker, see "CreaEditor Server" in CREAEDITOR.md), the macOS one on a Mac. The architecture
 # can differ only where the toolchain can cross-compile (npm_config_arch); building on the target is safest.
 #---------------------------------------------------------------------------------------------
 set -euo pipefail
@@ -50,7 +50,7 @@ ARCH="${TARGET#*-}"
 
 if [ "$OS" != "$host_os" ]; then
 	echo "Building $TARGET on $host_os is not supported: native modules are compiled for the building OS." >&2
-	echo "Build Linux tarballs on Linux or in Docker (see build/creaeditor-server/README.md)." >&2
+	echo "Build Linux tarballs on Linux or in Docker (see 'CreaEditor Server' in CREAEDITOR.md)." >&2
 	exit 1
 fi
 
@@ -107,11 +107,18 @@ if [ "$DRY_RUN" -eq 0 ] && [ ! -f "$STAGE/out/vs/server/node/creaeditorServer/cr
 	exit 1
 fi
 
-# 3. The web Agents window, served by the server's remote access page.
+# 3. The web Agents window, served by the server's Remote Access page (like the desktop app's
+#    <app>/Contents/Resources/app/out-sessions-web). Only the Agents window and its workers are needed.
 if [ "$SKIP_WEB" -eq 0 ]; then
 	step "Building the web Agents window"
-	run npx tsx build/next/index.ts bundle --minify --nls --target web --out out-creaeditor-server-web
-	run cp -R "$ROOT/out-creaeditor-server-web" "$STAGE/web"
+	WEB_OUT="$ROOT/.build/out-sessions-web"
+	run rm -rf "$WEB_OUT"
+	run node build/next/index.ts bundle --minify --nls --target web --out .build/out-sessions-web
+	if [ "$DRY_RUN" -eq 0 ]; then
+		rm -f "$WEB_OUT"/vs/workbench/workbench.web.main.internal.*
+		find "$WEB_OUT" -name '*.map' -delete
+	fi
+	run cp -R "$WEB_OUT" "$STAGE/out-sessions-web"
 fi
 
 # 4. The Claude and Codex SDKs for the target, laid out as agentSdkDownloader.ts expects them
