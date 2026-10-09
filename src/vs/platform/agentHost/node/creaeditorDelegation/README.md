@@ -1,0 +1,43 @@
+# Delegate to Server (CreaEditor)
+
+Moves a chat from this machine to a CreaEditor Server: its code, its conversation and the accounts it needs. The chat then runs there in its own worktree, and its results come back as a local branch or a pull request.
+
+## Files
+
+| File | Side | What it does |
+|---|---|---|
+| `../../common/creaeditorDelegation.ts` | both | Types, constants, the HTTP API shapes, `ICreaEditorDelegationService` |
+| `delegationPack.ts` | laptop | `packWorkspace`: one git bundle with `head` and a `snapshot` commit (uncommitted + untracked, not ignored; secret-looking files only on request), incremental with `^<known>` |
+| `delegationWorktrees.ts` | server | Bare repo per repository, worktree per chat, result bundles, `importResultBundle` (laptop), `openPullRequestFromServer` |
+| `delegationSessionFiles.ts` | both | Claude SDK transcript export (rewritten to the worktree path) and install |
+| `delegationCrypto.ts` | both | X25519 + HKDF-SHA256 + AES-256-GCM envelope for the accounts, bound to the delegation id |
+| `delegationAccounts.ts` | server agent host | Opens the envelope (`authenticate` resource `creaeditor-delegation-accounts:<id>`) with the key pair of the code receiver |
+| `delegationClient.ts` | laptop | HTTP client (retries, chunked resumable upload), `delegateChat`, `bringBackChanges` |
+| `delegationProcess.ts` | both | The `git`/`gh` runner (replaced in tests) |
+| `../../electron-main/creaeditorDelegationMainService.ts` | laptop | The main-process service windows call over IPC |
+| `src/vs/server/node/creaeditorServer/creaeditorServerDelegation.ts` | server | The `/api/delegation/` routes |
+| `src/vs/sessions/contrib/providers/remoteAgentHost/electron-browser/delegateToServer.contribution.ts` | laptop | The Agents window actions |
+
+## Transport
+
+The server's Remote Access HTTP API with this device's key (`Authorization: Bearer <deviceKey>`), under `/api/delegation/`. Not AHP: bundles can be hundreds of MB, and AHP's JSON text frames would base64 them through the chat connection. HTTP gives chunked, resumable uploads with progress, and the code receiver runs in the server's front process next to its data folder. The accounts go over AHP (`authenticate`) because the agent host keeps them; they are sealed so only the server's agent host opens them.
+
+| Route | Answer |
+|---|---|
+| `GET key` | `{ publicKey, hasGitHubToken, hasGh, worktreesDir, agentHome }` |
+| `GET repos/<repoId>/known` | `{ commits }`: tips of the server's branches and bases, newest first |
+| `PUT uploads/<id>?offset=<n>` (raw body, 4 MB chunks) | `{ received }`; 409 when `offset` is not what the server has |
+| `GET uploads/<id>` | `{ received }` (resume) |
+| `POST delegations` | Unpacks the upload, creates the worktree, answers the record |
+| `GET delegations/<id>` | The record |
+| `POST delegations/<id>/session` | Installs Claude session files; the record gets `resumeSessionId` |
+| `POST delegations/<id>/results` `{ knownCommits }` | `{ commit, downloadId?, bytes, includesUncommitted }` |
+| `GET downloads/<id>` | The result bundle (removed after download) |
+| `POST delegations/<id>/pull-request` | `{ url }` |
+| `PUT github-token` `{ token }` | Empty removes it |
+
+Errors are `{ error: <DelegationErrorCode>, message }`.
+
+## Server data
+
+`<data>/repos/<repoId>.git` (bare; `repoId` comes from the root commit, so the same project shares history), `<data>/worktrees/<delegationId>` on `creaeditor/delegated/<shortId>`, `<data>/delegations/<id>.json` (records, uploads, downloads), `<data>/secrets/delegation/` (key pair and GitHub token; its own master key, separate from the agent host's store).

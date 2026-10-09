@@ -229,6 +229,18 @@
             ]
           },
           {
+            "id": "delegateToServer",
+            "title": "%step.delegateToServer.title%",
+            "description": "%step.delegateToServer.description%",
+            "media": {
+              "image": "media/delegate-to-server.svg",
+              "altText": "%step.delegateToServer.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.delegation.delegateToServer"
+            ]
+          },
+          {
             "id": "costs",
             "title": "%step.costs.title%",
             "description": "%step.costs.description%",

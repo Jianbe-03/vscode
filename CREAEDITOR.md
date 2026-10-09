@@ -360,7 +360,7 @@ The image build uses `dist/creaeditor-server-linux-<arch>.tar.gz` when it is the
 - `agent-host/`: chats (session database), agent settings, the account list, logs.
 - `secrets/`: Claude setup-tokens (and later gateway keys), encrypted with AES-256-GCM under a key derived from `secrets/master.key` (generated on first start, 0600). There is no OS keychain in Docker, so this file store replaces it.
 - `remote-access/`: paired devices (only hashes of their keys), the password (scrypt hash), the admin token.
-- `repos/`: repositories the server works in; chat worktrees go next to them.
+- `repos/`: repositories of delegated chats (bare), `worktrees/`: one worktree per delegated chat, `delegations/`: their records (see Delegate to a Server).
 - `server.json` (pid, port, version while it runs) and `pairing.txt`.
 - In Docker, `/data/home` holds `~/.claude`, `~/.codex`, gh and git settings.
 
@@ -378,6 +378,27 @@ node out/vs/server/node/creaeditorServer/creaeditorServerMain.js pair --data-dir
 Then **Add CreaEditor Server** with `http://127.0.0.1:31600`. Use the Node from `.tools/node` (the server's native modules are built for Node 24); without a web build in `.build/out-sessions-web` the browser shows the pairing page only. Add `--enable-mock-agent` and `VSCODE_AGENT_HOST_CLAUDE_AGENT_ENABLED=false` to try it without real agents.
 
 **Build the tarballs**: `scripts/creaeditor-build-server.sh [darwin-arm64|linux-x64|linux-arm64] [--skip-install] [--skip-web] [--dry-run]` writes `dist/creaeditor-server-<os>-<arch>.tar.gz` with Node, the bundled server and agent host (the standard remote server packaging, `gulp vscode-reh-<os>-<arch>-min`), the web Agents window, the Claude and Codex SDKs for the target, the `bin/creaeditor-server` command and the installers. Native modules are compiled for the building OS, so build the Linux tarballs on Linux or let the Docker build do it.
+
+## Delegate to a Server
+
+Move a chat from your laptop to a CreaEditor Server: the chat continues there with its code, so you can close the laptop. It only runs in one place at a time.
+
+**Delegate**: in the Agents window, right-click a chat (or its header) > **Delegate to Server...**, or pick **Delegate to Server...** under **Continue Chat in...** in the chat input (also Cmd+Shift+P). Pick the server, then how the results come back. If the chat is running, CreaEditor stops it first. A notification shows the progress ("Sending code... 12 MB / 40 MB").
+
+What goes to the server:
+- **The code**, as one git bundle: the current branch with the history the server lacks, plus your uncommitted changes and untracked files that are not ignored (`.gitignore` is respected). Your files, index and branches are not touched. The first time the whole history of the branch goes up; after that only new commits (the server says which commits it has). Untracked files that look like secrets (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc`, ...) stay on the laptop unless you choose **Send Them Too**; tracked files always go, they are in the repository anyway. The upload is limited to 500 MB (`creaeditor.delegation.maxUploadMB`); over the limit you get a clear message.
+- **The conversation**: for Claude chats the Agent SDK session itself (its transcript, rewritten to the server's folder), so the chat resumes there as the same session with all its history. Codex and Copilot CLI chats continue with a transcript of the conversation as an attachment; the notification says so.
+- **Claude setup-token accounts**, encrypted for that server (X25519 + AES-256-GCM, on top of Tailscale or HTTPS), so the server's agent host is the only one that can read them; it keeps them in its encrypted secret store. A browser-login Claude account or a Codex login cannot move: if the server has none, sign in once on the server (**CreaEditor Servers** > the server > **Sign In to an Account on This Server**). OpenRouter and LiteLLM models still go through a connected CreaEditor window, so they do not run on the server while the laptop is off.
+
+On the server the chat works in its own worktree `<data>/worktrees/<id>` on the branch `creaeditor/delegated/<id>`, with your uncommitted changes as uncommitted changes (repositories are kept as `<data>/repos/<repo>.git`). The chat then shows under the server in the Agents window (and on your phone when it is connected to the server). The laptop's chat is archived and its input says "Delegated to <server>: this chat continues there"; **Open on Server** opens the server's chat.
+
+**Results**, chosen when delegating and changeable later (**Change How Results Come Back** in the chat header menu):
+- **Bring Back Changes**: when the laptop is online, fetches the server's branch into the local branch `creaeditor/from-<server>/<id>`; the server's uncommitted work comes as one last commit. Your working tree is never touched; then pick **Compare** (a diff against your current branch), **Checkout** or **Merge** (both refuse while you have uncommitted changes; a merge with conflicts is undone).
+- **Open PR from the Server**: the server commits its uncommitted work, pushes `creaeditor/delegated/<id>` to the repository's GitHub `origin` and opens a pull request with `gh`. It uses its own GitHub token: set it once with **Set GitHub Token on Server** (a fine-grained token with Contents and Pull requests read and write; the server keeps it encrypted and never puts it in command lines or logs). The server needs `gh` (the Docker image has it).
+
+**Status**: **Show Delegated Chats** (Cmd+Shift+P) lists every delegated chat with its server, state (running, waiting for approval, done, server offline) and branch, with Open on Server and the results action. While CreaEditor runs, a notification says when a delegated chat finishes or waits for you. When the server is offline, delegating stops with **Try Again**; uploads continue where they stopped after a dropped connection.
+
+**How it works**: the laptop's main process packs the code (`git bundle` with a snapshot commit built in a temporary index) and talks to the server's code receiver under `/api/delegation/` with this computer's device key (chunked, resumable uploads). The accounts go to the server's agent host over the agent host connection. See `src/vs/platform/agentHost/node/creaeditorDelegation/README.md`.
 
 ## Building from source
 

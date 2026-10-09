@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="600" rx="16" fill="#16152D"/>
+
+	<!-- The laptop's chat with the session menu -->
+	<rect x="40" y="56" width="380" height="488" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="92" fill="#8E8CA8" font-size="12">This laptop</text>
+	<text x="64" y="118" fill="#F8F7FA" font-size="16" font-weight="600">Fix the login redirect</text>
+	<rect x="64" y="138" width="332" height="62" rx="8" fill="#252347"/>
+	<text x="80" y="164" fill="#F8F7FA" font-size="13">Claude: I changed auth/redirect.ts and</text>
+	<text x="80" y="184" fill="#F8F7FA" font-size="13">started the end-to-end tests...</text>
+
+	<rect x="132" y="220" width="264" height="140" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
+	<text x="150" y="248" fill="#8E8CA8" font-size="13">Rename</text>
+	<text x="150" y="276" fill="#8E8CA8" font-size="13">Copy Link</text>
+	<rect x="140" y="290" width="248" height="30" rx="6" fill="#2F2C55"/>
+	<g fill="none" stroke="#00EC95" stroke-width="1.6" stroke-linecap="round">
+		<rect x="152" y="298" width="14" height="6" rx="1.5"/>
+		<rect x="152" y="307" width="14" height="6" rx="1.5"/>
+	</g>
+	<text x="176" y="310" fill="#F8F7FA" font-size="13" font-weight="600">Delegate to Server...</text>
+	<text x="150" y="344" fill="#8E8CA8" font-size="13">Archive</text>
+
+	<rect x="64" y="384" width="332" height="58" rx="8" fill="#252347"/>
+	<text x="80" y="408" fill="#F8F7FA" font-size="13">Sending code... 12 MB / 40 MB</text>
+	<rect x="80" y="420" width="300" height="6" rx="3" fill="#16152D"/>
+	<rect x="80" y="420" width="90" height="6" rx="3" fill="#00EC95"/>
+	<text x="64" y="476" fill="#8E8CA8" font-size="12">Code + uncommitted changes, the Claude</text>
+	<text x="64" y="494" fill="#8E8CA8" font-size="12">session, setup-tokens (encrypted).</text>
+	<text x="64" y="512" fill="#8E8CA8" font-size="12">.env files stay here.</text>
+
+	<!-- Arrow -->
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M432 300 H516"/>
+		<path d="M506 290 L516 300 L506 310"/>
+	</g>
+
+	<!-- The server -->
+	<rect x="528" y="56" width="392" height="488" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="552" y="92" fill="#8E8CA8" font-size="12">Office Mac mini</text>
+	<text x="896" y="92" fill="#00EC95" font-size="12" text-anchor="end">Online</text>
+	<text x="552" y="118" fill="#F8F7FA" font-size="16" font-weight="600">Fix the login redirect</text>
+	<circle cx="558" cy="140" r="4" fill="#00EC95"/>
+	<text x="570" y="144" fill="#8E8CA8" font-size="12">running · creaeditor/delegated/3f9a2c1d</text>
+	<rect x="552" y="160" width="344" height="82" rx="8" fill="#252347"/>
+	<text x="568" y="186" fill="#F8F7FA" font-size="13">Claude: The tests pass now. I also</text>
+	<text x="568" y="206" fill="#F8F7FA" font-size="13">fixed the expired-session case and</text>
+	<text x="568" y="226" fill="#F8F7FA" font-size="13">committed both changes.</text>
+	<text x="552" y="276" fill="#8E8CA8" font-size="12">Same session, same history: the laptop</text>
+	<text x="552" y="294" fill="#8E8CA8" font-size="12">can be turned off.</text>
+
+	<text x="552" y="350" fill="#F8F7FA" font-size="13" font-weight="600">Results</text>
+	<rect x="552" y="366" width="344" height="40" rx="8" fill="#00BD8B"/>
+	<text x="724" y="391" fill="#0F0E22" font-size="13" font-weight="600" text-anchor="middle">Bring Back Changes</text>
+	<text x="552" y="428" fill="#8E8CA8" font-size="12">into creaeditor/from-mac-mini/3f9a2c1d</text>
+	<rect x="552" y="446" width="344" height="40" rx="8" fill="#16152D" stroke="#2F2C55"/>
+	<text x="724" y="471" fill="#F8F7FA" font-size="13" font-weight="600" text-anchor="middle">Open PR from the Server</text>
+	<text x="552" y="508" fill="#8E8CA8" font-size="12">pushed with the server's own GitHub token</text>
+</svg>
