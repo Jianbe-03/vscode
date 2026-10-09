@@ -21,6 +21,8 @@ import { PersistedTurnUsageContribution } from './persistedTurnUsage/persistedTu
 import { PullRequestChatContribution } from './pullRequest/pullRequestChatContribution.js';
 import { SessionWorkspaceConversionContribution } from './sessionWorkspaceConversion/sessionWorkspaceConversionContribution.js';
 import { QueueDrainContribution } from './queueDrain/queueDrainContribution.js';
+import { RunningChatsLimitContribution } from './runningChatsLimit/runningChatsLimitContribution.js';
+import { ChatNotificationsContribution } from '../shared/chatNotifications.js';
 import { RemoteSessionOriginContribution } from './remoteSessionOrigin/remoteSessionOriginContribution.js';
 import { SessionFlagsContribution } from './sessionFlags/sessionFlagsContribution.js';
 import { SessionInputNeededContribution } from './sessionInputNeeded/sessionInputNeededContribution.js';
@@ -59,5 +61,8 @@ export function registerBuiltInChatContributions(
 	registrations.add(contributions.registerContribution(SessionFlagsContribution));
 	registrations.add(contributions.registerContribution(AdditionalWorktreeLifecycleContribution));
 	registrations.add(contributions.registerContribution(ChatArchiveContribution));
+	// CreaEditor: push notifications, and the running chats limit of a CreaEditor Server.
+	registrations.add(contributions.registerContribution(ChatNotificationsContribution));
+	registrations.add(contributions.registerContribution(RunningChatsLimitContribution));
 	return registrations;
 }

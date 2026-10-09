@@ -169,6 +169,33 @@ export function readCreaEditorServerMachine(values: Readonly<Record<string, unkn
 }
 
 /**
+ * The root config value (transient) in which the agent host publishes how many chats run and wait,
+ * when it limits how many run at once (a CreaEditor Server's `--max-running-chats`).
+ */
+export const CREAEDITOR_SERVER_CHATS_KEY = 'creaeditor.server.chats';
+
+/** What {@link CREAEDITOR_SERVER_CHATS_KEY} holds. */
+export interface ICreaEditorServerChats {
+	readonly running: number;
+	readonly queued: number;
+	/** How many chats may run at once. */
+	readonly max: number;
+}
+
+/** Reads {@link CREAEDITOR_SERVER_CHATS_KEY} from root config values. */
+export function readCreaEditorServerChats(values: Readonly<Record<string, unknown>> | undefined): ICreaEditorServerChats | undefined {
+	const value = values?.[CREAEDITOR_SERVER_CHATS_KEY] as Partial<ICreaEditorServerChats> | undefined;
+	if (!value || typeof value !== 'object') {
+		return undefined;
+	}
+	const numbers = [value.running, value.queued, value.max];
+	return numbers.every(item => typeof item === 'number' && Number.isInteger(item) && item >= 0) ? value as ICreaEditorServerChats : undefined;
+}
+
+/** The default of `creaeditor-server --max-running-chats`. */
+export const CREAEDITOR_SERVER_DEFAULT_MAX_RUNNING_CHATS = 4;
+
+/**
  * Application storage key the editor window sets (to `Date.now()`) to have the Agents window start Add
  * CreaEditor Server, e.g. from the CreaEditor Features walkthrough.
  */
