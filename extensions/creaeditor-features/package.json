@@ -241,6 +241,18 @@
             ]
           },
           {
+            "id": "notifications",
+            "title": "%step.notifications.title%",
+            "description": "%step.notifications.description%",
+            "media": {
+              "image": "media/notifications.svg",
+              "altText": "%step.notifications.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.notifications.setUp"
+            ]
+          },
+          {
             "id": "costs",
             "title": "%step.costs.title%",
             "description": "%step.costs.description%",
