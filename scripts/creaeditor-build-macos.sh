@@ -97,6 +97,18 @@ for entry in "claude:@anthropic-ai/claude-agent-sdk @anthropic-ai/claude-agent-s
 	done
 done
 
+# Remote Access serves the web Agents window (sessions.web.main) to phones and other devices from
+# <app>/Contents/Resources/app/out-sessions-web (see remoteAccessMainService.ts). Only the Agents
+# window and its workers are needed: drop the vscode.dev workbench bundle and source maps.
+step "Building the web Agents window for Remote Access"
+WEB_OUT="$ROOT/.build/out-sessions-web"
+rm -rf "$WEB_OUT"
+node build/next/index.ts bundle --minify --nls --target web --out .build/out-sessions-web
+rm -f "$WEB_OUT"/vs/workbench/workbench.web.main.internal.*
+find "$WEB_OUT" -name '*.map' -delete
+rm -rf "$APP/Contents/Resources/app/out-sessions-web"
+cp -R "$WEB_OUT" "$APP/Contents/Resources/app/out-sessions-web"
+
 SIGN_IDENTITY="${CREAEDITOR_SIGN_IDENTITY:-CreaEditor Local Signing}"
 if security find-identity -p codesigning | grep -qF "\"$SIGN_IDENTITY\""; then
 	step "Signing with \"$SIGN_IDENTITY\""

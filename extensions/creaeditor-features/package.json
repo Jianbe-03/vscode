@@ -204,6 +204,19 @@
             ]
           },
           {
+            "id": "remoteAccess",
+            "title": "%step.remoteAccess.title%",
+            "description": "%step.remoteAccess.description%",
+            "media": {
+              "image": "media/remote-access.svg",
+              "altText": "%step.remoteAccess.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.remoteAccess.toggle",
+              "onCommand:creaeditor.remoteAccess.show"
+            ]
+          },
+          {
             "id": "costs",
             "title": "%step.costs.title%",
             "description": "%step.costs.description%",

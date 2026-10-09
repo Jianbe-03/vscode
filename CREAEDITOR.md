@@ -285,6 +285,35 @@ Setup-tokens are stored in the keychain by the window and handed to the agent ho
 - The Claude and Codex agent SDKs ship inside CreaEditor.app (about 490 MB), because CreaEditor has no SDK download server.
 - After installing a new CreaEditor build, macOS asks once for access to **CreaEditor Safe Storage** (where the tokens are kept); choose **Always Allow**. Without an Apple Developer ID that answer does not carry over to the next build.
 
+## Remote Access
+
+Use the Agents window of your Mac from a phone or another computer: see the sessions and chats live, open a chat and follow its output, send messages, approve or skip tool calls, stop a chat or **Stop All Chats**, and pick the agent and model. The agents keep running on the Mac; the device shows the same sessions as every window.
+
+**Set up Tailscale** (once): install [Tailscale](https://tailscale.com/download) on the Mac and on the phone, and sign in to the same account on both. Remote Access listens on the Mac's Tailscale address only (never on all networks), so only devices in your tailnet can reach it. Traffic inside a tailnet is encrypted by WireGuard, so plain `http://` is fine there.
+
+**Turn it on**: in the Agents window click the phone button at the top right (or Cmd+Shift+P, **Remote Access**) and click **Allow Remote Access** (also a command: **Allow Remote Access** turns it on and off). The dialog shows the address (`http://100.x.y.z:8790`, also the MagicDNS name when your tailnet has it), a QR code with a one-time pairing code, the paired devices with **Sign Out**, the password and public access.
+
+**Pair a device**: scan the QR code with the phone's camera. The page asks for a device name (it suggests one, such as "iPhone (Safari)") and opens the Agents window in the phone layout. The device keeps its key in the browser, so later it only needs the address; add it to the home screen for an app-like window. Codes work once and expire after 10 minutes (**New Code** makes another). **Sign Out** on the Mac ends the device's key and closes its connections at once.
+
+**Keep-awake**: while Remote Access is on and a chat runs, the Mac does not sleep ("Keeping this Mac awake while chats run" in the dialog); it may sleep again once no chat runs. Closing the lid still sleeps most MacBooks unless they are on power with an external display.
+
+**Try it on the Mac** (no Tailscale needed): set `creaeditor.remoteAccess.network` to `localhost` (or click **Use Localhost Only** in the dialog), turn Remote Access on, click **Copy Link** and open the link in a browser; the browser's device toolbar (phone size, e.g. 390×844) shows the phone layout.
+
+**Public access** (optional, off by default): reach the Mac from anywhere over HTTPS with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel), for example from a phone without Tailscale. Set a password first (at least 8 characters), then click **Turn On Public Access**. CreaEditor runs `tailscale funnel --bg --yes 8790` (Funnel forwards `https://<mac>.<tailnet>.ts.net` to `127.0.0.1:8790`, so the server then also listens on `127.0.0.1`), shows the `https://` address from `tailscale funnel status --json`, and puts that address in the QR code. While public access is on, every new pairing needs the password as well as the pairing code. **Turn Off Public Access** (or turning Remote Access off) runs `tailscale funnel --https=443 off`. Funnel must be allowed for your tailnet once; if it is not, the dialog shows Tailscale's link to allow it. Quitting CreaEditor leaves the Funnel configured (it then answers with an error until CreaEditor runs again).
+
+**Cloudflare Tunnel instead of Funnel**: keep public access off, set the network to `localhost`, and point a tunnel at the port, e.g. `cloudflared tunnel --url http://127.0.0.1:8790` (quick tunnel) or a named tunnel with your own hostname. Put [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/) in front of it, because CreaEditor only asks for the password when its own public access is on.
+
+**Security**:
+- Device keys are long random secrets; the Mac only stores their SHA-256 hash (`<user data>/remote-access/remote-access-auth.json`, readable by you only). The password is stored as an scrypt hash.
+- Five wrong pairing codes or passwords from one address within 15 minutes lock that address out for 15 minutes; 30 failures from all addresses together lock pairing for everyone for 15 minutes.
+- The pages and scripts of the web Agents window are served without a key (they are the same for everyone and hold no data); everything with data (the agent host connection) needs a device key.
+- Devices paired over Tailscale keep working when public access is turned on; sign them out to require the password from everyone.
+- Anyone with a paired device can do what you can do in the Agents window, including running commands on the Mac through the agents. Sign out devices you lose.
+
+**Settings**: `creaeditor.remoteAccess.enabled`, `creaeditor.remoteAccess.network` (`tailscale` or `localhost`), `creaeditor.remoteAccess.port` (default `8790`). They are per machine and not synced. `GET /health` answers `{ "status": "ok", "version": … }` without a key.
+
+**How it works**: the main process runs the server, so it survives window reloads and stops when CreaEditor quits. It serves the web Agents window (built into `CreaEditor.app/Contents/Resources/app/out-sessions-web` by `scripts/creaeditor-build-macos.sh`), the pairing page and API, and relays each device's authenticated WebSocket to the agent host. The server core is shared with CreaEditor Server: see `src/vs/platform/agentHost/node/remoteAccess/README.md`.
+
 ## Building from source
 
 ```sh
