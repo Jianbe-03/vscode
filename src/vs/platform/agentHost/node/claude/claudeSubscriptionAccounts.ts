@@ -44,6 +44,7 @@ import { SUBSCRIPTION_LIMIT_ERROR_META_KEY, type ISubscriptionAccount, type ISub
 import { ActionType } from '../../common/state/sessionActions.js';
 import { createErrorResponsePart, type ErrorResponsePart } from '../../common/state/sessionState.js';
 import { ISubscriptionAccountsService, type ISubscriptionAccountsProvider, type IStoredSubscriptionAccount } from '../shared/subscriptionAccountsService.js';
+import { claudeTokenSecretName, getAgentHostSecretStore } from '../shared/fileSecretStore.js';
 import { IClaudeAgentSdkService } from './claudeAgentSdkService.js';
 import type { IClaudeAccountCredential } from './claudeProxyService.js';
 import { buildModelEnumerationOptions } from './claudeSdkOptions.js';
@@ -78,6 +79,8 @@ export interface IClaudeAccountState {
 	readonly limitedUntil?: number;
 	readonly error?: string;
 	readonly authUrl?: string;
+	/** The sign-in waits for the code its page shows (`Paste code here`), see `submitAuthCode`. */
+	readonly acceptsAuthCode?: boolean;
 	/** Anthropic has not accepted this account's credential yet (or refused it): chats use it only as a last resort. */
 	readonly unverified?: boolean;
 }
@@ -118,6 +121,7 @@ export function toSubscriptionAccount(account: IClaudeAccountState, now: number)
 		...(limited ? { limitedUntil: account.limitedUntil } : {}),
 		...(account.error ? { error: account.error } : {}),
 		...(account.authUrl ? { authUrl: account.authUrl } : {}),
+		...(account.authUrl && account.acceptsAuthCode ? { acceptsAuthCode: true } : {}),
 	};
 }
 
@@ -494,6 +498,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 				this._verifiedTokens.set(stored.id, stored.verifiedToken);
 			}
 		}
+		this._loadStoredTokens();
 		this._register(toDisposable(() => {
 			for (const login of this._logins.values()) {
 				login.kill();
@@ -537,6 +542,9 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 				return;
 			case 'signIn':
 				await this._signIn(request.accountId);
+				return;
+			case 'submitAuthCode':
+				this._submitAuthCode(request.accountId, request.code);
 				return;
 			case 'switchChat':
 				this._chatAccounts.set(request.chat, request.accountId);
@@ -605,6 +613,9 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 	/** Receives (or, with an empty token, revokes) the setup-token of a `token` account. */
 	setToken(accountId: string, token: string): boolean {
 		const account = this._accounts.get(accountId);
+		if (!account || account.kind === 'token') {
+			this._storeToken(accountId, token);
+		}
 		if (!account) {
 			// The token may arrive before the `add` request: keep it for the account.
 			if (token) {
@@ -823,6 +834,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		this._logins.delete(id);
 		this._accounts.delete(id);
 		this._tokens.delete(id);
+		this._storeToken(id, '');
 		this._verifiedTokens.delete(id);
 		for (const chats of [this._chatAccounts, this._pinnedChats]) {
 			for (const [chat, accountId] of chats) {
@@ -1071,7 +1083,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			this._update(id, { status: 'signedOut', error: this._manualLoginError(dir) });
 			return;
 		}
-		this._update(id, { status: 'signingIn', error: undefined, authUrl: undefined });
+		this._update(id, { status: 'signingIn', error: undefined, authUrl: undefined, acceptsAuthCode: undefined });
 		const login = spawn(cli, ['auth', 'login', '--claudeai'], {
 			env: { ...process.env, CLAUDE_CONFIG_DIR: dir, ELECTRON_RUN_AS_NODE: undefined, CLAUDE_CODE_OAUTH_TOKEN: undefined, ANTHROPIC_API_KEY: undefined },
 			stdio: ['pipe', 'pipe', 'pipe'],
@@ -1079,9 +1091,14 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		this._logins.set(id, login);
 		const timeout = setTimeout(() => login.kill(), CLAUDE_LOGIN_TIMEOUT_MS);
 		const onOutput = (data: Buffer) => {
-			const url = /https:\/\/\S+/.exec(data.toString())?.[0];
+			const text = data.toString();
+			// Stop at control characters: the CLI may wrap the URL in a terminal hyperlink.
+			const url = /https:\/\/[^\s\x00-\x1f\x7f]+/.exec(text)?.[0];
 			if (url && !this._find(id)?.authUrl) {
 				this._update(id, { authUrl: url });
+			}
+			if (/paste code/i.test(text) && !this._find(id)?.acceptsAuthCode) {
+				this._update(id, { acceptsAuthCode: true });
 			}
 		};
 		login.stdout?.on('data', onOutput);
@@ -1096,11 +1113,70 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		}
 		this._logins.delete(id);
 		if (exitCode === 0) {
-			this._update(id, { authUrl: undefined });
+			this._update(id, { authUrl: undefined, acceptsAuthCode: undefined });
 			await this._readAccount(id, true);
 			return;
 		}
-		this._update(id, { status: 'signedOut', authUrl: undefined, error: this._manualLoginError(dir) });
+		this._update(id, { status: 'signedOut', authUrl: undefined, acceptsAuthCode: undefined, error: this._manualLoginError(dir) });
+	}
+
+	/**
+	 * Hands the code the sign-in page showed to the waiting `claude auth login` (it reads `code#state`
+	 * lines from stdin), for a sign-in finished in a browser on another machine.
+	 */
+	private _submitAuthCode(id: string, code: string): void {
+		const login = this._logins.get(id);
+		const trimmed = code.trim();
+		if (!login?.stdin || !trimmed || /[\r\n]/.test(trimmed)) {
+			return;
+		}
+		login.stdin.write(`${trimmed}\n`);
+	}
+
+	// #endregion
+
+	// #region server secret store
+
+	/** On a CreaEditor Server, the setup-tokens stay in its secret store, so they survive a restart. */
+	private _loadStoredTokens(): void {
+		const store = getAgentHostSecretStore();
+		if (!store) {
+			return;
+		}
+		for (const account of this._accounts.values()) {
+			if (account.kind !== 'token') {
+				continue;
+			}
+			try {
+				const token = store.get(claudeTokenSecretName(account.id));
+				if (token) {
+					this._tokens.set(account.id, token);
+				}
+			} catch (error) {
+				this._logService.warn(`[Claude] Could not read the stored setup-token of account ${account.id}`, error);
+			}
+		}
+		queueMicrotask(() => {
+			for (const accountId of this._tokens.keys()) {
+				void this._readAccount(accountId, this._verifiedTokens.get(accountId) !== claudeTokenFingerprint(this._tokens.get(accountId)!));
+			}
+		});
+	}
+
+	private _storeToken(accountId: string, token: string): void {
+		const store = getAgentHostSecretStore();
+		if (!store) {
+			return;
+		}
+		const name = claudeTokenSecretName(accountId);
+		try {
+			if ((store.get(name) ?? '') === token) {
+				return;
+			}
+		} catch {
+			// Unreadable: replace it.
+		}
+		void (token ? store.set(name, token) : store.delete(name)).catch(error => this._logService.error(error, `[Claude] Could not store the setup-token of account ${accountId}`));
 	}
 
 	// #endregion
