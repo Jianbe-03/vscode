@@ -314,6 +314,71 @@ Use the Agents window of your Mac from a phone or another computer: see the sess
 
 **How it works**: the main process runs the server, so it survives window reloads and stops when CreaEditor quits. It serves the web Agents window (built into `CreaEditor.app/Contents/Resources/app/out-sessions-web` by `scripts/creaeditor-build-macos.sh`), the pairing page and API, and relays each device's authenticated WebSocket to the agent host. The server core is shared with CreaEditor Server: see `src/vs/platform/agentHost/node/remoteAccess/README.md`.
 
+## CreaEditor Server
+
+A separate, headless CreaEditor that runs the agents (Claude, Codex) on a machine that is always on: a Linux server with Docker, a Mac mini, a Linux box. You use it from CreaEditor on your laptop (its chats show in the Agents window next to the laptop's) and from your phone (the same web Agents window as Remote Access). The server keeps its own chats, accounts and worktrees, so it keeps working while the laptop sleeps.
+
+It is the agent host plus the Remote Access server: one port (default **31600**) serves the web Agents window, pairing (`/api/pair`), `/health` and the agent host WebSocket (`/ahp`, device key required). The agent host runs as a child process on a private unix socket and is restarted when it stops.
+
+**Add it in CreaEditor**: in the Agents window, Cmd+Shift+P, **Add CreaEditor Server** (also in the workspace picker under Manage, and the **Add CreaEditor Server** button of the CreaEditor Features walkthrough):
+- **Connect by Address or Pairing Link**: paste the link the server prints (`http://100.x.y.z:31600/#pair=ABCDE-12345`) or just its address (`https://agents.example.com`, `http://100.x.y.z:31600`; a bare `100.x.y.z` means port 31600). Without a code in the link CreaEditor asks for one; a public server also asks for its password. CreaEditor exchanges the code for a device key, keeps the key in its secret storage (never in settings) and connects.
+- **Install on a Computer over SSH**: pick a host from your SSH config or type `user@host`, then choose **Install as a Service from a Server Tarball** (copies a `creaeditor-server-<os>-<arch>.tar.gz` from this computer and runs its installer), **from a Download URL** (that computer downloads the tarball for its system), or **Run with Docker** (runs the image you built, see below). Choose how this computer reaches it: **Tailscale** (recommended; the server listens on that computer's Tailscale address), **Every Network of That Computer** (plain HTTP on 0.0.0.0, trusted networks only) or **Only That Computer** (for a domain or Funnel you set up there; you then enter its address). CreaEditor reads the pairing code the installer prints and pairs.
+
+**CreaEditor Servers** (Cmd+Shift+P, or Manage in the workspace picker) lists every server: Online or Offline (with "last seen"), version, CPU and memory of the server machine, running chats, and whether it is public. Per server: **Open in Browser**, **Pair Phone** (a QR code of the server's web page; the page asks for a pairing code from `creaeditor-server pair`), **Sign In to an Account on This Server** (below), **Check Now** and **Remove** (signs this computer out of the server and forgets its key; the server keeps running).
+
+**Accounts on the server**: the server has its own Claude and Codex logins (in Docker they live in the data volume). From **CreaEditor Servers** > a server > **Sign In to an Account on This Server**:
+- **Claude: Sign In with a Browser**: the server runs `claude auth login`; CreaEditor opens the sign-in page here, and you paste the code the page shows.
+- **Claude: Paste a Setup-Token**: a token from `claude setup-token`; the server keeps it encrypted (see Data) so it survives restarts.
+- **Codex: Sign In with a Device Code**: the server runs the ChatGPT device sign-in; CreaEditor copies the code and opens the page where you enter it.
+
+**Run it with Docker** (Linux, amd64 or arm64), from the repository:
+
+```sh
+docker build -f build/creaeditor-server/Dockerfile --build-arg BUILD_SOURCEVERSION=$(git rev-parse HEAD) -t creaeditor-server .
+cd build/creaeditor-server
+docker compose up -d                                   # on 127.0.0.1:31600 of the Docker host
+docker compose exec creaeditor-server creaeditor-server pair     # a pairing code and link
+docker compose exec creaeditor-server creaeditor-server status
+```
+
+The image build uses `dist/creaeditor-server-linux-<arch>.tar.gz` when it is there, and otherwise builds the server from source inside Docker (needs about 8 GB of memory). The image runs as a non-root user with `git`, `gh` and `ssh`, keeps everything in the `/data` volume (`HOME` is `/data/home`, so Claude, Codex, `gh` and git settings persist), exposes 31600 and has a `HEALTHCHECK` on `/health`.
+
+- **Tailscale** (recommended): `docker compose --profile tailscale up -d` with `TS_AUTHKEY=tskey-auth-…` in a `.env` file next to the compose file. The sidecar joins your tailnet as `creaeditor-server` and serves `https://creaeditor-server.<tailnet>.ts.net` (Tailscale Serve, `tailscale-serve.json`). Set `CREAEDITOR_SERVER_PUBLIC_URL` to that address so pairing links use it. For access from the internet set `AllowFunnel` to true in `tailscale-serve.json` (Tailscale Funnel) and also `CREAEDITOR_SERVER_PUBLIC=1`.
+- **Your own domain with HTTPS**: `docker compose --profile public up -d` with `CREAEDITOR_PUBLIC_DOMAIN=agents.example.com` in `.env` (a DNS record pointing at the machine, ports 80 and 443 open). Caddy gets a Let's Encrypt certificate and proxies to the server; the domain also turns public mode on.
+- **Public mode** (domain or Funnel): pairing needs the password as well as the code. Set it once: `docker compose exec creaeditor-server creaeditor-server password`.
+- Behind Caddy or the Tailscale sidecar every client reaches the server from the proxy's address, so failed pairing attempts of all clients count together for the lockout.
+
+**Run it as a macOS service** (Apple silicon): extract `creaeditor-server-darwin-arm64.tar.gz` and run `creaeditor-server/install.sh` (or `install/macos/install.sh`). It installs into `~/Applications/CreaEditor Server` (`--system`: `/usr/local/lib/creaeditor-server`), writes the launch agent `~/Library/LaunchAgents/nl.creacoon.creaeditor-server.plist` (starts at login, restarts when it stops) and starts it with `launchctl bootstrap gui/$UID`. It listens on the Mac's Tailscale address when Tailscale runs, else on 127.0.0.1 (`--host`, `--port` to change). Logs: `~/Library/Logs/CreaEditor Server/server.log`. Remove with `install/macos/uninstall.sh` (`--purge` also deletes the data). The tarball is not notarized; the installer removes the quarantine flag.
+
+**Run it as a Linux service** (instead of Docker): extract the tarball and run `creaeditor-server/install.sh`. As root it installs into `/opt/creaeditor-server` and runs a systemd service as the user `creaeditor` (data in `/var/lib/creaeditor-server/data`); as a user it installs into `~/.local/lib/creaeditor-server` with a user service (run `loginctl enable-linger $USER` once so it keeps running after you log out). Install `git` (and `gh` for pull requests) on the machine. Logs: `journalctl -u creaeditor-server` (add `--user` for a user service). Remove with `install/linux/uninstall.sh`.
+
+**One-line install**: publish the tarballs and `build/creaeditor-server/install.sh` on a web server, then on the machine: `curl -fsSL https://downloads.example.com/creaeditor-server/install.sh | CREAEDITOR_SERVER_DOWNLOAD_URL=https://downloads.example.com/creaeditor-server sh`. Options go after `sh -s --`, e.g. `--host 0.0.0.0`. The same `install.sh` also works from an extracted tarball.
+
+**Commands** (`creaeditor-server help`): `serve` (default) starts the server; `pair` prints a new one-time pairing code, its link and (in a terminal) a QR code; `password` sets or removes the password for public mode; `status` shows the agent host state, paired and connected devices, CPU and memory; `version`. Options (with environment variables): `--host` (`CREAEDITOR_SERVER_HOST`; default 127.0.0.1, 0.0.0.0 in Docker), `--port` (`CREAEDITOR_SERVER_PORT`, 31600), `--data-dir` (`CREAEDITOR_SERVER_DATA_DIR`), `--public-url` (`CREAEDITOR_SERVER_PUBLIC_URL`, or `https://$CREAEDITOR_PUBLIC_DOMAIN`), `--public` (`CREAEDITOR_SERVER_PUBLIC=1`), `--log`, `--disable-codex` (`CREAEDITOR_SERVER_CODEX=0`). On first start, with no device paired yet, the server prints a pairing code to its log and writes it to `<data>/pairing.txt` (readable by its user only). `pair`, `password` and `status` talk to the running server through an admin endpoint on 127.0.0.1 that needs the token in `<data>/remote-access/admin-token`, so only the server's user (or root) can use them.
+
+**Data** (`--data-dir`; default `~/.creaeditor-server`, `/data` in Docker; folder mode 0700):
+- `agent-host/`: chats (session database), agent settings, the account list, logs.
+- `secrets/`: Claude setup-tokens (and later gateway keys), encrypted with AES-256-GCM under a key derived from `secrets/master.key` (generated on first start, 0600). There is no OS keychain in Docker, so this file store replaces it.
+- `remote-access/`: paired devices (only hashes of their keys), the password (scrypt hash), the admin token.
+- `repos/`: repositories the server works in; chat worktrees go next to them.
+- `server.json` (pid, port, version while it runs) and `pairing.txt`.
+- In Docker, `/data/home` holds `~/.claude`, `~/.codex`, gh and git settings.
+
+**Backups**: stop the server (`docker compose stop`, `launchctl bootout gui/$UID/nl.creacoon.creaeditor-server`, or `systemctl stop creaeditor-server`) and copy the whole data folder (in Docker: `docker run --rm -v creaeditor-data:/data -v $PWD:/backup alpine tar czf /backup/creaeditor-data.tgz -C /data .`). Keep `secrets/master.key` with `secrets/secrets.json`: one is useless without the other, so store the backup privately.
+
+**Updating**: Docker: rebuild the image and `docker compose up -d` (the volume stays). macOS and Linux: run the new tarball's `install.sh` again; it stops the service, replaces the program and starts it, and keeps the data and paired devices. Paired laptops and phones reconnect by themselves.
+
+**Try it on this Mac from the repository** (after `npm run transpile-client`):
+
+```sh
+node out/vs/server/node/creaeditorServer/creaeditorServerMain.js --host 127.0.0.1 --port 31600 --data-dir /tmp/ce.server
+node out/vs/server/node/creaeditorServer/creaeditorServerMain.js pair --data-dir /tmp/ce.server
+```
+
+Then **Add CreaEditor Server** with `http://127.0.0.1:31600`. Use the Node from `.tools/node` (the server's native modules are built for Node 24); without a web build in `.build/out-sessions-web` the browser shows the pairing page only. Add `--enable-mock-agent` and `VSCODE_AGENT_HOST_CLAUDE_AGENT_ENABLED=false` to try it without real agents.
+
+**Build the tarballs**: `scripts/creaeditor-build-server.sh [darwin-arm64|linux-x64|linux-arm64] [--skip-install] [--skip-web] [--dry-run]` writes `dist/creaeditor-server-<os>-<arch>.tar.gz` with Node, the bundled server and agent host (the standard remote server packaging, `gulp vscode-reh-<os>-<arch>-min`), the web Agents window, the Claude and Codex SDKs for the target, the `bin/creaeditor-server` command and the installers. Native modules are compiled for the building OS, so build the Linux tarballs on Linux or let the Docker build do it.
+
 ## Building from source
 
 ```sh

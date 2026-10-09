@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="600" rx="16" fill="#16152D"/>
+
+	<!-- The server: a terminal on the machine that runs it -->
+	<rect x="40" y="56" width="400" height="300" rx="12" fill="#0F0E22" stroke="#2F2C55"/>
+	<circle cx="64" cy="80" r="5" fill="#2F2C55"/>
+	<circle cx="82" cy="80" r="5" fill="#2F2C55"/>
+	<circle cx="100" cy="80" r="5" fill="#2F2C55"/>
+	<text x="240" y="85" fill="#8E8CA8" font-size="12" text-anchor="middle">server</text>
+	<g font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13">
+		<text x="64" y="124" fill="#00EC95">$ <tspan fill="#F8F7FA">docker compose up -d</tspan></text>
+		<text x="64" y="148" fill="#8E8CA8">Container creaeditor-server  Started</text>
+		<text x="64" y="184" fill="#00EC95">$ <tspan fill="#F8F7FA">creaeditor-server pair</tspan></text>
+		<text x="64" y="208" fill="#F8F7FA">Pair a laptop or phone:</text>
+		<text x="64" y="232" fill="#8E8CA8">Pairing code: <tspan fill="#00EC95" font-weight="600">K7QDM-2XP9H</tspan></text>
+		<text x="64" y="256" fill="#8E8CA8">Link: <tspan fill="#F8F7FA">http://100.64.0.2:31600/#pair=…</tspan></text>
+		<text x="64" y="292" fill="#8E8CA8">Docker · macOS service · Linux</text>
+		<text x="64" y="314" fill="#8E8CA8">service · or installed over SSH</text>
+	</g>
+
+	<!-- Arrow: pairing -->
+	<path d="M452 206 H508" stroke="#00BD8B" stroke-width="2" stroke-dasharray="5 5" fill="none"/>
+	<path d="M506 199 L516 206 L506 213 Z" fill="#00BD8B"/>
+
+	<!-- The Servers list in CreaEditor -->
+	<rect x="524" y="56" width="396" height="488" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="548" y="94" fill="#F8F7FA" font-size="16" font-weight="600">CreaEditor Servers</text>
+	<rect x="548" y="110" width="348" height="30" rx="6" fill="#16152D" stroke="#2F2C55"/>
+	<text x="560" y="130" fill="#8E8CA8" font-size="12">Select a server to manage it</text>
+
+	<!-- Online server -->
+	<rect x="548" y="152" width="348" height="92" rx="8" fill="#252347"/>
+	<g fill="none" stroke="#00EC95" stroke-width="1.6">
+		<rect x="562" y="166" width="20" height="8" rx="2"/>
+		<rect x="562" y="178" width="20" height="8" rx="2"/>
+	</g>
+	<text x="594" y="180" fill="#F8F7FA" font-size="14" font-weight="600">Office Mac mini</text>
+	<text x="884" y="180" fill="#00EC95" font-size="12" text-anchor="end">Online</text>
+	<text x="562" y="206" fill="#8E8CA8" font-size="12">Version 1.140.0 · CPU 18% of 10 cores</text>
+	<text x="562" y="226" fill="#8E8CA8" font-size="12">Memory 9.2 of 32.0 GB · 3 chats running</text>
+
+	<!-- Offline server -->
+	<rect x="548" y="254" width="348" height="72" rx="8" fill="#16152D" stroke="#2F2C55"/>
+	<g fill="none" stroke="#8E8CA8" stroke-width="1.6">
+		<rect x="562" y="268" width="20" height="8" rx="2"/>
+		<rect x="562" y="280" width="20" height="8" rx="2"/>
+	</g>
+	<text x="594" y="282" fill="#F8F7FA" font-size="14" font-weight="600">Build box</text>
+	<text x="884" y="282" fill="#8E8CA8" font-size="12" text-anchor="end">Offline, last seen 2 hrs ago</text>
+	<text x="562" y="308" fill="#8E8CA8" font-size="12">https://agents.example.com · Public</text>
+
+	<!-- Actions of a server -->
+	<text x="548" y="360" fill="#F8F7FA" font-size="13" font-weight="600">For each server</text>
+	<g font-size="12" fill="#F8F7FA">
+		<rect x="548" y="374" width="160" height="32" rx="6" fill="#16152D" stroke="#2F2C55"/>
+		<text x="628" y="394" text-anchor="middle">Open in Browser</text>
+		<rect x="716" y="374" width="180" height="32" rx="6" fill="#16152D" stroke="#2F2C55"/>
+		<text x="806" y="394" text-anchor="middle">Pair Phone</text>
+		<rect x="548" y="414" width="348" height="32" rx="6" fill="#16152D" stroke="#2F2C55"/>
+		<text x="722" y="434" text-anchor="middle">Sign In to an Account on This Server</text>
+	</g>
+
+	<!-- Add button -->
+	<rect x="548" y="480" width="348" height="40" rx="8" fill="#00EC95"/>
+	<text x="722" y="505" fill="#1B1A36" font-size="14" font-weight="600" text-anchor="middle">+ Add CreaEditor Server…</text>
+
+	<!-- Phone -->
+	<rect x="156" y="384" width="168" height="160" rx="18" fill="#1C1A37" stroke="#2F2C55"/>
+	<rect x="210" y="394" width="60" height="6" rx="3" fill="#2F2C55"/>
+	<text x="240" y="430" fill="#F8F7FA" font-size="13" font-weight="600" text-anchor="middle">Agents</text>
+	<rect x="172" y="444" width="136" height="22" rx="5" fill="#252347"/>
+	<text x="182" y="459" fill="#F8F7FA" font-size="11">Fix login bug</text>
+	<circle cx="296" cy="455" r="4" fill="#00EC95"/>
+	<rect x="172" y="472" width="136" height="22" rx="5" fill="#252347"/>
+	<text x="182" y="487" fill="#F8F7FA" font-size="11">Release notes</text>
+	<text x="240" y="526" fill="#8E8CA8" font-size="11" text-anchor="middle">the server, on your phone</text>
+</svg>

@@ -217,6 +217,18 @@
             ]
           },
           {
+            "id": "creaeditorServer",
+            "title": "%step.creaeditorServer.title%",
+            "description": "%step.creaeditorServer.description%",
+            "media": {
+              "image": "media/creaeditor-server.svg",
+              "altText": "%step.creaeditorServer.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.servers.openAdd"
+            ]
+          },
+          {
             "id": "costs",
             "title": "%step.costs.title%",
             "description": "%step.costs.description%",
