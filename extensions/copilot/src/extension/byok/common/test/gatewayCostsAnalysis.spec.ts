@@ -366,3 +366,31 @@ describe('budgets', () => {
 		expect(findHardStopBudget(hardStop, [...ENTRIES, entry(later, { cost: 0.2, repo: 'acme/web', providerGroup: 'Other' })], { providerGroup: 'Other', repo: 'acme/web' }, NOW)?.budget.id).toBe('repo:acme/web:day');
 	});
 });
+
+describe('machine (CreaEditor Servers)', () => {
+	it('groups, filters and budgets requests of this computer and of servers together', () => {
+		const server = [
+			entry(at(10, 15, 8), { cost: 0.5, providerGroup: 'Team', source: 'build-box' }),
+			entry(at(10, 15, 8), { cost: 0.25, providerGroup: 'Team', source: 'build-box' }),
+		];
+		const dataset = prepareCostDataset([...ENTRIES, ...server]);
+		const thisMonth = { range: 'thisMonth' as const };
+		const breakdown = computeCostBreakdown(filterCostRows(dataset, thisMonth, NOW), 'machine').map(group => [group.value, group.cost, group.requests]);
+		const onlyServer = filterCostRows(dataset, { ...thisMonth, values: { machine: ['build-box'] } }, NOW).length;
+		const budget = parseCostBudgets([{ scope: 'key', value: 'Team', amount: 1.25, hardStop: true }]);
+		expect({
+			options: dataset.options.machine.map(option => option.value),
+			breakdown,
+			onlyServer,
+			// 0.5 + 0.25 here plus 0.75 on the server use up 1.25.
+			withoutServer: findHardStopBudget(budget, ENTRIES, { providerGroup: 'Team' }, NOW)?.budget.id,
+			withServer: findHardStopBudget(budget, [...ENTRIES, ...server], { providerGroup: 'Team' }, NOW)?.budget.id,
+		}).toEqual({
+			options: ['', 'build-box'],
+			breakdown: [['', 2.75, 4], ['build-box', 0.75, 2]],
+			onlyServer: 2,
+			withoutServer: undefined,
+			withServer: 'key:Team:month',
+		});
+	});
+});

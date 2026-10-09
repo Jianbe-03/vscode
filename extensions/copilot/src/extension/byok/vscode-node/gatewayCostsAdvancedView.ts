@@ -60,6 +60,8 @@ export function getAdvancedStrings() {
 		dim_issue: l10n.t('Issue'),
 		dim_chat: l10n.t('Chat'),
 		dim_costSource: l10n.t('Cost source'),
+		dim_machine: l10n.t('Machine'),
+		thisComputer: l10n.t('This computer'),
 		dim_kind: l10n.t('Main or subagent'),
 		none: l10n.t('(none)'),
 		other: l10n.t('Other'),
@@ -412,8 +414,8 @@ export function getAdvancedScript(): string {
 }
 
 const ADVANCED_SCRIPT = String.raw`
-const DIMENSIONS = ['key', 'model', 'gateway', 'repo', 'branch', 'issue', 'chat', 'costSource', 'kind'];
-const FILTER_DIMENSIONS = ['key', 'model', 'gateway', 'repo', 'branch', 'issue', 'chat', 'costSource'];
+const DIMENSIONS = ['key', 'model', 'gateway', 'repo', 'branch', 'issue', 'chat', 'costSource', 'machine', 'kind'];
+const FILTER_DIMENSIONS = ['key', 'model', 'gateway', 'repo', 'branch', 'issue', 'chat', 'costSource', 'machine'];
 const PAGE_SIZE = 100;
 const POPOVER_LIMIT = 200;
 const GATEWAY_NAMES = { openrouter: 'OpenRouter', litellm: 'LiteLLM' };
@@ -452,6 +454,7 @@ function labelOf(dimension, key) {
 	if (value === OTHER) { return S.other; }
 	if (dimension === 'kind') { return value === 'subagent' ? S.subagent : S.main; }
 	if (dimension === 'chat') { return key.label || S.untitled; }
+	if (dimension === 'machine') { return value || S.thisComputer; }
 	if (!value) { return S.none; }
 	if (dimension === 'costSource') { return S['source_' + value] || value; }
 	return key.label || value;
@@ -1032,7 +1035,7 @@ function detailFields(r) {
 		[S.dim_gateway, GATEWAY_NAMES[r.gateway] || r.gateway], [S.fGatewayHost, r.gatewayHost], [S.dim_key, r.providerGroup], [S.dim_model, r.model],
 		[S.colRequestId, r.gatewayRequestId],
 		[S.prompt, r.promptTokens === undefined ? undefined : num(r.promptTokens)], [S.completion, r.completionTokens === undefined ? undefined : num(r.completionTokens)], [S.cached, r.cachedTokens === undefined ? undefined : num(r.cachedTokens)],
-		[S.fCostFull, r.cost === undefined ? undefined : '$' + r.cost], [S.dim_costSource, r.costSource ? sourceLabel(r.costSource) : undefined],
+		[S.fCostFull, r.cost === undefined ? undefined : '$' + r.cost], [S.dim_costSource, r.costSource ? sourceLabel(r.costSource) : undefined], [S.dim_machine, r.source || S.thisComputer],
 		[S.fId, r.id],
 	].filter(([, v]) => v !== undefined && v !== '');
 }

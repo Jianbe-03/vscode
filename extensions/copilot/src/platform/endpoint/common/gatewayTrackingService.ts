@@ -35,9 +35,31 @@ export interface IGatewayCostEntry {
 	/** Cost in USD. */
 	readonly cost?: number;
 	readonly costSource?: GatewayCostSource;
+	/**
+	 * CreaEditor: the CreaEditor Server that made the request (its name), for requests pulled from a
+	 * server's ledger; undefined for requests made on this computer. Never persisted in this computer's
+	 * own ledger.
+	 */
+	readonly source?: string;
 }
 
 export type GatewayCostEntryUpdate = Partial<Pick<IGatewayCostEntry, 'gatewayRequestId' | 'promptTokens' | 'completionTokens' | 'cachedTokens' | 'cost' | 'costSource'>>;
+
+/** CreaEditor: reads one CreaEditor Server's cost cache file; its entries tagged with the server's name. */
+export function parseServerCostsFile(content: string): IGatewayCostEntry[] {
+	try {
+		const value = JSON.parse(content) as { serverName?: unknown; entries?: unknown };
+		if (typeof value.serverName !== 'string' || !Array.isArray(value.entries)) {
+			return [];
+		}
+		const source = value.serverName;
+		return value.entries
+			.filter((entry): entry is IGatewayCostEntry => !!entry && typeof entry.id === 'string' && typeof entry.time === 'number')
+			.map(entry => ({ ...entry, source }));
+	} catch {
+		return [];
+	}
+}
 
 export const IGatewayTrackingService = createServiceIdentifier<IGatewayTrackingService>('IGatewayTrackingService');
 

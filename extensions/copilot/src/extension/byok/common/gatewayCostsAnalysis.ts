@@ -10,12 +10,13 @@ import { formatIssue, getIssueUrl } from '../../../platform/endpoint/common/gate
 import { IGatewayCostEntry } from '../../../platform/endpoint/common/gatewayTrackingService';
 
 /** A property the requests can be grouped by. */
-export type CostDimension = 'key' | 'model' | 'gateway' | 'repo' | 'branch' | 'issue' | 'chat' | 'costSource' | 'kind';
+/** CreaEditor: `machine` is where the request ran: this computer or a CreaEditor Server (`IGatewayCostEntry.source`). */
+export type CostDimension = 'key' | 'model' | 'gateway' | 'repo' | 'branch' | 'issue' | 'chat' | 'costSource' | 'machine' | 'kind';
 
 /** The dimensions that have a multi-select filter; `kind` has its own toggle. */
 export type CostFilterDimension = Exclude<CostDimension, 'kind'>;
 
-export const COST_FILTER_DIMENSIONS: readonly CostFilterDimension[] = ['key', 'model', 'gateway', 'repo', 'branch', 'issue', 'chat', 'costSource'];
+export const COST_FILTER_DIMENSIONS: readonly CostFilterDimension[] = ['key', 'model', 'gateway', 'repo', 'branch', 'issue', 'chat', 'costSource', 'machine'];
 
 export type CostRangePreset = 'today' | '7' | '30' | '90' | 'thisMonth' | 'lastMonth' | 'all' | 'custom';
 
@@ -223,7 +224,7 @@ export function prepareCostDataset(entries: readonly IGatewayCostEntry[]): ICost
 			subagent: entry.chatId !== entry.rootChatId,
 			rootTitle: rootTitles.get(entry.rootChatId),
 		};
-		const search = [row.rootTitle, row.chatTitle, row.issueLabel, row.repo, row.branch, row.model, row.gatewayRequestId, row.id].filter(Boolean).join('\n').toLowerCase();
+		const search = [row.rootTitle, row.chatTitle, row.issueLabel, row.repo, row.branch, row.model, row.gatewayRequestId, row.id, row.source].filter(Boolean).join('\n').toLowerCase();
 		return { row, search };
 	});
 	return {
@@ -237,6 +238,7 @@ export function prepareCostDataset(entries: readonly IGatewayCostEntry[]): ICost
 			issue: computeOptions(rows, 'issue'),
 			chat: computeOptions(rows, 'chat'),
 			costSource: computeOptions(rows, 'costSource'),
+			machine: computeOptions(rows, 'machine'),
 		},
 	};
 }
@@ -305,6 +307,8 @@ export function getDimensionKey(row: ICostRow, dimension: CostDimension): ICostG
 		case 'issue': return { value: row.issueLabel ?? '' };
 		case 'chat': return { value: row.rootChatId, label: row.rootTitle };
 		case 'costSource': return { value: row.costSource ?? '' };
+		// '' is this computer.
+		case 'machine': return { value: row.source ?? '' };
 		case 'kind': return { value: row.subagent ? 'subagent' : 'main' };
 	}
 }
