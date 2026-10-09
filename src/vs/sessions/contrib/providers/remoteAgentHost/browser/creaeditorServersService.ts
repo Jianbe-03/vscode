@@ -16,6 +16,7 @@ import { generateUuid } from '../../../../../base/common/uuid.js';
 import { AgentHostProtocolClient } from '../../../../../platform/agentHost/browser/agentHostProtocolClient.js';
 import { WebSocketClientTransport } from '../../../../../platform/agentHost/browser/webSocketClientTransport.js';
 import { agentsWindowAgentHostClientInfo } from '../../../../../platform/agentHost/common/agentHostClientInfo.js';
+import { CREAEDITOR_SERVER_API_BUDGETS, CREAEDITOR_SERVER_API_COSTS, CREAEDITOR_SERVER_API_PAIRING, CREAEDITOR_SERVER_API_PREFIX, ICreaEditorServerCostsResponse, ICreaEditorServerPairingResponse, IServerCostBudgets } from '../../../../../platform/agentHost/common/creaeditorCosts.js';
 import { CREAEDITOR_SERVER_HEALTH_PATH, CREAEDITOR_SERVER_PAIR_PATH, CreaEditorServerPairResult, getCreaEditorServerAgentHostAddress, parseCreaEditorServerHealth, parseCreaEditorServerInput, parseCreaEditorServerPairResponse } from '../../../../../platform/agentHost/common/creaeditorServer.js';
 import { getEntryAddress, IRemoteAgentHostConnectionFactory, IRemoteAgentHostConnectOptions, IRemoteAgentHostCreatedConnection, IRemoteAgentHostEntry, IRemoteAgentHostService, RemoteAgentHostEntryType } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -185,6 +186,53 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 		const states = new Map(this._healthStates.get());
 		states.delete(serverId);
 		this._healthStates.set(states, undefined);
+	}
+
+	async createPairing(serverId: string): Promise<ICreaEditorServerPairingResponse | undefined> {
+		const answer = await this._apiRequest<Partial<ICreaEditorServerPairingResponse>>(serverId, 'POST', CREAEDITOR_SERVER_API_PAIRING);
+		return answer && typeof answer.code === 'string' && typeof answer.link === 'string' && typeof answer.expiresAt === 'number'
+			? { code: answer.code, link: answer.link, expiresAt: answer.expiresAt }
+			: undefined;
+	}
+
+	async fetchCosts(serverId: string, cursor: number): Promise<ICreaEditorServerCostsResponse | undefined> {
+		const answer = await this._apiRequest<Partial<ICreaEditorServerCostsResponse>>(serverId, 'GET', `${CREAEDITOR_SERVER_API_COSTS}?after=${cursor}`);
+		return answer && Array.isArray(answer.entries) && typeof answer.cursor === 'number'
+			? { entries: answer.entries, cursor: answer.cursor, reset: answer.reset === true }
+			: undefined;
+	}
+
+	async pushBudgets(serverId: string, budgets: IServerCostBudgets): Promise<boolean> {
+		return !!await this._apiRequest(serverId, 'PUT', CREAEDITOR_SERVER_API_BUDGETS, budgets);
+	}
+
+	/** A request to the server's own API with this computer's device key; undefined on any failure. */
+	private async _apiRequest<T>(serverId: string, type: 'GET' | 'POST' | 'PUT', path: string, body?: object): Promise<T | undefined> {
+		const server = this._servers.get().find(candidate => candidate.id === serverId);
+		const deviceKey = this._deviceKeys.get().get(serverId);
+		if (!server || !deviceKey) {
+			return undefined;
+		}
+		try {
+			const context = await this._requestService.request({
+				type,
+				url: `${server.serverUrl}${CREAEDITOR_SERVER_API_PREFIX}${path}`,
+				headers: { 'Authorization': `Bearer ${deviceKey}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+				...(body ? { data: JSON.stringify(body) } : {}),
+				timeout: REQUEST_TIMEOUT_MS,
+				disableCache: true,
+				callSite: 'creaeditorServers.api',
+			}, CancellationToken.None);
+			const status = context.res.statusCode ?? 0;
+			if (status < 200 || status >= 300) {
+				this._logService.info(`[CreaEditor Servers] ${server.name} answered ${status} to ${type} ${path.split('?')[0]}`);
+				return undefined;
+			}
+			return (await asJson<T>(context)) ?? undefined;
+		} catch (error) {
+			this._logService.info(`[CreaEditor Servers] ${type} ${path.split('?')[0]} on ${server.name} failed`, error);
+			return undefined;
+		}
 	}
 
 	async refreshHealth(): Promise<void> {

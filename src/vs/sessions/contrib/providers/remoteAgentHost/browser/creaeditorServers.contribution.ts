@@ -7,3 +7,4 @@
 
 import './creaeditorServersService.js';
 import './creaeditorServerActions.js';
+import './creaeditorServerCosts.js';

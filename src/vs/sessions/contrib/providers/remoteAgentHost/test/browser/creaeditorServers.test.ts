@@ -39,6 +39,7 @@ suite('CreaEditor Servers', () => {
 			describeCreaEditorServer({ health: { reachable: true, health: { ...health, publicMode: true }, lastSeen: now }, connection: RemoteAgentHostConnectionStatus.connecting, machine: undefined, runningChats: undefined }, now),
 			describeCreaEditorServer({ health: undefined, connection: undefined, machine: undefined, runningChats: undefined }, now),
 			describeCreaEditorServer({ health: { reachable: true, health, lastSeen: now }, connection: RemoteAgentHostConnectionStatus.disconnected, machine: undefined, runningChats: undefined }, now),
+			describeCreaEditorServer({ health: { reachable: true, health, lastSeen: now }, connection: RemoteAgentHostConnectionStatus.connected, machine: undefined, runningChats: 4, chats: { running: 4, queued: 2, max: 4 } }, now),
 		];
 		assert.deepStrictEqual(views.map(view => ({ icon: view.icon.id, status: view.status, details: view.details })), [
 			{ icon: 'server', status: 'Online', details: ['Version 1.140.0', 'CPU 12% of 8 cores', 'Memory 4.0 of 16.0 GB', '2 chats running'] },
@@ -46,6 +47,7 @@ suite('CreaEditor Servers', () => {
 			{ icon: 'loading', status: 'Online, connecting...', details: ['Version 1.140.0', 'Public'] },
 			{ icon: 'loading', status: 'Checking...', details: [] },
 			{ icon: 'warning', status: 'Online, not connected', details: ['Version 1.140.0'] },
+			{ icon: 'server', status: 'Online', details: ['Version 1.140.0', '4 of 4 chats running', '2 queued'] },
 		]);
 	});
 

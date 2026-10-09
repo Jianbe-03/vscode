@@ -21,7 +21,7 @@ import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
-import { CREAEDITOR_SERVERS_ADD_REQUEST_KEY, getCreaEditorServerWebUrl, readCreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
+import { CREAEDITOR_SERVERS_ADD_REQUEST_KEY, getCreaEditorServerWebUrl, readCreaEditorServerChats, readCreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
 import { IAgentConnection } from '../../../../../platform/agentHost/common/agentService.js';
 import { readSubscriptionAccountsState, subscriptionAccountTokenResource, type ISubscriptionAccount, type SubscriptionProvider } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import { IRemoteAgentHostService, RemoteAgentHostsEnabledSettingId } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
@@ -133,13 +133,19 @@ function getServerConnection(remoteAgentHostService: IRemoteAgentHostService, se
 	return remoteAgentHostService.getConnection(serversService.getAgentHostAddress(server));
 }
 
-/** Shows the server's web page as a QR code, so a phone opens it (and pairs there). */
+/**
+ * Shows a QR code a phone scans to pair with the server: the server's web page with a new one-time
+ * pairing code from the server's API, or (an older or unreachable server) just the page.
+ */
 async function showPairPhoneDialog(accessor: ServicesAccessor, server: ICreaEditorServer): Promise<void> {
 	const layoutService = accessor.get(ILayoutService);
 	const keybindingService = accessor.get(IKeybindingService);
 	const hostService = accessor.get(IHostService);
 	const clipboardService = accessor.get(IClipboardService);
-	const url = getCreaEditorServerWebUrl(server.serverUrl);
+	const serversService = accessor.get(ICreaEditorServersService);
+	const progressService = accessor.get(IProgressService);
+	const pairing = await progressService.withProgress({ location: ProgressLocation.Notification, title: localize('creaeditorServers.creatingPairing', "Asking {0} for a pairing code...", server.name), delay: 500 }, () => serversService.createPairing(server.id));
+	const url = pairing?.link ?? getCreaEditorServerWebUrl(server.serverUrl);
 	const store = new DisposableStore();
 	const dialog = store.add(new Dialog(
 		layoutService.activeContainer,
@@ -154,8 +160,13 @@ async function showPairPhoneDialog(accessor: ServicesAccessor, server: ICreaEdit
 				const body = DOM.append(container, DOM.$('.creaeditor-server-pair'));
 				const qr = DOM.append(body, DOM.$('.creaeditor-server-qr', { role: 'img', 'aria-label': localize('creaeditorServers.qrAria', "QR code of {0}", url) }));
 				qr.appendChild(createQrCodeSvg(url));
-				DOM.append(body, DOM.$('p', undefined, localize('creaeditorServers.pairPhoneScan', "Scan this with your phone's camera to open the server's Agents window.")));
-				DOM.append(body, DOM.$('p', undefined, localize('creaeditorServers.pairPhoneCode', "The page asks for a pairing code: run `creaeditor-server pair` on the server for one. Over the internet it also asks for the server's password.")));
+				if (pairing) {
+					DOM.append(body, DOM.$('p', undefined, localize('creaeditorServers.pairPhoneScanCode', "Scan this with your phone's camera: it opens the server's Agents window and pairs with code {0}. The code works once, for 10 minutes.", pairing.code)));
+					DOM.append(body, DOM.$('p', undefined, localize('creaeditorServers.pairPhonePassword', "Over the internet the page also asks for the server's password.")));
+				} else {
+					DOM.append(body, DOM.$('p', undefined, localize('creaeditorServers.pairPhoneScan', "Scan this with your phone's camera to open the server's Agents window.")));
+					DOM.append(body, DOM.$('p', undefined, localize('creaeditorServers.pairPhoneCode', "The page asks for a pairing code: run `creaeditor-server pair` on the server for one. Over the internet it also asks for the server's password.")));
+				}
 				DOM.append(body, DOM.$('p.creaeditor-server-url', undefined, url));
 			},
 		}, keybindingService, layoutService, hostService),
@@ -354,6 +365,7 @@ async function showServersList(accessor: ServicesAccessor): Promise<void> {
 				connection: remoteAgentHostService.connections.find(candidate => candidate.address === address)?.status,
 				machine: readCreaEditorServerMachine(root?.config?.values),
 				runningChats: root?.activeSessions,
+				chats: readCreaEditorServerChats(root?.config?.values),
 			}, Date.now());
 			return {
 				server,

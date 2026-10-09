@@ -11,7 +11,8 @@ import { fromNow } from '../../../../../base/common/date.js';
 import { IObservable } from '../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize } from '../../../../../nls.js';
-import { CreaEditorServerPairResult, ICreaEditorServerHealth, ICreaEditorServerInput, ICreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
+import { CreaEditorServerPairResult, ICreaEditorServerChats, ICreaEditorServerHealth, ICreaEditorServerInput, ICreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
+import { ICreaEditorServerCostsResponse, ICreaEditorServerPairingResponse, IServerCostBudgets } from '../../../../../platform/agentHost/common/creaeditorCosts.js';
 import { RemoteAgentHostConnectionStatus } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
 
@@ -73,6 +74,8 @@ export interface ICreaEditorServerStatusInput {
 	readonly connection: RemoteAgentHostConnectionStatus | undefined;
 	readonly machine: ICreaEditorServerMachine | undefined;
 	readonly runningChats: number | undefined;
+	/** Running and queued chats when the server limits how many run at once. */
+	readonly chats?: ICreaEditorServerChats;
 }
 
 /** How a server shows in the Servers list. */
@@ -88,7 +91,7 @@ function formatGigabytes(bytes: number): string {
 
 /** The status line and details of a server, e.g. "Online" and "Version 1.140.0 · CPU 12% · 2 chats running". */
 export function describeCreaEditorServer(input: ICreaEditorServerStatusInput, now: number): ICreaEditorServerView {
-	const { health, connection, machine, runningChats } = input;
+	const { health, connection, machine, runningChats, chats } = input;
 	const connected = RemoteAgentHostConnectionStatus.isConnected(connection);
 	const details: string[] = [];
 	if (health?.health) {
@@ -99,7 +102,12 @@ export function describeCreaEditorServer(input: ICreaEditorServerStatusInput, no
 		details.push(localize('creaeditorServer.cpu', "CPU {0}% of {1} cores", machine.cpuPercent, machine.cores));
 		details.push(localize('creaeditorServer.memory', "Memory {0} of {1} GB", formatGigabytes(machine.memoryTotalBytes - machine.memoryFreeBytes), formatGigabytes(machine.memoryTotalBytes)));
 	}
-	if (connected && runningChats !== undefined) {
+	if (connected && chats) {
+		details.push(localize('creaeditorServer.chatsOfMax', "{0} of {1} chats running", chats.running, chats.max));
+		if (chats.queued) {
+			details.push(chats.queued === 1 ? localize('creaeditorServer.oneQueued', "1 queued") : localize('creaeditorServer.queued', "{0} queued", chats.queued));
+		}
+	} else if (connected && runningChats !== undefined) {
 		details.push(runningChats === 1 ? localize('creaeditorServer.oneChat', "1 chat running") : localize('creaeditorServer.chats', "{0} chats running", runningChats));
 	}
 	if (health?.health?.publicMode) {
@@ -161,4 +169,10 @@ export interface ICreaEditorServersService {
 	refreshHealth(): Promise<void>;
 	/** The remote agent host address of a server (`IRemoteAgentHostService`). */
 	getAgentHostAddress(server: ICreaEditorServer): string;
+	/** A new one-time pairing code from the server (for Pair Phone); undefined when the server cannot make one (older version, offline). */
+	createPairing(serverId: string): Promise<ICreaEditorServerPairingResponse | undefined>;
+	/** New entries of the server's AI cost ledger after `cursor`; undefined when it does not answer. */
+	fetchCosts(serverId: string, cursor: number): Promise<ICreaEditorServerCostsResponse | undefined>;
+	/** Sends the hard-stop budgets to the server; false when it did not take them. */
+	pushBudgets(serverId: string, budgets: IServerCostBudgets): Promise<boolean>;
 }
