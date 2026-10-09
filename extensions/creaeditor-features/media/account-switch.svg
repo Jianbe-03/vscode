@@ -38,5 +38,5 @@
 	<text x="516" y="482" fill="#BCBBCA" font-size="14">Then the chat continues on Work. Stop cancels it.</text>
 
 	<!-- Footer: when no account is left -->
-	<text x="40" y="548" fill="#8E8CA8" font-size="13">No account left? Set Chat › Subscription Accounts: When No Account Left to waitForReset and chats wait by themselves.</text>
+	<text x="40" y="548" fill="#8E8CA8" font-size="13">No account left? Set Chat › Subscription Accounts: When No Account Left to Wait for Reset, and chats wait by themselves.</text>
 </svg>

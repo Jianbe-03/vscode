@@ -32,8 +32,9 @@
 	<!-- Usage history -->
 	<rect x="40" y="328" width="500" height="180" rx="10" fill="#1C1A37" stroke="#2F2C55"/>
 	<text x="64" y="356" fill="#F8F7FA" font-size="14" font-weight="600">Usage over the past weeks</text>
+	<text x="516" y="356" fill="#F2B24C" font-size="11" text-anchor="end">Close to the limit on busy days</text>
 	<line x1="64" y1="488" x2="516" y2="488" stroke="#2F2C55"/>
-	<g fill="#00BD8B">
+	<g fill="#5B8DEF">
 		<rect x="64" y="452" width="10" height="36" rx="2"/>
 		<rect x="80" y="430" width="10" height="58" rx="2"/>
 		<rect x="96" y="440" width="10" height="48" rx="2"/>
@@ -56,8 +57,9 @@
 		<rect x="224" y="378" width="10" height="110" rx="2"/>
 		<rect x="352" y="390" width="10" height="98" rx="2"/>
 		<rect x="432" y="384" width="10" height="104" rx="2"/>
-		<rect x="480" y="372" width="10" height="116" rx="2"/>
 	</g>
+	<!-- A day all accounts were used up -->
+	<rect x="480" y="370" width="10" height="118" rx="2" fill="#E07A6A"/>
 	<text x="64" y="502" fill="#8E8CA8" font-size="11">4 weeks ago</text>
 	<text x="516" y="502" fill="#8E8CA8" font-size="11" text-anchor="end">Today</text>
 

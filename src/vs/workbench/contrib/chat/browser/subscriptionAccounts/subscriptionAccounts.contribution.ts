@@ -66,6 +66,10 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 		[SubscriptionAccountsWhenNoAccountLeftSettingId]: {
 			type: 'string',
 			enum: ['ask', 'waitForReset'],
+			enumItemLabels: [
+				localize('chat.subscriptionAccounts.whenNoAccountLeft.askLabel', "Ask"),
+				localize('chat.subscriptionAccounts.whenNoAccountLeft.waitForResetLabel', "Wait for Reset"),
+			],
 			enumDescriptions: [
 				localize('chat.subscriptionAccounts.whenNoAccountLeft.ask', "Show the limit and offer to continue once the usage resets."),
 				localize('chat.subscriptionAccounts.whenNoAccountLeft.waitForReset', "Wait in the chat until the first account resets, then continue automatically."),
