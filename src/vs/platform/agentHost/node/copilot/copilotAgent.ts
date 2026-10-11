@@ -80,6 +80,7 @@ import { McpServerStatus, type McpServerCustomization } from '../../common/state
 import { IAgentHostSessionTitleSignal } from '../agentHostSessionTitleSignal.js';
 import { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { parseDelegationAccountsResource, tryOpenServerDelegationAccounts } from '../creaeditorDelegation/delegationAccounts.js';
+import { getRepositoryDisplayName } from '../creaeditorDelegation/delegationRepositoryName.js';
 import { getServerGatewayKeys } from '../shared/serverGatewayKeys.js';
 import { IAgentHostWorktreeIsolation, type IAgentHostWorktreeResumeService, SessionWorkingDirectoryMissingError } from '../shared/worktreeIsolation.js';
 import { buildSessionEventLogFromTurns } from './buildSessionEvents.js';
@@ -6336,7 +6337,7 @@ export class CopilotAgent extends Disposable implements IAgent {
 				return { resolved: false };
 			}
 			const workingDirectory = cwd ? URI.parse(cwd) : undefined;
-			const project = uri && displayName ? { uri: URI.parse(uri), displayName } : undefined;
+			const project = uri && displayName ? this._storedProject(URI.parse(uri), displayName) : undefined;
 			return {
 				model: this._parseModelSelection(m[CopilotAgent._META_MODEL]),
 				agent: this._parseAgentSelection(m[CopilotAgent._META_AGENT]),
@@ -6368,6 +6369,14 @@ export class CopilotAgent extends Disposable implements IAgent {
 		} finally {
 			dbRef.dispose();
 		}
+	}
+
+	/**
+	 * CreaEditor: a chat stored before its server named the bare repository (`<repoId>.git`) shows the
+	 * name the server keeps in it now.
+	 */
+	private _storedProject(uri: URI, displayName: string): IAgentSessionProjectInfo {
+		return { uri, displayName: displayName.endsWith('.git') ? getRepositoryDisplayName(uri) : displayName };
 	}
 
 	private async _storeSessionProjectResolution(session: URI, project: IAgentSessionProjectInfo | undefined): Promise<void> {
