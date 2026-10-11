@@ -51,13 +51,20 @@ import { ILanguageModelsConfigurationService } from '../../../../../workbench/co
 import { getSubscriptionAccountSecretKey, ISubscriptionAccountsService } from '../../../../../workbench/services/agentHost/browser/subscriptionAccountsService.js';
 import { Menus } from '../../../../browser/menus.js';
 import { LOCAL_AGENT_HOST_PROVIDER_ID, REMOTE_AGENT_HOST_PROVIDER_PREFIX } from '../../../../common/agentHostSessionsProvider.js';
-import { SessionProviderIdContext } from '../../../../common/contextkeys.js';
+import { IsNewChatSessionContext, SessionProviderIdContext } from '../../../../common/contextkeys.js';
+import { INewSessionComposerService } from '../../../chat/browser/newSessionComposerService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { getCreaEditorServerDeviceKeyName, ICreaEditorServer, ICreaEditorServersService } from '../browser/creaeditorServers.js';
 import { CreaEditorServerCommandIds } from '../browser/creaeditorServerActions.js';
-import { DelegatedChatsStore, describeDelegatedChatState, describeServerWorktree, getServerFolderTrustUris, IDelegatedChat } from '../browser/delegatedChats.js';
+import { DelegatedChatsStore, describeDelegatedChatState, describeServerWorktree, getServerFolderTrustUris, IDelegatedChat, titleFromFirstMessage } from '../browser/delegatedChats.js';
+
+/** True when this computer has a CreaEditor Server to delegate to (Start on Server... in the new chat input). */
+const HasCreaEditorServersContext = new RawContextKey<boolean>('creaeditorHasServers', false, localize('hasCreaEditorServers', "Whether a CreaEditor Server is added on this computer."));
+
+/** Start on Server...: a new chat's first message starts it on a CreaEditor Server, with this folder's code. */
+const START_ON_SERVER_COMMAND_ID = 'creaeditor.delegation.startOnServer';
 
 /** True when the active session is a delegated chat (here or on its server). */
 const ActiveSessionDelegatedContext = new RawContextKey<boolean>('creaeditorActiveSessionDelegated', false, localize('activeSessionDelegated', "Whether the active chat was delegated to a CreaEditor Server."));
@@ -123,7 +130,21 @@ function getSessionArg(accessor: ServicesAccessor, context: DelegationActionCont
 		return undefined;
 	}
 	const session = Array.isArray(context) ? context[0] : context;
-	return session ?? accessor.get(ISessionsService).activeSession.get();
+	// In the new chat view there is no active session yet: then the new chat it shows.
+	return session ?? accessor.get(ISessionsService).activeSession.get() ?? accessor.get(ISessionsManagementService).newSession.get();
+}
+
+/** A chat without any turn yet (a new chat, or one whose first message was never sent). */
+function isUnstartedChat(accessor: ServicesAccessor, session: ISession): boolean {
+	return session.status.get() === SessionStatus.Untitled
+		&& !accessor.get(IChatService).getSession(session.mainChat.get().resource)?.getRequests().length;
+}
+
+/** The text typed in the new chat input of `session` (Start on Server... sends it as the first message on the server). */
+function findNewChatComposer(accessor: ServicesAccessor, session: ISession) {
+	const composer = accessor.get(INewSessionComposerService).activeComposer.get();
+	const resource = composer?.sessionResource?.get();
+	return composer && (!resource || resource.toString() === session.resource.toString()) ? composer : undefined;
 }
 
 function findDelegatedChat(accessor: ServicesAccessor, context: DelegationActionContext): IDelegatedChat | undefined {
@@ -283,11 +304,22 @@ function findServerChat(sessionsManagementService: ISessionsManagementService, a
 
 /** Starts the chat on the server with a transcript of the conversation (agents whose sessions cannot move). */
 async function continueWithTranscript(accessor: ServicesAccessor, session: ISession, server: ICreaEditorServer, authority: string, result: IDelegateResult): Promise<URI | undefined> {
-	const sessionsManagementService = accessor.get(ISessionsManagementService);
 	const chatService = accessor.get(IChatService);
 	const requests = chatService.getSession(session.mainChat.get().resource)?.getRequests() ?? [];
 	const transcript = buildDelegationTranscript(requests);
 	const attachment = createDelegationTranscriptAttachment(transcript, session.title.get());
+	return startChatOnServer(accessor, session, authority, result, {
+		query: localize('delegation.transcriptPrompt', "This chat was delegated from {0} to {1}. Continue the work from the previous conversation; the code, including uncommitted changes, is in this folder.", result.record.sourceName, server.name),
+		attachedContext: attachment ? [attachment] : [],
+	});
+}
+
+/**
+ * Starts a new chat on the server in the delegated worktree, with the same agent and model as the
+ * local chat, and sends `request` as its first message.
+ */
+async function startChatOnServer(accessor: ServicesAccessor, session: ISession, authority: string, result: IDelegateResult, request: Parameters<ISessionsManagementService['sendNewChatRequest']>[1]): Promise<URI | undefined> {
+	const sessionsManagementService = accessor.get(ISessionsManagementService);
 	const folder = toAgentHostUri(URI.file(result.record.workingDirectory), authority);
 	const options = { providerId: `${REMOTE_AGENT_HOST_PROVIDER_PREFIX}${authority}`, sessionTypeId: session.sessionType };
 	// The same model on the server (the server lists a delegated key's models under the same id), so the
@@ -299,10 +331,7 @@ async function continueWithTranscript(accessor: ServicesAccessor, session: ISess
 	} catch {
 		remote = sessionsManagementService.createNewSession(folder, options);
 	}
-	await sessionsManagementService.sendNewChatRequest(remote, {
-		query: localize('delegation.transcriptPrompt', "This chat was delegated from {0} to {1}. Continue the work from the previous conversation; the code, including uncommitted changes, is in this folder.", result.record.sourceName, server.name),
-		attachedContext: attachment ? [attachment] : [],
-	});
+	await sessionsManagementService.sendNewChatRequest(remote, request);
 	return remote.resource;
 }
 
@@ -345,6 +374,21 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		return;
 	}
 
+	// A new chat (no turn yet) starts on the server with its first message: no local turn ever runs.
+	const unstarted = instantiationService.invokeFunction(innerAccessor => isUnstartedChat(innerAccessor, session));
+	const composer = unstarted ? instantiationService.invokeFunction(innerAccessor => findNewChatComposer(innerAccessor, session)) : undefined;
+	let firstMessage = composer?.getDraftText?.().trim() ?? '';
+	if (unstarted && !firstMessage) {
+		firstMessage = (await quickInputService.input({
+			title: localize('delegation.firstMessageTitle', "Start on Server"),
+			prompt: localize('delegation.firstMessagePrompt', "The first message of the chat. It runs on the server with this folder's code; nothing runs on this computer."),
+			ignoreFocusLost: true,
+		}))?.trim() ?? '';
+		if (!firstMessage) {
+			return;
+		}
+	}
+
 	// The server.
 	const servers = serversService.servers.get();
 	if (!servers.length) {
@@ -359,7 +403,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		label: server.name,
 		description: health.get(server.id)?.reachable === false ? localize('delegation.serverOffline', "offline") : server.serverUrl,
 		server,
-	})), { placeHolder: localize('delegation.pickServer', "Delegate this chat to which server?") });
+	})), { placeHolder: unstarted ? localize('delegation.pickServerStart', "Start this chat on which server?") : localize('delegation.pickServer', "Delegate this chat to which server?") });
 	if (!serverPick) {
 		return;
 	}
@@ -407,7 +451,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 	}
 
 	// Only runs in one place at a time.
-	if (session.status.get() === SessionStatus.InProgress || session.status.get() === SessionStatus.NeedsInput) {
+	if (!unstarted && session.status.get() === SessionStatus.InProgress || session.status.get() === SessionStatus.NeedsInput) {
 		const { confirmed } = await dialogService.confirm({
 			message: localize('delegation.stopFirst', "Stop the chat here and continue it on {0}?", server.name),
 			detail: localize('delegation.stopFirstDetail', "A chat runs in one place at a time. The current turn stops; the server continues from there."),
@@ -421,16 +465,17 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 
 	const agent = getDelegationAgentKind(session.sessionType, session.resource.scheme);
 	const isClaude = agent === DelegationAgentKind.Claude;
-	const agentSessionId = await instantiationService.invokeFunction(innerAccessor => readAgentSessionId(innerAccessor, session, agent));
+	// A new chat has no session of its agent yet: it starts fresh on the server.
+	const agentSessionId = unstarted ? undefined : await instantiationService.invokeFunction(innerAccessor => readAgentSessionId(innerAccessor, session, agent));
 	const claudeTokens = isClaude ? await instantiationService.invokeFunction(readClaudeTokenAccounts) : [];
 	const gatewayKey = agent === DelegationAgentKind.CopilotCli ? await instantiationService.invokeFunction(innerAccessor => readGatewayKey(innerAccessor, session)) : undefined;
 	const maxUploadMb = configurationService.getValue<number>(DelegationMaxUploadSettingId) || CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB;
-	const title = session.title.get() || localize('delegation.untitled', "Delegated chat");
+	const title = (unstarted ? titleFromFirstMessage(firstMessage) : session.title.get()) || localize('delegation.untitled', "Delegated chat");
 
 	const operationId = generateUuid();
 	let result: IDelegateResult;
 	try {
-		result = await progressService.withProgress({ location: ProgressLocation.Notification, title: localize('delegation.progressTitle', "Delegating to {0}", server.name) }, async progress => {
+		result = await progressService.withProgress({ location: ProgressLocation.Notification, title: unstarted ? localize('delegation.progressTitleStart', "Starting on {0}", server.name) : localize('delegation.progressTitle', "Delegating to {0}", server.name) }, async progress => {
 			const listener = delegationService.onDidProgress(event => {
 				if (event.operationId !== operationId) {
 					return;
@@ -468,7 +513,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		const code = getDelegationErrorCode(error);
 		logService.warn(`[Delegation] Delegating to ${server.name} failed (${code ?? 'unexpected'}): ${errorMessage(error)}`);
 		const retry = code === DelegationErrorCode.Offline ? [{ label: localize('delegation.retry', "Try Again"), run: () => commandService.executeCommand(CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, session) }] : [];
-		notificationService.prompt(Severity.Error, localize('delegation.failed', "Delegating to {0} failed: {1}", server.name, errorMessage(error)), retry);
+		notificationService.prompt(Severity.Error, unstarted ? localize('delegation.startFailed', "Starting the chat on {0} failed: {1}", server.name, errorMessage(error)) : localize('delegation.failed', "Delegating to {0} failed: {1}", server.name, errorMessage(error)), retry);
 		return;
 	}
 
@@ -479,7 +524,8 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		serverId: server.id,
 		serverName: server.name,
 		title,
-		localSessionResource: session.resource.toString(),
+		// A chat started on the server has no local copy to lock.
+		...(unstarted ? { startedOnServer: true } : { localSessionResource: session.resource.toString() }),
 		folder: folderUri.fsPath,
 		worktree: result.record.worktree,
 		repositoriesDir: serverInfo.repositoriesDir,
@@ -506,7 +552,13 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 			}
 		}
 		const provider = getDelegationAgentProvider(result.record.agent);
-		if (result.sessionFilesSent && result.record.resumeSessionId && provider && connected.connection.importSession) {
+		if (unstarted) {
+			try {
+				remoteResource = await instantiationService.invokeFunction(innerAccessor => startChatOnServer(innerAccessor, session, connected.authority, result, { query: firstMessage }));
+			} catch (error) {
+				logService.warn(`[Delegation] Starting the chat on ${server.name} failed: ${errorMessage(error)}`);
+			}
+		} else if (result.sessionFilesSent && result.record.resumeSessionId && provider && connected.connection.importSession) {
 			// The server lists the installed session a moment after the accounts call; try a few times.
 			const backendSession = URI.from({ scheme: provider, path: `/${result.record.resumeSessionId}` });
 			for (let attempt = 1; attempt <= IMPORT_ATTEMPTS && !remoteResource; attempt++) {
@@ -522,7 +574,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 				}
 			}
 		}
-		if (!remoteResource) {
+		if (!remoteResource && !unstarted) {
 			transcriptOnly = true;
 			try {
 				remoteResource = await instantiationService.invokeFunction(innerAccessor => continueWithTranscript(innerAccessor, session, server, connected.authority, result));
@@ -531,10 +583,17 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 			}
 		}
 	}
-	store.update(chat.delegationId, { ...(remoteResource ? { remoteSessionResource: remoteResource.toString() } : {}), ...(transcriptOnly ? { transcriptOnly } : {}) });
+	store.update(chat.delegationId, { ...(remoteResource ? { remoteSessionResource: remoteResource.toString() } : {}), ...(transcriptOnly && !unstarted ? { transcriptOnly } : {}) });
 
-	// Runs in one place only: the local chat is archived and points to the server.
-	await sessionsManagementService.archiveSession(session).catch(error => logService.warn(`[Delegation] Archiving the local chat failed: ${errorMessage(error)}`));
+	if (unstarted) {
+		// The message went to the server; the new chat input is free for the next chat.
+		if (remoteResource) {
+			composer?.clearDraft?.();
+		}
+	} else {
+		// Runs in one place only: the local chat is archived and points to the server.
+		await sessionsManagementService.archiveSession(session).catch(error => logService.warn(`[Delegation] Archiving the local chat failed: ${errorMessage(error)}`));
+	}
 
 	const sent = result.bytesSent ? localize('delegation.sentBytes', "{0} MB of code sent{1}.", formatMegabytes(result.bytesSent), result.incremental ? localize('delegation.incremental', " (only what the server lacked)") : '') : localize('delegation.nothingToSend', "The server had the code already.");
 	const how = transcriptOnly ? localize('delegation.transcriptNote', " It continues with a transcript of the conversation (this chat's session could not move to the server).") : '';
@@ -543,9 +602,15 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		...(modePick.mode === DelegationResultsMode.PullRequest && !serverInfo.hasGitHubToken ? [{ label: localize('delegation.setToken', "Set GitHub Token on Server"), run: () => commandService.executeCommand(CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, server.id) }] : []),
 		...(!connected ? [{ label: localize('delegation.openServers', "Open Servers"), run: () => commandService.executeCommand(CreaEditorServerCommandIds.manage) }] : []),
 	];
-	notificationService.prompt(Severity.Info, connected
-		? localize('delegation.done', "Delegated to {0}: the chat continues there, so this computer can be turned off. {1}{2}", server.name, sent, how)
-		: localize('delegation.doneOffline', "The code is on {0}, but its agent host is not connected yet, so the chat did not start there. Connect to the server and run Delegate to Server... again. {1}", server.name, sent), actions);
+	notificationService.prompt(Severity.Info, unstarted
+		? (remoteResource
+			? localize('delegation.started', "Started on {0}: the chat runs there, so this computer can be turned off. {1}", server.name, sent)
+			: connected
+				? localize('delegation.startedNoChat', "The code is on {0}, but the chat could not start there. Open the server's repository in the Agents window and send the message again. {1}", server.name, sent)
+				: localize('delegation.startedOffline', "The code is on {0}, but its agent host is not connected yet, so the chat did not start there. Connect to the server and run Start on Server... again. {1}", server.name, sent))
+		: connected
+			? localize('delegation.done', "Delegated to {0}: the chat continues there, so this computer can be turned off. {1}{2}", server.name, sent, how)
+			: localize('delegation.doneOffline', "The code is on {0}, but its agent host is not connected yet, so the chat did not start there. Connect to the server and run Delegate to Server... again. {1}", server.name, sent), actions);
 
 	if (isClaude && !claudeTokens?.length && connected) {
 		notificationService.prompt(Severity.Info, localize('delegation.loginOnServer', "This computer signs in to Claude with a browser login, which cannot move to {0}. If the server has no Claude account yet, log in once on the server.", server.name), [
@@ -873,6 +938,11 @@ async function takeBackHereAction(accessor: ServicesAccessor, context: Delegatio
 	if (!chat) {
 		return;
 	}
+	if (chat.startedOnServer) {
+		// Its conversation exists on the server only: there is nothing here to continue.
+		notificationService.info(localize('delegation.takeBackStartedOnServer', "\"{0}\" started on {1}, so this computer has no copy of its conversation to continue. Keep working on it there, and use Bring Back Changes to get its code.", chat.title, chat.serverName));
+		return;
+	}
 	const { confirmed } = await dialogService.confirm({
 		message: localize('delegation.takeBackConfirm', "Take \"{0}\" back from {1}?", chat.title, chat.serverName),
 		detail: chat.resultsMode === DelegationResultsMode.BringBack && !chat.broughtBackBranch
@@ -967,6 +1037,29 @@ registerAction2(class extends Action2 {
 	}
 	run(accessor: ServicesAccessor, context?: ISession | ISession[]): Promise<void> {
 		return delegateToServer(accessor, context);
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: START_ON_SERVER_COMMAND_ID,
+			title: localize2('delegation.startOnServer', "Start on Server..."),
+			tooltip: localize('delegation.startOnServerTooltip', "Start this chat on a CreaEditor Server: its code goes there and the first message runs there"),
+			category: localize2('delegation.category', "Chat"),
+			icon: Codicon.server,
+			f1: false,
+			precondition: HasCreaEditorServersContext,
+			menu: [{
+				id: Menus.NewSessionControl,
+				group: 'navigation',
+				order: 100,
+				when: ContextKeyExpr.and(LocalAgentHostSession, IsNewChatSessionContext, HasCreaEditorServersContext),
+			}],
+		});
+	}
+	run(accessor: ServicesAccessor): Promise<void> {
+		return delegateToServer(accessor, accessor.get(ISessionsManagementService).newSession.get() ?? accessor.get(ISessionsService).activeSession.get());
 	}
 });
 
@@ -1104,10 +1197,14 @@ class DelegatedChatsContribution extends Disposable implements IWorkbenchContrib
 		@IChatWidgetService chatWidgetService: IChatWidgetService,
 		@INotificationService notificationService: INotificationService,
 		@ICommandService commandService: ICommandService,
+		@ICreaEditorServersService serversService: ICreaEditorServersService,
 	) {
 		super();
 		const store = instantiationService.invokeFunction(getDelegatedChats);
 		const delegated = ActiveSessionDelegatedContext.bindTo(contextKeyService);
+		const hasServers = HasCreaEditorServersContext.bindTo(contextKeyService);
+		this._register(autorun(reader => hasServers.set(serversService.servers.read(reader).length > 0)));
+		this._register(toDisposable(() => hasServers.reset()));
 		const storeChanged = observableSignalFromEvent(this, store.onDidChange);
 		// A chat view binds its widget to a chat a moment after the chat is opened.
 		const widgetsChanged = this._register(new Emitter<void>());

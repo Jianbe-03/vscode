@@ -106,7 +106,9 @@ The server needs its own Claude or Codex login to run chats. There are two ways 
 
 ### Start a new chat on the server
 
-You can start a chat on the server directly, in a repository it has from an earlier delegated chat:
+To start a chat on the server with code from your laptop, type its first message in a new chat on this computer and click **Start on Server...** below the input: see [Start a new chat on a server](delegate-to-server.md#start-a-new-chat-on-a-server).
+
+You can also start a chat on the server directly, in a repository it has from an earlier delegated chat:
 
 1. In the Agents window, click the folder button above the input box.
 2. Pick the repository under your server. It is shown as `<repository> [<server>]`, for example "ws2 [Office Server]".

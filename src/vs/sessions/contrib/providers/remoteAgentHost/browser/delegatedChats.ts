@@ -97,6 +97,12 @@ export function describeDelegatedChatState(status: SessionStatus | undefined, co
 	}
 }
 
+/** The title of a chat that starts on a server with `message` (Start on Server...): its first line, shortened. */
+export function titleFromFirstMessage(message: string): string {
+	const line = message.split(/\r?\n/).find(candidate => candidate.trim())?.trim() ?? '';
+	return line.length > 80 ? `${line.slice(0, 77)}...` : line;
+}
+
 /** How a server's worktree of a delegated chat reads in Clean Up Server... */
 export function describeServerWorktree(info: IDelegationWorktreeInfo, now: number): { readonly label: string; readonly description: string; readonly detail: string } {
 	let state: string;

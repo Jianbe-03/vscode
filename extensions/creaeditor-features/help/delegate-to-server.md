@@ -39,6 +39,18 @@ A notification shows the progress ("Packing code...", "Sending code... 12 MB / 4
 
 In the editor window, **Delegate to Server...** (under **Continue Chat in...** or in the Command Palette) opens the Agents window and delegates the chat from there. Only agent chats (Copilot CLI, Claude, Codex) that run on this computer can move.
 
+### Start a new chat on a server
+
+A new chat does not have to run on the laptop first. Type its first message in the new chat input (with a folder on this computer picked), then click **Start on Server...**: the server button in the row below the input, next to the approvals. It shows when you have added a CreaEditor Server. **Delegate to Server...** from the Command Palette does the same for a new chat.
+
+1. Pick the server, how the results should come back, and whether to send files that look like secrets, as above.
+2. The folder's code goes to the server (the same git bundle, uncommitted changes included), and the chat starts there in its own worktree with your message, on the same agent (Copilot CLI, Claude or Codex) and model. No turn runs on this computer.
+3. The input is emptied and the chat on the server opens.
+
+Without a typed message, CreaEditor asks for it. The chat's title is the first line of the message. Attachments in the input stay on this computer: mention the files in the message instead; their code is in the worktree anyway.
+
+A chat started this way has no copy on the laptop, so **Take Back Here** does not apply to it; use **Bring Back Changes** or **Open PR from the Server** for its results.
+
 ### Follow the chat on the server
 
 The chat now runs on the server, grouped under its repository and the server's name, such as "ws2 [Office Server]". Open it like any other chat: send messages, approve tools, stop it.

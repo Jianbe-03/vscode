@@ -81,6 +81,10 @@ export interface INewSessionComposer {
 	showPromptOptions(state: NewSessionPromptOptionsState | undefined): boolean;
 	setPromptOptionsController?(controller: INewSessionPromptOptionsController): void;
 	refreshPromptOptions?(token?: CancellationToken): Promise<boolean>;
+	/** CreaEditor: the typed first message (Start on Server... sends it to a CreaEditor Server instead). */
+	getDraftText?(): string;
+	/** CreaEditor: empties the input once the draft started elsewhere (Start on Server...). */
+	clearDraft?(): void;
 }
 
 export const INewSessionComposerService = createDecorator<INewSessionComposerService>('newSessionComposerService');

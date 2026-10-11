@@ -496,6 +496,17 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 	/** Opens the model picker dropdown. */
 	openModelPicker(): void { this._newChatModelPickerService.openModelPicker(); }
 
+	// CreaEditor: Start on Server... reads the typed first message, and empties the input once the
+	// chat started on the server with it.
+	getDraftText(): string {
+		return this._editor?.getModel()?.getValue() ?? '';
+	}
+
+	clearDraft(): void {
+		this._contextAttachments.clear();
+		this._editor?.getModel()?.setValue('');
+	}
+
 	// Input
 	private _editor!: CodeEditorWidget;
 	private _editorContainer!: HTMLElement;
