@@ -16,6 +16,8 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { Emitter } from '../../../../../base/common/event.js';
 import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { autorun, observableSignalFromEvent } from '../../../../../base/common/observable.js';
+import { posix } from '../../../../../base/common/path.js';
+import { extUri } from '../../../../../base/common/resources.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { localize, localize2 } from '../../../../../nls.js';
@@ -261,6 +263,17 @@ function getRemoteModelId(session: ISession, authority: string): string | undefi
  */
 async function trustServerWorktrees(workspaceTrustManagementService: IWorkspaceTrustManagementService, authority: string, folders: readonly string[]): Promise<void> {
 	await workspaceTrustManagementService.setUrisTrust(folders.filter(folder => !!folder).map(folder => toAgentHostUri(URI.file(folder), authority)), true);
+}
+
+/** The chat of a delegation in the server's list: its session works in the delegated worktree (or a worktree next to it). */
+function findServerChat(sessionsManagementService: ISessionsManagementService, authority: string, chat: IDelegatedChat): ISession | undefined {
+	if (!chat.worktree) {
+		return undefined;
+	}
+	const worktree = toAgentHostUri(URI.file(chat.worktree), authority);
+	const nextToIt = toAgentHostUri(URI.file(`${chat.worktree}.worktrees`), authority);
+	return sessionsManagementService.getSessions().find(session => session.providerId === `${REMOTE_AGENT_HOST_PROVIDER_PREFIX}${authority}`
+		&& !!session.workspace.get()?.folders.some(folder => extUri.isEqualOrParent(folder.workingDirectory, worktree) || extUri.isEqualOrParent(folder.workingDirectory, nextToIt)));
 }
 
 /** Starts the chat on the server with a transcript of the conversation (agents whose sessions cannot move). */
@@ -688,15 +701,38 @@ async function setServerGitHubTokenAction(accessor: ServicesAccessor, serverId?:
 async function openOnServerAction(accessor: ServicesAccessor, context: DelegationActionContext): Promise<void> {
 	const notificationService = accessor.get(INotificationService);
 	const sessionsService = accessor.get(ISessionsService);
+	const sessionsManagementService = accessor.get(ISessionsManagementService);
+	const serversService = accessor.get(ICreaEditorServersService);
+	const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
+	const workspaceTrustManagementService = accessor.get(IWorkspaceTrustManagementService);
+	const logService = accessor.get(ILogService);
+	const store = getDelegatedChats(accessor);
 	const chat = await pickDelegatedChat(accessor, context, localize('delegation.pickOpen', "Open which delegated chat?"));
 	if (!chat) {
 		return;
 	}
-	if (!chat.remoteSessionResource) {
-		notificationService.info(localize('delegation.notStarted', "The chat has not started on {0} yet. Connect to the server and run Delegate to Server... again.", chat.serverName));
+	const server = serversService.servers.get().find(candidate => candidate.id === chat.serverId);
+	const authority = server ? agentHostAuthority(serversService.getAgentHostAddress(server)) : undefined;
+	if (authority && chat.worktree) {
+		await trustServerWorktrees(workspaceTrustManagementService, authority, [posix.dirname(chat.worktree), chat.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
+	}
+	let resource = chat.remoteSessionResource ? URI.parse(chat.remoteSessionResource) : undefined;
+	if (!resource && authority) {
+		// The chat started on the server, but this computer did not learn its session (the start was
+		// interrupted, or it ran in another window): find it by its worktree.
+		resource = findServerChat(sessionsManagementService, authority, chat)?.resource;
+		if (resource) {
+			store.update(chat.delegationId, { remoteSessionResource: resource.toString() });
+		}
+	}
+	if (!resource) {
+		const connected = !!server && !!remoteAgentHostService.getConnection(serversService.getAgentHostAddress(server));
+		notificationService.info(connected
+			? localize('delegation.notOnServer', "{0} has no chat for \"{1}\" yet. Run Delegate to Server... again to start it there.", chat.serverName, chat.title)
+			: localize('delegation.serverNotConnected', "{0} is not connected. Open Servers to connect it, then open the chat.", chat.serverName));
 		return;
 	}
-	await sessionsService.openSession(URI.parse(chat.remoteSessionResource));
+	await sessionsService.openSession(resource);
 }
 
 async function changeResultsModeAction(accessor: ServicesAccessor, context: DelegationActionContext): Promise<void> {
