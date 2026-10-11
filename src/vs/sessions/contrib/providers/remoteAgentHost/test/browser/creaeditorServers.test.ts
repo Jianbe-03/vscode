@@ -8,6 +8,10 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/
 import { RemoteAgentHostConnectionStatus } from '../../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { describeCreaEditorServer, parsePairAgainInput, parseStoredCreaEditorServers } from '../../browser/creaeditorServers.js';
 import { buildCreaEditorServerSshScript, parseCreaEditorServerInstallOutput } from '../../browser/creaeditorServerSshInstall.js';
+import { getServerFolderTrustUris } from '../../browser/delegatedChats.js';
+import { agentHostAuthority, toAgentHostUri } from '../../../../../../platform/agentHost/common/agentHostUri.js';
+import { URI } from '../../../../../../base/common/uri.js';
+import { extUri } from '../../../../../../base/common/resources.js';
 
 suite('CreaEditor Servers', () => {
 
@@ -62,6 +66,23 @@ suite('CreaEditor Servers', () => {
 			parsePairAgainInput('http://100.64.0.2:31600/', serverUrl),
 			parsePairAgainInput('', serverUrl),
 		], ['ABCDE-12345', 'K7QDM-2XP9H', undefined, undefined, undefined]);
+	});
+
+	test('trusts a delegated chat\'s server folders in both forms the trust checks use', () => {
+		const authority = agentHostAuthority('ws://100.64.0.2:31600/ahp');
+		const uris = getServerFolderTrustUris(authority, ['/srv/ce/worktrees', undefined, '']);
+		// The session state reports a chat's folders as file URIs of the server; the Agents window uses agent host URIs.
+		const stateFolder = URI.parse('file:///srv/ce/worktrees/ws2-a42b12e0');
+		const windowFolder = toAgentHostUri(stateFolder, authority);
+		assert.deepStrictEqual({
+			uris: uris.map(uri => uri.toString()),
+			coversStateFolder: uris.some(uri => extUri.isEqualOrParent(stateFolder, uri)),
+			coversWindowFolder: uris.some(uri => extUri.isEqualOrParent(windowFolder, uri)),
+		}, {
+			uris: [toAgentHostUri(URI.file('/srv/ce/worktrees'), authority).toString(), 'file:///srv/ce/worktrees'],
+			coversStateFolder: true,
+			coversWindowFolder: true,
+		});
 	});
 
 	test('builds the SSH install scripts and reads the pairing link they print', () => {

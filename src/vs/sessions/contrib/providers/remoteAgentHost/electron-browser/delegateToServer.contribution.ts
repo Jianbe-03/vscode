@@ -57,7 +57,7 @@ import { ISession, SessionStatus } from '../../../../services/sessions/common/se
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { getCreaEditorServerDeviceKeyName, ICreaEditorServer, ICreaEditorServersService } from '../browser/creaeditorServers.js';
 import { CreaEditorServerCommandIds } from '../browser/creaeditorServerActions.js';
-import { DelegatedChatsStore, describeDelegatedChatState, IDelegatedChat } from '../browser/delegatedChats.js';
+import { DelegatedChatsStore, describeDelegatedChatState, getServerFolderTrustUris, IDelegatedChat } from '../browser/delegatedChats.js';
 
 /** True when the active session is a delegated chat (here or on its server). */
 const ActiveSessionDelegatedContext = new RawContextKey<boolean>('creaeditorActiveSessionDelegated', false, localize('activeSessionDelegated', "Whether the active chat was delegated to a CreaEditor Server."));
@@ -262,7 +262,7 @@ function getRemoteModelId(session: ISession, authority: string): string | undefi
  * own, so its chats open without the workspace trust question.
  */
 async function trustServerWorktrees(workspaceTrustManagementService: IWorkspaceTrustManagementService, authority: string, folders: readonly string[]): Promise<void> {
-	await workspaceTrustManagementService.setUrisTrust(folders.filter(folder => !!folder).map(folder => toAgentHostUri(URI.file(folder), authority)), true);
+	await workspaceTrustManagementService.setUrisTrust(getServerFolderTrustUris(authority, folders), true);
 }
 
 /** The chat of a delegation in the server's list: its session works in the delegated worktree (or a worktree next to it). */
@@ -479,13 +479,14 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 	};
 	store.upsert(chat);
 
+	// The worktree holds this computer's own code: trust it like the folder it came from, and the
+	// server's folder of delegated worktrees (a chat there may work in a worktree next to it). Before
+	// connecting, so the chat's first message never asks.
+	await trustServerWorktrees(workspaceTrustManagementService, agentHostAuthority(serversService.getAgentHostAddress(server)), [serverInfo.worktreesDir, result.record.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
 	const connected = await instantiationService.invokeFunction(innerAccessor => getServerConnection(innerAccessor, server));
 	let remoteResource: URI | undefined;
 	let transcriptOnly = !result.sessionFilesSent;
 	if (connected) {
-		// The worktree holds this computer's own code: trust it like the folder it came from, and the
-		// server's folder of delegated worktrees (a chat there may work in a worktree next to it).
-		await trustServerWorktrees(workspaceTrustManagementService, connected.authority, [serverInfo.worktreesDir, result.record.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
 		if (result.accountsEnvelope) {
 			try {
 				await connected.connection.authenticate({ resource: `${CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}${result.record.delegationId}`, token: JSON.stringify(result.accountsEnvelope) });

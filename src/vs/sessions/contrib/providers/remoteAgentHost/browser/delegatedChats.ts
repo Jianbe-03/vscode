@@ -8,7 +8,9 @@
 
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
+import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
+import { toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
 import { DelegationResultsMode } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { SessionStatus } from '../../../../services/sessions/common/session.js';
@@ -44,6 +46,18 @@ export interface IDelegatedChat {
 }
 
 /** Reads the stored list, skipping anything malformed. */
+/**
+ * The workspace trust keys of folders on a server (absolute paths there) whose code came from this
+ * computer's delegations. Trust is checked in two forms, so both are returned for each folder:
+ * - the agent host URI (`vscode-agent-host://<authority>/file/...`): what the Agents window checks when
+ *   it opens a session, and what is sent to the server as its trusted folders;
+ * - the folder as the server reports it in a session's working directories (`file:///...`): what the
+ *   chat checks before the first message of an existing session (it reads the session state as is).
+ */
+export function getServerFolderTrustUris(authority: string, folders: readonly (string | undefined)[]): URI[] {
+	return folders.filter((folder): folder is string => !!folder).flatMap(folder => [toAgentHostUri(URI.file(folder), authority), URI.file(folder)]);
+}
+
 export function parseDelegatedChats(raw: string | undefined): IDelegatedChat[] {
 	if (!raw) {
 		return [];
