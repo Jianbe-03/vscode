@@ -784,6 +784,16 @@ async function takeBackHereAction(accessor: ServicesAccessor, context: Delegatio
 	if (!confirmed) {
 		return;
 	}
+	store.remove(chat.delegationId);
+	// The local chat first: archiving the server's chat while it shows would open a new chat in its
+	// place (in the server's repository) before the local one.
+	const local = chat.localSessionResource ? sessionsManagementService.getSession(URI.parse(chat.localSessionResource)) : undefined;
+	if (local) {
+		if (local.isArchived.get()) {
+			await sessionsManagementService.unarchiveSession(local).catch(error => logService.warn(`[Delegation] Unarchiving the local chat failed: ${errorMessage(error)}`));
+		}
+		await sessionsService.openSession(local.resource).catch(() => undefined);
+	}
 	// The server's chat as recorded, else (no record of it, e.g. it started later) the one in its worktree.
 	const server = serversService.servers.get().find(candidate => candidate.id === chat.serverId);
 	const authority = server ? agentHostAuthority(serversService.getAgentHostAddress(server)) : undefined;
@@ -800,14 +810,6 @@ async function takeBackHereAction(accessor: ServicesAccessor, context: Delegatio
 		}
 	} else if (chat.remoteSessionResource) {
 		notificationService.info(localize('delegation.takeBackOffline', "{0} is not connected, so the chat could not be stopped there. Archive it on the server when it is back.", chat.serverName));
-	}
-	store.remove(chat.delegationId);
-	const local = chat.localSessionResource ? sessionsManagementService.getSession(URI.parse(chat.localSessionResource)) : undefined;
-	if (local) {
-		if (local.isArchived.get()) {
-			await sessionsManagementService.unarchiveSession(local).catch(error => logService.warn(`[Delegation] Unarchiving the local chat failed: ${errorMessage(error)}`));
-		}
-		await sessionsService.openSession(local.resource).catch(() => undefined);
 	}
 }
 
