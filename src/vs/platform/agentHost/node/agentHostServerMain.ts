@@ -45,6 +45,7 @@ import { createCodexProviderConfiguration } from './codex/codexProviderConfigura
 import { IAgentSdkDownloader, type IAgentSdkDownloadProgress } from './agentSdkDownloader.js';
 import { IAgentHostProviderService } from './agentHostProviderService.js';
 import { AgentHostCodexEnabledConfigKey, platformRootSchema } from '../common/agentHostSchema.js';
+import { AgentHostConfigKey, agentHostCustomizationConfigSchema } from '../common/agentHostCustomizationConfig.js';
 import { AgentModelRefreshScheduler, MODEL_REFRESH_INTERVAL_MS } from './agentModelRefreshScheduler.js';
 import { AgentHostClaudeAgentEnabledEnvVar, AgentHostClaudeSdkRootEnvVar, AgentHostCodexAgentCodexHomeEnvVar, AgentHostCodexAgentEnabledEnvVar, AgentHostCodexAgentSdkRootEnvVar, isAgentEnabled } from '../common/agentService.js';
 import { WebSocketProtocolServer } from './webSocketTransport.js';
@@ -255,6 +256,13 @@ async function main(): Promise<void> {
 		customizationEnablementService,
 	} = runtimeServices;
 	errorTelemetry.value = new ErrorTelemetry(runtimeServices.telemetryService);
+
+	// CreaEditor: a CreaEditor Server runs chats on the OpenRouter/LiteLLM keys delegated chats brought
+	// and on its own accounts, never on GitHub Copilot. A laptop's window forwards this opt-in (on by
+	// default in CreaEditor) to its local agent host; no window does that here, so it is on unless set.
+	if (serverGatewayKeys && agentConfigurationService.getRootValue(agentHostCustomizationConfigSchema, AgentHostConfigKey.AllowSignedOutWhenUsable) === undefined) {
+		agentConfigurationService.updateRootConfig({ [AgentHostConfigKey.AllowSignedOutWhenUsable]: true });
+	}
 
 	// Register agents
 	let sdkDownloadProgress: Event<IAgentSdkDownloadProgress> | undefined;

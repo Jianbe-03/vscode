@@ -247,6 +247,14 @@ async function waitForSession(sessionsManagementService: ISessionsManagementServ
 	}
 }
 
+/** The id of a chat's model on a server: `<server's session type>:<model>` for the same agent. */
+function getRemoteModelId(session: ISession, authority: string): string | undefined {
+	const provider = getDelegationAgentProvider(getDelegationAgentKind(session.sessionType, session.resource.scheme));
+	const modelId = session.modelId.get();
+	const colon = modelId?.indexOf(':') ?? -1;
+	return provider && modelId && colon > 0 ? `${remoteAgentHostSessionTypeId(authority, provider)}:${modelId.slice(colon + 1)}` : undefined;
+}
+
 /** Starts the chat on the server with a transcript of the conversation (agents whose sessions cannot move). */
 async function continueWithTranscript(accessor: ServicesAccessor, session: ISession, server: ICreaEditorServer, authority: string, result: IDelegateResult): Promise<URI | undefined> {
 	const sessionsManagementService = accessor.get(ISessionsManagementService);
@@ -255,7 +263,16 @@ async function continueWithTranscript(accessor: ServicesAccessor, session: ISess
 	const transcript = buildDelegationTranscript(requests);
 	const attachment = createDelegationTranscriptAttachment(transcript, session.title.get());
 	const folder = toAgentHostUri(URI.file(result.record.workingDirectory), authority);
-	const remote = sessionsManagementService.createNewSession(folder, { providerId: `${REMOTE_AGENT_HOST_PROVIDER_PREFIX}${authority}`, sessionTypeId: session.sessionType });
+	const options = { providerId: `${REMOTE_AGENT_HOST_PROVIDER_PREFIX}${authority}`, sessionTypeId: session.sessionType };
+	// The same model on the server (the server lists a delegated key's models under the same id), so the
+	// chat runs on that key there and needs no GitHub sign-in for a default model.
+	const modelId = getRemoteModelId(session, authority);
+	let remote: ISession;
+	try {
+		remote = sessionsManagementService.createNewSession(folder, modelId ? { ...options, modelId } : options);
+	} catch {
+		remote = sessionsManagementService.createNewSession(folder, options);
+	}
 	await sessionsManagementService.sendNewChatRequest(remote, {
 		query: localize('delegation.transcriptPrompt', "This chat was delegated from {0} to {1}. Continue the work from the previous conversation; the code, including uncommitted changes, is in this folder.", result.record.sourceName, server.name),
 		attachedContext: attachment ? [attachment] : [],

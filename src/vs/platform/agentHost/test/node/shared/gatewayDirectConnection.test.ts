@@ -16,7 +16,7 @@ import { IByokLmChatRequest } from '../../../common/agentHostByokLm.js';
 import { IServerHardStop } from '../../../common/creaeditorCosts.js';
 import { IDelegationGatewayKey } from '../../../common/creaeditorDelegation.js';
 import { GatewayCostLedgerWriter, IGatewayCostRecord } from '../../../node/shared/gatewayCostLedger.js';
-import { detectCostIssueFromBranch, GatewayDirectConnection, getGatewayChatCompletionsUrl, IGatewayDirectConnectionHost } from '../../../node/shared/gatewayDirectConnection.js';
+import { detectCostIssueFromBranch, GatewayDirectConnection, getGatewayChatCompletionsUrl, getGatewayKeyModels, IGatewayDirectConnectionHost, parseChatCompletionsAnswer } from '../../../node/shared/gatewayDirectConnection.js';
 import { FileSecretStore } from '../../../node/shared/fileSecretStore.js';
 import { readServerCostLedger } from '../../../node/shared/serverCostLedger.js';
 import { ServerGatewayKeys } from '../../../node/shared/serverGatewayKeys.js';
@@ -234,6 +234,29 @@ suite('CreaEditor - server gateway connection', () => {
 			outside: undefined,
 			plaintextOnDisk: false,
 			changes: 2,
+		});
+	});
+
+	test('joins a streamed answer (data: events) into one, and names models with their key', () => {
+		const chunk = (delta: object, extra: object = {}) => `data: ${JSON.stringify({ id: 'gen-2', choices: [{ index: 0, delta }], ...extra })}\n\n`;
+		const streamed = [
+			chunk({ role: 'assistant', content: 'Hel' }),
+			chunk({ content: 'lo.' }),
+			chunk({ tool_calls: [{ index: 0, id: 'tc1', type: 'function', function: { name: 'read_', arguments: '{"pa' } }] }),
+			chunk({ tool_calls: [{ index: 0, function: { name: 'file', arguments: 'th":"a.ts"}' } }] }),
+			`data: ${JSON.stringify({ id: 'gen-2', choices: [], usage: { prompt_tokens: 10, completion_tokens: 5 } })}\n\n`,
+			'data: [DONE]\n\n',
+		].join('');
+		assert.deepStrictEqual({
+			streamed: parseChatCompletionsAnswer(streamed),
+			json: parseChatCompletionsAnswer('{"id":"gen-3","choices":[{"message":{"content":"Hi"}}]}'),
+			invalid: parseChatCompletionsAnswer('<html>Bad gateway</html>'),
+			names: getGatewayKeyModels([{ providerId: 'litellm', label: 'Home key', key: 'k', models: [{ id: 'mock-mini' }, { id: 'mock-opus', name: 'mock-opus (Home key)' }] }]).map(model => model.name),
+		}, {
+			streamed: { id: 'gen-2', choices: [{ message: { content: 'Hello.', tool_calls: [{ id: 'tc1', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }] } }], usage: { prompt_tokens: 10, completion_tokens: 5 } },
+			json: { id: 'gen-3', choices: [{ message: { content: 'Hi' } }] },
+			invalid: undefined,
+			names: ['mock-mini (Home key)', 'mock-opus (Home key)'],
 		});
 	});
 

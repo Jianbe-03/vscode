@@ -57,7 +57,9 @@ export function modelRequiresAgentAuthentication(agent: AgentInfo | undefined, m
 		return requiresAuthentication;
 	}
 	if (!model) {
-		return true;
+		// CreaEditor: without a selection the host picks its default model; when it only has BYOK models
+		// (CreaEditor lists no GitHub Copilot models), that default needs no GitHub sign-in either.
+		return !agent.models.every(candidate => readAgentModelByokIdentifier(candidate) !== undefined);
 	}
 	const selectedModel = agent.models.find(candidate => candidate.id === model.id);
 	return !selectedModel || readAgentModelByokIdentifier(selectedModel) === undefined;

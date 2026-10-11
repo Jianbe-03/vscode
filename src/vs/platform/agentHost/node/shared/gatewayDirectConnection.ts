@@ -17,7 +17,7 @@ import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { IByokLmBridgeConnection, IByokLmChatContext, IByokLmChatRequest, IByokLmChatResult, IByokLmContentPart, IByokLmModelInfo, IByokLmOutputItem } from '../../common/agentHostByokLm.js';
 import { CostBudgetPeriod, ICostBudget, IGatewayCostEntryLike, IServerHardStop } from '../../common/creaeditorCosts.js';
-import { IDelegationGatewayKey, IDelegationWorkContext } from '../../common/creaeditorDelegation.js';
+import { IDelegationGatewayKey, IDelegationGatewayModel, IDelegationWorkContext } from '../../common/creaeditorDelegation.js';
 import type { IGatewayCostRecord } from './gatewayCostLedger.js';
 
 export const OPENROUTER_API_BASE_URL = 'https://openrouter.ai/api/v1';
@@ -33,12 +33,19 @@ export function getGatewayChatCompletionsUrl(key: Pick<IDelegationGatewayKey, 'p
 	return `${root}/v1/chat/completions`;
 }
 
+/** The name of a key's model in the model picker: with the key's name, like on the laptop ("mock-mini (Home key)"). */
+function getGatewayModelName(key: IDelegationGatewayKey, model: IDelegationGatewayModel): string {
+	const name = model.name ?? model.id;
+	const suffix = ` (${key.label})`;
+	return name.endsWith(suffix) ? name : `${name}${suffix}`;
+}
+
 /** The BYOK models of the delegated keys, as the agent host advertises them (`<vendor>/<group>/<id>`). */
 export function getGatewayKeyModels(keys: readonly IDelegationGatewayKey[]): IByokLmModelInfo[] {
 	return keys.flatMap(key => (key.models ?? []).map((model): IByokLmModelInfo => ({
 		vendor: key.providerId,
 		id: model.id,
-		name: model.name ?? model.id,
+		name: getGatewayModelName(key, model),
 		modelIdentifier: `${key.providerId}/${key.label}/${model.id}`,
 		...(model.maxInputTokens ? { maxPromptTokens: model.maxInputTokens } : {}),
 		...(model.maxOutputTokens ? { maxOutputTokens: model.maxOutputTokens } : {}),
@@ -273,6 +280,78 @@ export function chatCompletionsToBridgeResult(response: IChatCompletionsResponse
 	};
 }
 
+interface IChatCompletionsChunk {
+	readonly id?: string;
+	readonly choices?: readonly {
+		readonly delta?: {
+			readonly content?: string | null;
+			readonly reasoning?: string | null;
+			readonly reasoning_content?: string | null;
+			readonly tool_calls?: readonly { readonly index?: number; readonly id?: string; readonly function?: { readonly name?: string; readonly arguments?: string } }[];
+		};
+	}[];
+	readonly usage?: IChatCompletionsResponse['usage'];
+}
+
+/**
+ * The answer of a `/chat/completions` request: a JSON body, or a stream of `data:` events, which some
+ * gateways (and proxies in front of them) send even when `stream: false` was asked; the chunks are
+ * joined into one answer. Undefined when the text is neither.
+ */
+export function parseChatCompletionsAnswer(text: string): IChatCompletionsResponse | undefined {
+	const trimmed = text.trimStart();
+	if (!trimmed.startsWith('data:')) {
+		try {
+			return JSON.parse(text) as IChatCompletionsResponse;
+		} catch {
+			return undefined;
+		}
+	}
+	let id: string | undefined;
+	let content = '';
+	let reasoning = '';
+	let usage: IChatCompletionsResponse['usage'];
+	const toolCalls: { id?: string; name: string; arguments: string }[] = [];
+	for (const line of trimmed.split(/\r?\n/)) {
+		if (!line.startsWith('data:')) {
+			continue;
+		}
+		const data = line.slice('data:'.length).trim();
+		if (!data || data === '[DONE]') {
+			continue;
+		}
+		let chunk: IChatCompletionsChunk;
+		try {
+			chunk = JSON.parse(data) as IChatCompletionsChunk;
+		} catch {
+			continue;
+		}
+		id ??= chunk.id;
+		usage = chunk.usage ?? usage;
+		const delta = chunk.choices?.[0]?.delta;
+		content += delta?.content ?? '';
+		reasoning += delta?.reasoning ?? delta?.reasoning_content ?? '';
+		for (const call of delta?.tool_calls ?? []) {
+			const index = call.index ?? toolCalls.length;
+			const entry = toolCalls[index] ??= { name: '', arguments: '' };
+			entry.id ??= call.id;
+			entry.name += call.function?.name ?? '';
+			entry.arguments += call.function?.arguments ?? '';
+		}
+	}
+	return {
+		...(id ? { id } : {}),
+		choices: [{
+			message: {
+				content: content || null,
+				...(reasoning ? { reasoning } : {}),
+				...(toolCalls.length ? { tool_calls: toolCalls.filter(call => !!call).map(call => ({ ...(call.id ? { id: call.id } : {}), function: { name: call.name, arguments: call.arguments } })) } : {}),
+			},
+		}],
+		...(usage ? { usage } : {}),
+	};
+}
+
 function toNumber(value: unknown): number | undefined {
 	const number = typeof value === 'string' ? Number(value) : value;
 	return typeof number === 'number' && Number.isFinite(number) ? number : undefined;
@@ -362,10 +441,8 @@ export class GatewayDirectConnection implements IByokLmBridgeConnection, IDispos
 			}
 			return { output: [], error: localize('gatewayDirect.failed', "{0} answered {1}: {2}", key.providerId === 'openrouter' ? 'OpenRouter' : 'LiteLLM', response.status, message) };
 		}
-		let parsed: IChatCompletionsResponse;
-		try {
-			parsed = JSON.parse(text) as IChatCompletionsResponse;
-		} catch {
+		const parsed = parseChatCompletionsAnswer(text);
+		if (!parsed) {
 			return { output: [], error: localize('gatewayDirect.invalid', "The gateway's answer could not be read.") };
 		}
 		const customTools = new Set((request.tools ?? []).filter(tool => tool.type === 'custom').map(tool => tool.name));
