@@ -190,7 +190,7 @@ suite('customizationMigration', () => {
 				PromptsConfig.SKILLS_LOCATION_KEY,
 				PromptsConfig.INSTRUCTIONS_LOCATION_KEY,
 			],
-			value: `The settings ${settingsLinks[0]} and ${settingsLinks[1]} are no longer read by Copilot. Move the customizations into supported harness folders so both VS Code and Copilot can use them.`,
+			value: `The settings ${settingsLinks[0]} and ${settingsLinks[1]} are no longer read by Copilot. Move the customizations into supported harness folders so both CreaEditor and Copilot can use them.`,
 			isTrusted: { enabledCommands: ['workbench.action.openSettings'] },
 			consequence: 'The option to clear unused location settings after migration is selected by default.',
 		});
