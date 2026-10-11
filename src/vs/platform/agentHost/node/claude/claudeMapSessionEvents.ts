@@ -17,6 +17,21 @@ import { buildClaudeToolMeta, getClaudePastTenseMessage, getClaudeToolDisplayNam
 import { claudeToolDenialCode } from './claudeToolDenial.js';
 import { ClaudeToolCallRegistry } from './claudeToolCallRegistry.js';
 import { ToolCallConfirmationReason, ToolCallContributorKind, type StringOrMarkdown } from '../../common/state/protocol/state.js';
+import { localize } from '../../../../nls.js';
+import { PROMPT_CACHE_USAGE_META_KEY, type IPromptCacheUsage } from '../../common/creaeditorCacheCompaction.js';
+
+/** The token counts of an Anthropic request's usage that tell its context size and caching. */
+interface IClaudeRequestUsage {
+	readonly input_tokens?: number | null;
+	readonly cache_read_input_tokens?: number | null;
+	readonly cache_creation_input_tokens?: number | null;
+	readonly cache_creation?: { readonly ephemeral_1h_input_tokens?: number | null } | null;
+}
+
+/** Input + cache read + cache creation tokens: the context a request sent. */
+function getRequestContextTokens(usage: IClaudeRequestUsage): number {
+	return (usage.input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0);
+}
 
 /**
  * Cross-call state for {@link mapSDKMessageToAgentSignals}. One instance
@@ -81,6 +96,36 @@ export class ClaudeMapperState {
 
 	getCurrentMessageId(): string | undefined {
 		return this._currentMessageId;
+	}
+
+	// CreaEditor: what the prompt cache holds, for compacting idle chats before it expires
+	// (`common/creaeditorCacheCompaction.ts`).
+	private _lastRequestContextTokens: number | undefined;
+	private _promptCacheOneHour = false;
+
+	/** Records the usage of a top-level (main-thread) request: the context it sent and how it was cached. */
+	recordRequestUsage(usage: IClaudeRequestUsage | undefined): void {
+		if (!usage) {
+			return;
+		}
+		this._lastRequestContextTokens = getRequestContextTokens(usage);
+		if ((usage.cache_creation?.ephemeral_1h_input_tokens ?? 0) > 0) {
+			this._promptCacheOneHour = true;
+		}
+	}
+
+	/**
+	 * The prompt cache after a turn, from its last request (or, when none was seen, the turn's total
+	 * usage). The 1 hour lifetime sticks once any request of the session wrote to a 1 hour cache: a
+	 * request that only reads the cache writes nothing that would show it.
+	 */
+	takePromptCacheUsage(resultUsage: IClaudeRequestUsage): IPromptCacheUsage {
+		if ((resultUsage.cache_creation?.ephemeral_1h_input_tokens ?? 0) > 0) {
+			this._promptCacheOneHour = true;
+		}
+		const contextTokens = this._lastRequestContextTokens ?? getRequestContextTokens(resultUsage);
+		this._lastRequestContextTokens = undefined;
+		return { contextTokens, ttlSeconds: this._promptCacheOneHour ? 3600 : 300 };
 	}
 
 	/**
@@ -272,6 +317,15 @@ export function mapSDKMessageToAgentSignals(
 		default:
 			// Phase 12 step 7 — system subtypes for subagent task discrimination.
 			if (message.type === 'system') {
+				// CreaEditor: show a compaction (`/compact`, automatic or the CLI's own) as it happens,
+				// like the replayed transcript does.
+				if (message.subtype === 'compact_boundary') {
+					return [{
+						kind: 'action',
+						resource: chat,
+						action: { type: ActionType.ChatResponsePart, turnId, part: { kind: ResponsePartKind.SystemNotification, content: localize('claude.conversationCompacted', "Conversation compacted") } },
+					}];
+				}
 				return mapSubagentSystemMessage(message, chat, registry);
 			}
 			return [];
@@ -315,6 +369,10 @@ function mapAssistantCanonical(
 	};
 	const completedSignals = message.aborted ? [] : [completedSignal];
 	if (parentToolUseId === null) {
+		// CreaEditor: the context of the latest main-thread request (see `recordRequestUsage`).
+		if (!message.aborted) {
+			state.recordRequestUsage(message.message.usage);
+		}
 		const top: AgentSignal[] = [...completedSignals];
 		for (const block of message.message.content) {
 			if (block.type !== 'tool_use' || !SUBAGENT_SPAWNING_TOOL_NAMES.has(block.name)) {
@@ -478,6 +536,8 @@ function mapResult(
 					outputTokens: message.usage.output_tokens,
 					cacheReadTokens: message.usage.cache_read_input_tokens,
 					...(modelKey ? { model: modelKey } : {}),
+					// CreaEditor: for compacting the chat before its prompt cache expires.
+					_meta: { [PROMPT_CACHE_USAGE_META_KEY]: state.takePromptCacheUsage(message.usage) },
 				},
 			},
 		});

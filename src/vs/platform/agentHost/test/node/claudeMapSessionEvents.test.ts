@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
 import assert from 'assert';
 import * as sinon from 'sinon';
 import { URI } from '../../../../base/common/uri.js';
@@ -14,6 +15,7 @@ import { ResponsePartKind, ToolResultContentType } from '../../common/state/sess
 import { STREAMING_TOOL_DISPLAY_INTERVAL_MS } from '../../common/streamingToolCallDisplay.js';
 import { ToolCallConfirmationReason, ToolCallContributorKind } from '../../common/state/protocol/state.js';
 import { ClaudeMapperState, mapSDKMessageToAgentSignals } from '../../node/claude/claudeMapSessionEvents.js';
+import { PROMPT_CACHE_USAGE_META_KEY } from '../../common/creaeditorCacheCompaction.js';
 import { CLAUDE_USER_DECLINED_MESSAGE } from '../../node/claude/claudeToolDenial.js';
 import { encodeForwardedChatError, PROXY_ERROR_PREFIX } from '../../node/shared/proxyChatError.js';
 import { SubagentRegistry } from '../../node/claude/claudeSubagentRegistry.js';
@@ -32,6 +34,7 @@ import {
 	makeTextDelta,
 	makeThinkingDelta,
 	makeUserToolResultMessage,
+	TEST_UUID,
 } from './claudeMapSessionEventsTestUtils.js';
 
 /**
@@ -878,10 +881,57 @@ suite('claudeMapSessionEvents — direct mapper tests', () => {
 						outputTokens: 34,
 						cacheReadTokens: 5,
 						model: 'claude-test',
+						_meta: { [PROMPT_CACHE_USAGE_META_KEY]: { contextTokens: 17, ttlSeconds: 300 } },
 					},
 				},
 			},
 		]);
+	});
+
+	test('CreaEditor: result usage carries the last main-thread request context and the prompt cache lifetime', () => {
+		const state = new ClaudeMapperState();
+		const take = (requests: readonly { input: number; read: number; created: number; oneHour: number }[]) => {
+			for (const request of requests) {
+				const assistant = makeAssistantMessage(SESSION_ID, []);
+				assistant.message.usage.input_tokens = request.input;
+				assistant.message.usage.cache_read_input_tokens = request.read;
+				assistant.message.usage.cache_creation_input_tokens = request.created;
+				assistant.message.usage.cache_creation = { ephemeral_1h_input_tokens: request.oneHour, ephemeral_5m_input_tokens: 0 };
+				mapSDKMessageToAgentSignals(assistant, SESSION, TURN_ID, state, new NullLogService(), r());
+			}
+			const signals = mapSDKMessageToAgentSignals(makeResultSuccess(SESSION_ID), SESSION, TURN_ID, state, new NullLogService(), r());
+			const usage = signals[0];
+			return usage.kind === 'action' && usage.action.type === ActionType.ChatUsage ? usage.action.usage._meta?.[PROMPT_CACHE_USAGE_META_KEY] : undefined;
+		};
+
+		assert.deepStrictEqual([
+			// Two requests: the last one's context counts, 5 minute cache.
+			take([{ input: 10, read: 1000, created: 200, oneHour: 0 }, { input: 5, read: 70_000, created: 300, oneHour: 0 }]),
+			// A request that wrote a 1 hour cache.
+			take([{ input: 5, read: 80_000, created: 400, oneHour: 400 }]),
+			// The 1 hour lifetime sticks when a later request only reads the cache.
+			take([{ input: 3, read: 90_000, created: 0, oneHour: 0 }]),
+		], [
+			{ contextTokens: 70_305, ttlSeconds: 300 },
+			{ contextTokens: 80_405, ttlSeconds: 3600 },
+			{ contextTokens: 90_003, ttlSeconds: 3600 },
+		]);
+	});
+
+	test('CreaEditor: compact_boundary shows a Conversation compacted notification', () => {
+		const signals = mapSDKMessageToAgentSignals({
+			type: 'system',
+			subtype: 'compact_boundary',
+			compact_metadata: { trigger: 'manual', pre_tokens: 100_000 },
+			uuid: TEST_UUID,
+			session_id: SESSION_ID,
+		} as SDKMessage, SESSION, TURN_ID, new ClaudeMapperState(), new NullLogService(), r());
+
+		assert.deepStrictEqual(signals, [{
+			kind: 'action',
+			resource: SESSION,
+			action: { type: ActionType.ChatResponsePart, turnId: TURN_ID, part: { kind: ResponsePartKind.SystemNotification, content: 'Conversation compacted' } },
+		}]);
 	});
 
 	test('result success does not derive credits from total_cost_usd', () => {
@@ -896,7 +946,7 @@ suite('claudeMapSessionEvents — direct mapper tests', () => {
 		assert.strictEqual(signals.length, 1);
 		const usage = signals[0];
 		assert.ok(usage.kind === 'action' && usage.action.type === ActionType.ChatUsage);
-		assert.strictEqual(usage.action.usage._meta, undefined);
+		assert.strictEqual(usage.action.usage._meta?.cost, undefined);
 	});
 
 	test('result success without modelUsage omits the model field on ChatUsage', () => {
