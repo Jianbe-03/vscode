@@ -108,11 +108,19 @@ export function describeServerWorktree(info: IDelegationWorktreeInfo, now: numbe
 	let state: string;
 	switch (info.chatState) {
 		case DelegationChatState.Running: state = localize('serverWorktree.running', "chat in use"); break;
-		case DelegationChatState.Archived: state = info.archivedSince ? localize('serverWorktree.archivedSince', "chat archived {0}", fromNow(info.archivedSince, true)) : localize('serverWorktree.archived', "chat archived"); break;
+		case DelegationChatState.Archived: state = !info.archivedSince
+			? localize('serverWorktree.archived', "chat archived")
+			: now - info.archivedSince < 60_000
+				? localize('serverWorktree.archivedJustNow', "chat archived just now")
+				: localize('serverWorktree.archivedSince', "chat archived {0}", fromNow(info.archivedSince, true)); break;
 		case DelegationChatState.Deleted: state = localize('serverWorktree.deleted', "no chat on the server"); break;
 		default: state = localize('serverWorktree.unknown', "chat state unknown"); break;
 	}
-	const size = info.bytes === undefined ? undefined : localize('serverWorktree.size', "{0} MB", (info.bytes / (1024 * 1024)).toFixed(info.bytes < 10 * 1024 * 1024 ? 1 : 0));
+	const size = info.bytes === undefined
+		? undefined
+		: info.bytes < 100 * 1024
+			? localize('serverWorktree.sizeSmall', "under 0.1 MB")
+			: localize('serverWorktree.size', "{0} MB", (info.bytes / (1024 * 1024)).toFixed(info.bytes < 10 * 1024 * 1024 ? 1 : 0));
 	const work = info.pullRequestUrl && info.workSafe
 		? localize('serverWorktree.pushed', "work is in its pull request")
 		: info.broughtBackAt && info.workSafe

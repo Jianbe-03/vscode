@@ -503,6 +503,7 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 	}
 
 	clearDraft(): void {
+		this._clearDraftState();
 		this._contextAttachments.clear();
 		this._editor?.getModel()?.setValue('');
 	}
