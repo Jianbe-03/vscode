@@ -98,6 +98,31 @@ suite('RemoteAccessAuth', () => {
 		);
 	});
 
+	test('an old device reconnecting with a key the server no longer knows never locks out pairing', async () => {
+		const auth = await createAuth({ maxFailuresPerClient: 2, maxKeyFailuresPerClient: 3 });
+		// A key from before the server's data was wiped: well-formed, but it names no device.
+		const staleKey = `${'A'.repeat(12)}.${'B'.repeat(43)}`;
+		for (let i = 0; i < 50; i++) {
+			auth.verifyDeviceKey(staleKey, 'laptop');
+		}
+		const staleLockout = auth.getLockout('laptop');
+		const paired = await auth.pair({ code: auth.createPairingCode().code, deviceName: 'Phone', requirePassword: false, client: 'laptop' });
+		assert.ok(paired.ok);
+		const validAfterStale = auth.verifyDeviceKey(paired.deviceKey, 'laptop')?.name;
+
+		// Malformed keys and wrong secrets are rate limited, but only for device key checks.
+		for (let i = 0; i < 3; i++) {
+			auth.verifyDeviceKey(i === 0 ? 'garbage' : `${paired.device.id}.${'C'.repeat(43)}`, 'attacker');
+		}
+		const attackerValidKey = auth.verifyDeviceKey(paired.deviceKey, 'attacker');
+		const attackerPairing = await auth.pair({ code: auth.createPairingCode().code, deviceName: 'Tablet', requirePassword: false, client: 'attacker' });
+
+		assert.deepStrictEqual(
+			[staleLockout, validAfterStale, attackerValidKey, attackerPairing.ok, auth.verifyDeviceKey(paired.deviceKey, 'laptop')?.name],
+			[0, 'Phone', undefined, true, 'Phone'],
+		);
+	});
+
 	test('signing a device out revokes its key and fires the event', async () => {
 		const auth = await createAuth({ maxFailuresPerClient: 1 });
 		const result = await auth.pair({ code: auth.createPairingCode().code, deviceName: 'Phone', requirePassword: false, client: 'a' });

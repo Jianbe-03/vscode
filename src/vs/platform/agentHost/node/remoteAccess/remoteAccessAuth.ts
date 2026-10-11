@@ -5,8 +5,9 @@
 
 // CreaEditor: who may use Remote Access. Paired devices hold a random device key of which only a
 // SHA-256 hash is stored; devices pair with a short-lived single-use pairing code (plus a password
-// when the server is reachable from the internet). Failed attempts are rate limited per client and
-// in total, with a lockout.
+// when the server is reachable from the internet). Failed pairing attempts are rate limited per
+// client and in total, with a lockout. Failed device key checks have their own per-client limiter, so
+// an old device that keeps reconnecting with a key the server no longer knows never locks out pairing.
 
 import { createHash, randomBytes, scrypt, timingSafeEqual } from 'crypto';
 import { promises as fs } from 'fs';
@@ -77,9 +78,14 @@ export interface IRemoteAccessAuth {
 	getPairingCode(): IRemoteAccessPairingCode | undefined;
 	/** Exchanges a pairing code (and password if required) for a new device key. */
 	pair(request: IRemoteAccessPairRequest): Promise<RemoteAccessPairResult>;
-	/** The device of a device key, or `undefined`. A wrong key counts as a failed attempt of `client`. */
+	/**
+	 * The device of a device key, or `undefined`. A malformed key, or a wrong secret for a known
+	 * device, counts as a failed device key check of `client` (a separate limiter from pairing). A
+	 * well-formed key of a device this server does not know (signed out, or from before its data was
+	 * wiped) does not count: that is an old device reconnecting, not a guess.
+	 */
 	verifyDeviceKey(deviceKey: string | undefined, client: string): IRemoteAccessDevice | undefined;
-	/** Milliseconds `client` must wait before trying again, or 0. */
+	/** Milliseconds `client` must wait before trying to pair again, or 0. */
 	getLockout(client: string): number;
 	listDevices(): readonly IRemoteAccessDevice[];
 	/** Signs a device out: its key stops working and its connections are closed. */
@@ -102,6 +108,8 @@ export interface IRemoteAccessAuthOptions {
 	readonly failureWindowMs?: number;
 	/** Defaults to 15 minutes. */
 	readonly lockoutMs?: number;
+	/** Failed device key checks of one client within {@link failureWindowMs} before its device key checks are locked out. Defaults to 20. */
+	readonly maxKeyFailuresPerClient?: number;
 	/** scrypt cost parameter N. Defaults to 16384. */
 	readonly scryptCost?: number;
 }
@@ -112,6 +120,8 @@ const PAIRING_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const PAIRING_CODE_LENGTH = 10;
 const LAST_SEEN_PERSIST_INTERVAL_MS = 60_000;
 const ALL_CLIENTS = '*';
+/** `<id>.<secret>`: 9 and 32 random bytes in base64url, as {@link RemoteAccessAuth.pair} makes them. */
+const DEVICE_KEY_PATTERN = /^[A-Za-z0-9_-]{12}\.[A-Za-z0-9_-]{43}$/;
 
 interface IStoredDevice extends IRemoteAccessDevice {
 	/** Hex SHA-256 of the secret part of the device key. */
@@ -164,6 +174,8 @@ export class RemoteAccessAuth extends Disposable implements IRemoteAccessAuth {
 	private _password: IStoredPassword | undefined;
 	private _pairingCode: { readonly display: string; readonly normalized: string; readonly expiresAt: number } | undefined;
 	private readonly _failures = new Map<string, IFailureRecord>();
+	/** Failed device key checks per client; kept apart from pairing failures. */
+	private readonly _keyFailures = new Map<string, IFailureRecord>();
 	private readonly _persistedLastSeen = new Map<string, number>();
 	private readonly _revokedIds = new Set<string>();
 	private _writeQueue: Promise<void> = Promise.resolve();
@@ -172,6 +184,7 @@ export class RemoteAccessAuth extends Disposable implements IRemoteAccessAuth {
 	private readonly _pairingCodeLifetimeMs: number;
 	private readonly _maxFailuresPerClient: number;
 	private readonly _maxFailuresTotal: number;
+	private readonly _maxKeyFailuresPerClient: number;
 	private readonly _failureWindowMs: number;
 	private readonly _lockoutMs: number;
 	private readonly _scryptCost: number;
@@ -187,6 +200,7 @@ export class RemoteAccessAuth extends Disposable implements IRemoteAccessAuth {
 		this._pairingCodeLifetimeMs = options.pairingCodeLifetimeMs ?? 10 * 60_000;
 		this._maxFailuresPerClient = options.maxFailuresPerClient ?? 5;
 		this._maxFailuresTotal = options.maxFailuresTotal ?? 30;
+		this._maxKeyFailuresPerClient = options.maxKeyFailuresPerClient ?? 20;
 		this._failureWindowMs = options.failureWindowMs ?? 15 * 60_000;
 		this._lockoutMs = options.lockoutMs ?? 15 * 60_000;
 		this._scryptCost = options.scryptCost ?? 16384;
@@ -269,18 +283,20 @@ export class RemoteAccessAuth extends Disposable implements IRemoteAccessAuth {
 	}
 
 	verifyDeviceKey(deviceKey: string | undefined, client: string): IRemoteAccessDevice | undefined {
-		// Device keys are 256-bit random, so only the client's own failures count here: a guessing
-		// client cannot lock every paired device out.
-		if (this._getLockout(client, false) > 0) {
+		// Device keys are 256-bit random, so only the client's own failed key checks count here: a
+		// guessing client cannot lock every paired device out, and never locks out pairing.
+		if (getLockout(this._keyFailures, [client], this._now()) > 0) {
 			return undefined;
 		}
 		const separator = deviceKey?.indexOf('.') ?? -1;
 		const id = deviceKey && separator > 0 ? deviceKey.slice(0, separator) : undefined;
 		const device = id ? this._devices.get(id) : undefined;
 		if (!deviceKey || !device || !safeEqual(hashSecret(deviceKey.slice(separator + 1)), device.keyHash)) {
-			// A signed-out device that keeps reconnecting is not an attack.
-			if (!id || !this._revokedIds.has(id)) {
-				this._fail(client, RemoteAccessAuthFailure.InvalidCode, false);
+			// A signed-out device, or one paired before the server's data was wiped, that keeps
+			// reconnecting is not an attack: its key is well-formed but names no device.
+			const staleKey = !!deviceKey && DEVICE_KEY_PATTERN.test(deviceKey) && !device;
+			if (!staleKey && (!id || !this._revokedIds.has(id))) {
+				this._recordFailure(this._keyFailures, [[client, this._maxKeyFailuresPerClient]], 'device key checks');
 			}
 			return undefined;
 		}
@@ -296,19 +312,7 @@ export class RemoteAccessAuth extends Disposable implements IRemoteAccessAuth {
 	}
 
 	getLockout(client: string): number {
-		return this._getLockout(client, true);
-	}
-
-	private _getLockout(client: string, includeAllClients: boolean): number {
-		const now = this._now();
-		let lockout = 0;
-		for (const key of includeAllClients ? [client, ALL_CLIENTS] : [client]) {
-			const record = this._failures.get(key);
-			if (record && record.lockedUntil > now) {
-				lockout = Math.max(lockout, record.lockedUntil - now);
-			}
-		}
-		return lockout;
+		return getLockout(this._failures, [client, ALL_CLIENTS], this._now());
 	}
 
 	listDevices(): readonly IRemoteAccessDevice[] {
@@ -358,24 +362,24 @@ export class RemoteAccessAuth extends Disposable implements IRemoteAccessAuth {
 		return actual.length === expected.length && timingSafeEqual(actual, expected);
 	}
 
-	private _fail(client: string, reason: RemoteAccessAuthFailure, countForAllClients = true): RemoteAccessPairResult {
+	private _fail(client: string, reason: RemoteAccessAuthFailure): RemoteAccessPairResult {
+		this._recordFailure(this._failures, [[client, this._maxFailuresPerClient], [ALL_CLIENTS, this._maxFailuresTotal]], 'pairing attempts');
+		return { ok: false, reason };
+	}
+
+	private _recordFailure(failures: Map<string, IFailureRecord>, limits: readonly [string, number][], what: string): void {
 		const now = this._now();
-		const limits: [string, number][] = [[client, this._maxFailuresPerClient]];
-		if (countForAllClients) {
-			limits.push([ALL_CLIENTS, this._maxFailuresTotal]);
-		}
 		for (const [key, max] of limits) {
-			const record = this._failures.get(key) ?? { failures: [], lockedUntil: 0 };
+			const record = failures.get(key) ?? { failures: [], lockedUntil: 0 };
 			record.failures = record.failures.filter(time => now - time < this._failureWindowMs);
 			record.failures.push(now);
 			if (record.failures.length >= max) {
 				record.lockedUntil = now + this._lockoutMs;
 				record.failures = [];
-				this._logService.warn(`[RemoteAccess] Too many failed attempts${key === ALL_CLIENTS ? '' : ` from ${key}`}; locked for ${Math.round(this._lockoutMs / 60_000)} minutes`);
+				this._logService.warn(`[RemoteAccess] Too many failed ${what}${key === ALL_CLIENTS ? '' : ` from ${key}`}; locked for ${Math.round(this._lockoutMs / 60_000)} minutes`);
 			}
-			this._failures.set(key, record);
+			failures.set(key, record);
 		}
-		return { ok: false, reason };
 	}
 
 	private _save(): Promise<void> {
@@ -393,6 +397,18 @@ export class RemoteAccessAuth extends Disposable implements IRemoteAccessAuth {
 		});
 		return this._writeQueue;
 	}
+}
+
+/** The longest lockout of `keys` in `failures` at `now`, or 0. */
+function getLockout(failures: ReadonlyMap<string, IFailureRecord>, keys: readonly string[], now: number): number {
+	let lockout = 0;
+	for (const key of keys) {
+		const record = failures.get(key);
+		if (record && record.lockedUntil > now) {
+			lockout = Math.max(lockout, record.lockedUntil - now);
+		}
+	}
+	return lockout;
 }
 
 /** Uppercase, without spaces and dashes. */
