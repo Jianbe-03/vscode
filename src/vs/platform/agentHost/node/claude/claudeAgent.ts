@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import type { CCAModel } from '@vscode/copilot-api';
-import type { ModelInfo, OnElicitation, Options, SDKSessionInfo, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { ModelInfo, OnElicitation, Options, SDKSessionInfo, SDKUserMessage, SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { Limiter, retry, SequencerByKey } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
@@ -53,6 +53,7 @@ import { buildModelEnumerationOptions } from './claudeSdkOptions.js';
 import { isClaudeAccountSetUp, resolveClaudeTransportMode, type ClaudeTransportMode } from './claudeTransportMode.js';
 import { mergeClaudeModelCatalogs, resolveClaudeSessionTransport } from './claudeModelSelection.js';
 import { mapSessionMessagesToTurns, resolveForkAnchorUuid } from './claudeReplayMapper.js';
+import { expandCompactedHistory, parseClaudeTranscript, startsAtCompaction } from './claudeCompactedHistory.js';
 import { getSubagentTranscript } from './claudeSubagentResolver.js';
 import { SubagentRegistry } from './claudeSubagentRegistry.js';
 import { ClaudeAgentSession, type IClaudeSessionSubscriptionLimits } from './claudeAgentSession.js';
@@ -2038,12 +2039,17 @@ export class ClaudeAgent extends Disposable implements IAgent {
 	 * and returns `[]` rather than propagating.
 	 */
 	private async _reconstructTurns(sdkSessionId: string, routingUri: URI, subagents: SubagentRegistry | undefined): Promise<readonly Turn[]> {
-		let messages;
+		let messages: readonly SessionMessage[];
 		try {
 			messages = await this._sdkService.getSessionMessages(sdkSessionId, { includeSystemMessages: true });
 		} catch (err) {
 			this._logService.warn(`[Claude] getSessionMessages SDK fetch failed for ${sdkSessionId}`, err);
 			return [];
+		}
+		// CreaEditor: the SDK returns a compacted chat from its last compaction on; put the turns
+		// before it back from the raw transcript (see `claudeCompactedHistory.ts`).
+		if (startsAtCompaction(messages)) {
+			messages = await this._expandCompactedHistory(sdkSessionId, messages);
 		}
 		let turns: readonly Turn[];
 		try {
@@ -2068,6 +2074,21 @@ export class ClaudeAgent extends Disposable implements IAgent {
 			this._logService.warn(`[Claude] primeFromTranscript threw for ${sdkSessionId}`, err);
 		}
 		return turns;
+	}
+
+	/** CreaEditor: {@link expandCompactedHistory} from the chat's transcript file; {@link messages} unchanged when it cannot be read. */
+	private async _expandCompactedHistory(sdkSessionId: string, messages: readonly SessionMessage[]): Promise<readonly SessionMessage[]> {
+		const transcript = findClaudeSessionTranscript(getClaudeConfigDir(process.env, this._environmentService.userHome.fsPath), sdkSessionId);
+		if (!transcript) {
+			return messages;
+		}
+		try {
+			const content = await this._fileService.readFile(URI.file(transcript));
+			return expandCompactedHistory(messages, parseClaudeTranscript(content.value.toString()));
+		} catch (err) {
+			this._logService.warn(`[Claude] could not read the history before the compaction of ${sdkSessionId}`, err);
+			return messages;
+		}
 	}
 
 	private async _listClaudeCodeChats(kind: 'migration' | 'discovery'): Promise<IAgentChatMetadata[] | undefined> {

@@ -151,6 +151,11 @@ function readTimestamp(msg: SessionMessage & { readonly timestamp?: unknown }): 
 }
 
 function parseUserMessage(msg: SessionMessage, timestamp: string | undefined): ParsedSessionMessage | undefined {
+	// CreaEditor: the summary the CLI writes after a compaction ("This session is being continued
+	// from a previous conversation…") is model context, not something the user typed.
+	if ((msg as SessionMessage & { readonly isCompactSummary?: unknown }).isCompactSummary === true) {
+		return undefined;
+	}
 	const content = readUserContent(msg.message);
 	if (content === undefined) {
 		return undefined;
@@ -188,7 +193,10 @@ function parseSystemMessage(msg: SessionMessage, timestamp: string | undefined):
 	if (subtype === undefined || !ALLOWED_SYSTEM_SUBTYPES.has(subtype)) {
 		return undefined;
 	}
-	const text = readSystemText(msg.message) ?? `[${subtype}]`;
+	// CreaEditor: the same notice as the live compaction (`claudeMapSessionEvents.ts`).
+	const text = subtype === 'compact_boundary'
+		? localize('claude.replay.conversationCompacted', "Conversation compacted")
+		: readSystemText(msg.message) ?? `[${subtype}]`;
 	return { kind: 'system-notification', uuid: msg.uuid, subtype, text, timestamp };
 }
 

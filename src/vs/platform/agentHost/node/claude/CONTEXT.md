@@ -957,8 +957,14 @@ empty chat.
   metadata asymmetry.
 - `compact_boundary` is **not** a Turn boundary in either path. Surface
   it as a `SystemNotification` part on the *currently active* Turn and
-  continue. The SDK's `logicalParentUuid` already linearises the chain
-  across the boundary; the mapper trusts it and does not re-derive.
+  continue. CreaEditor: the SDK does NOT follow `logicalParentUuid` —
+  `getSessionMessages` walks `parentUuid` from the leaf and stops at the
+  last boundary (whose `parentUuid` is `null`), and returns the boundary
+  without its `subtype`. When the chain starts at a system message,
+  `claudeAgent._reconstructTurns` reads the raw `.jsonl` and
+  [claudeCompactedHistory.ts](./claudeCompactedHistory.ts) prepends the
+  pre-compaction chain (from `logicalParentUuid`) and restores the
+  subtype. The `isCompactSummary` user message is never a turn.
 
 #### Subagent ToolCall on replay
 
