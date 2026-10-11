@@ -274,6 +274,8 @@ import './contrib/tunnelHost/electron-browser/tunnelHost.contribution.js';
 // CreaEditor: Remote Access (phones and other devices use this Mac's Agents window)
 import '../workbench/contrib/remoteAccess/electron-browser/remoteAccess.contribution.js';
 import '../workbench/contrib/creaeditorNotifications/electron-browser/creaeditorNotifications.contribution.js';
+// CreaEditor: CreaEditor Server API requests and ntfy test notifications go through the main process.
+import '../platform/agentHost/electron-browser/creaeditorServerHttpService.js';
 import './contrib/remoteAccess/electron-browser/remoteAccess.contribution.js';
 import './contrib/providers/remoteAgentHost/electron-browser/delegateToServer.contribution.js';
 

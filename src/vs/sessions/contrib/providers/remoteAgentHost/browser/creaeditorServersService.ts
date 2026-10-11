@@ -5,10 +5,11 @@
 
 // CreaEditor: keeps the paired CreaEditor Servers (list in application storage, device keys in secret
 // storage), checks their `/health`, and makes each one a remote agent host of the kind
-// `RemoteAgentHostEntryType.CreaEditorServer` whose connection token is the device key.
+// `RemoteAgentHostEntryType.CreaEditorServer` whose connection token is the device key. HTTP goes
+// through ICreaEditorServerHttpService (the main process on desktop: renderer fetch is blocked by CORS
+// and the window CSP).
 
 import { IntervalTimer } from '../../../../../base/common/async.js';
-import { CancellationToken } from '../../../../../base/common/cancellation.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { derived, IObservable, observableValue } from '../../../../../base/common/observable.js';
@@ -17,6 +18,7 @@ import { AgentHostProtocolClient } from '../../../../../platform/agentHost/brows
 import { WebSocketClientTransport } from '../../../../../platform/agentHost/browser/webSocketClientTransport.js';
 import { agentsWindowAgentHostClientInfo } from '../../../../../platform/agentHost/common/agentHostClientInfo.js';
 import { CREAEDITOR_SERVER_API_BUDGETS, CREAEDITOR_SERVER_API_COSTS, CREAEDITOR_SERVER_API_PAIRING, CREAEDITOR_SERVER_API_PREFIX, ICreaEditorServerCostsResponse, ICreaEditorServerPairingResponse, IServerCostBudgets } from '../../../../../platform/agentHost/common/creaeditorCosts.js';
+import { ICreaEditorServerHttpService } from '../../../../../platform/agentHost/common/creaeditorServerHttp.js';
 import { CREAEDITOR_SERVER_HEALTH_PATH, CREAEDITOR_SERVER_PAIR_PATH, CreaEditorServerPairResult, getCreaEditorServerAgentHostAddress, parseCreaEditorServerHealth, parseCreaEditorServerInput, parseCreaEditorServerPairResponse } from '../../../../../platform/agentHost/common/creaeditorServer.js';
 import { getEntryAddress, IRemoteAgentHostConnectionFactory, IRemoteAgentHostConnectOptions, IRemoteAgentHostCreatedConnection, IRemoteAgentHostEntry, IRemoteAgentHostService, RemoteAgentHostEntryType } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -24,7 +26,6 @@ import { InstantiationType, registerSingleton } from '../../../../../platform/in
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
-import { asJson, IRequestService } from '../../../../../platform/request/common/request.js';
 import { ISecretStorageService } from '../../../../../platform/secrets/common/secrets.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
@@ -36,6 +37,15 @@ import { EntryDrivenProviderContribution, IEntryDrivenProviderOptions } from './
 /** How often the servers' `/health` is checked while the window has focus. */
 const HEALTH_INTERVAL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 8_000;
+
+/** Reads a JSON answer; undefined when it is empty or not JSON. */
+function parseJson(text: string): unknown {
+	try {
+		return text ? JSON.parse(text) : undefined;
+	} catch {
+		return undefined;
+	}
+}
 
 /** Builds the WebSocket connections of CreaEditor Servers, with the device key as the token. */
 class CreaEditorServerConnectionFactory implements IRemoteAgentHostConnectionFactory {
@@ -76,7 +86,7 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 	constructor(
 		@IStorageService private readonly _storageService: IStorageService,
 		@ISecretStorageService private readonly _secretStorageService: ISecretStorageService,
-		@IRequestService private readonly _requestService: IRequestService,
+		@ICreaEditorServerHttpService private readonly _httpService: ICreaEditorServerHttpService,
 		@IRemoteAgentHostService private readonly _remoteAgentHostService: IRemoteAgentHostService,
 		@IInstantiationService instantiationService: IInstantiationService,
 		@IHostService private readonly _hostService: IHostService,
@@ -122,15 +132,14 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 
 	async pair(serverUrl: string, code: string, password: string | undefined, deviceName: string): Promise<CreaEditorServerPairResult> {
 		try {
-			const context = await this._requestService.request({
-				type: 'POST',
+			const response = await this._httpService.request({
+				method: 'POST',
 				url: `${serverUrl}${CREAEDITOR_SERVER_PAIR_PATH}`,
 				headers: { 'Content-Type': 'application/json' },
-				data: JSON.stringify({ code, deviceName, ...(password ? { password } : {}) }),
-				timeout: REQUEST_TIMEOUT_MS,
-				callSite: 'creaeditorServers.pair',
-			}, CancellationToken.None);
-			return parseCreaEditorServerPairResponse(context.res.statusCode ?? 0, await asJson(context).catch(() => undefined));
+				body: JSON.stringify({ code, deviceName, ...(password ? { password } : {}) }),
+				timeoutMs: REQUEST_TIMEOUT_MS,
+			});
+			return parseCreaEditorServerPairResponse(response.status, parseJson(response.body));
 		} catch (error) {
 			this._logService.warn(`[CreaEditor Servers] Pairing with ${serverUrl} failed`, error);
 			return { ok: false, error: 'unreachable' };
@@ -169,13 +178,12 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 		const deviceKey = this._deviceKeys.get().get(serverId);
 		if (deviceKey) {
 			// Best effort: the server forgets this device, so the key is useless even if it leaked.
-			await this._requestService.request({
-				type: 'POST',
+			await this._httpService.request({
+				method: 'POST',
 				url: `${server.serverUrl}/api/sign-out`,
 				headers: { 'Authorization': `Bearer ${deviceKey}` },
-				timeout: REQUEST_TIMEOUT_MS,
-				callSite: 'creaeditorServers.signOut',
-			}, CancellationToken.None).catch(error => this._logService.info(`[CreaEditor Servers] Could not sign out of ${server.serverUrl}`, error));
+				timeoutMs: REQUEST_TIMEOUT_MS,
+			}).catch(error => this._logService.info(`[CreaEditor Servers] Could not sign out of ${server.serverUrl}`, error));
 		}
 		await this._secretStorageService.delete(getCreaEditorServerDeviceKeyName(serverId));
 		const keys = new Map(this._deviceKeys.get());
@@ -214,21 +222,19 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 			return undefined;
 		}
 		try {
-			const context = await this._requestService.request({
-				type,
+			const response = await this._httpService.request({
+				method: type,
 				url: `${server.serverUrl}${CREAEDITOR_SERVER_API_PREFIX}${path}`,
 				headers: { 'Authorization': `Bearer ${deviceKey}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
-				...(body ? { data: JSON.stringify(body) } : {}),
-				timeout: REQUEST_TIMEOUT_MS,
-				disableCache: true,
-				callSite: 'creaeditorServers.api',
-			}, CancellationToken.None);
-			const status = context.res.statusCode ?? 0;
+				...(body ? { body: JSON.stringify(body) } : {}),
+				timeoutMs: REQUEST_TIMEOUT_MS,
+			});
+			const status = response.status;
 			if (status < 200 || status >= 300) {
 				this._logService.info(`[CreaEditor Servers] ${server.name} answered ${status} to ${type} ${path.split('?')[0]}`);
 				return undefined;
 			}
-			return (await asJson<T>(context)) ?? undefined;
+			return (parseJson(response.body) as T | undefined) ?? undefined;
 		} catch (error) {
 			this._logService.info(`[CreaEditor Servers] ${type} ${path.split('?')[0]} on ${server.name} failed`, error);
 			return undefined;
@@ -250,14 +256,12 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 	}
 
 	private async _fetchHealth(serverUrl: string) {
-		const context = await this._requestService.request({
-			type: 'GET',
+		const response = await this._httpService.request({
+			method: 'GET',
 			url: `${serverUrl}${CREAEDITOR_SERVER_HEALTH_PATH}`,
-			timeout: REQUEST_TIMEOUT_MS,
-			disableCache: true,
-			callSite: 'creaeditorServers.health',
-		}, CancellationToken.None);
-		return parseCreaEditorServerHealth(await asJson(context));
+			timeoutMs: REQUEST_TIMEOUT_MS,
+		});
+		return parseCreaEditorServerHealth(parseJson(response.body));
 	}
 
 	private async _loadDeviceKeys(): Promise<void> {

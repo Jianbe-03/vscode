@@ -11,11 +11,11 @@ import './media/creaeditorNotifications.css';
 import * as DOM from '../../../../base/browser/dom.js';
 import { createQrCodeSvg } from '../../../../base/browser/qrCodeElement.js';
 import { Dialog } from '../../../../base/browser/ui/dialog/dialog.js';
-import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { localize, localize2 } from '../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { CREAEDITOR_NOTIFICATIONS_TARGET_SECRET_KEY, CREAEDITOR_SET_UP_NOTIFICATIONS_COMMAND_ID, CreaEditorNotificationsRootKey, createNtfyRequest, createNtfyTopicUrl, ICreaEditorNotificationTarget, NTFY_DEFAULT_SERVER, parseNotificationTarget } from '../../../../platform/agentHost/common/creaeditorNotifications.js';
+import { CREAEDITOR_NOTIFICATIONS_TARGET_SECRET_KEY, CREAEDITOR_SET_UP_NOTIFICATIONS_COMMAND_ID, CreaEditorNotificationsRootKey, createNtfyTopicUrl, ICreaEditorNotificationTarget, NTFY_DEFAULT_SERVER, parseNotificationTarget } from '../../../../platform/agentHost/common/creaeditorNotifications.js';
+import { ICreaEditorServerHttpService } from '../../../../platform/agentHost/common/creaeditorServerHttp.js';
 import { IClipboardService } from '../../../../platform/clipboard/common/clipboardService.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
@@ -23,13 +23,10 @@ import { IKeybindingService } from '../../../../platform/keybinding/common/keybi
 import { ILayoutService } from '../../../../platform/layout/browser/layoutService.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
 import { IQuickInputService, IQuickPickItem } from '../../../../platform/quickinput/common/quickInput.js';
-import { IRequestService } from '../../../../platform/request/common/request.js';
 import { ISecretStorageService } from '../../../../platform/secrets/common/secrets.js';
 import { defaultDialogStyles } from '../../../../platform/theme/browser/defaultStyles.js';
 import { createWorkbenchDialogOptions } from '../../../browser/parts/dialogs/dialog.js';
 import { IHostService } from '../../../services/host/browser/host.js';
-
-const REQUEST_TIMEOUT_MS = 10_000;
 
 type SetupChoice = 'ntfy' | 'ownServer' | 'show' | 'test' | 'newTopic' | 'off';
 
@@ -46,17 +43,15 @@ async function readTarget(secretStorageService: ISecretStorageService): Promise<
 	}
 }
 
-/** Sends one test notification from this computer; resolves with an error message, or undefined when it went out. */
-async function sendTestNotification(requestService: IRequestService, target: ICreaEditorNotificationTarget): Promise<string | undefined> {
-	const request = createNtfyRequest(target, {
-		title: localize('creaeditorNotifications.testTitle', "CreaEditor"),
-		message: localize('creaeditorNotifications.testMessage', "Notifications work. You get one when a chat finishes, fails or needs your approval."),
-		priority: 3,
-		tags: ['tada'],
-	});
+/**
+ * Sends one test notification from this computer (through the main process: renderer fetch is blocked
+ * by CORS and the window CSP); resolves with an error message, or undefined when it went out.
+ */
+async function sendTestNotification(httpService: ICreaEditorServerHttpService, target: ICreaEditorNotificationTarget): Promise<string | undefined> {
 	try {
-		const context = await requestService.request({ type: 'POST', url: request.url, headers: request.headers, data: request.body, timeout: REQUEST_TIMEOUT_MS, callSite: 'creaeditorNotifications.test' }, CancellationToken.None);
-		const status = context.res.statusCode ?? 0;
+		const status = await httpService.sendNtfyTestNotification(target,
+			localize('creaeditorNotifications.testTitle', "CreaEditor"),
+			localize('creaeditorNotifications.testMessage', "Notifications work. You get one when a chat finishes, fails or needs your approval."));
 		if (status >= 200 && status < 300) {
 			return undefined;
 		}
@@ -96,7 +91,7 @@ async function showTopicDialog(accessor: ServicesAccessor, target: ICreaEditorNo
 	const keybindingService = accessor.get(IKeybindingService);
 	const hostService = accessor.get(IHostService);
 	const clipboardService = accessor.get(IClipboardService);
-	const requestService = accessor.get(IRequestService);
+	const httpService = accessor.get(ICreaEditorServerHttpService);
 	const notificationService = accessor.get(INotificationService);
 	const topic = new URL(target.url).pathname.split('/').pop() ?? '';
 
@@ -134,7 +129,7 @@ async function showTopicDialog(accessor: ServicesAccessor, target: ICreaEditorNo
 			store.dispose();
 		}
 		if (button === 0) {
-			const error = await sendTestNotification(requestService, target);
+			const error = await sendTestNotification(httpService, target);
 			if (error) {
 				notificationService.error(error);
 			} else {
@@ -162,7 +157,7 @@ registerAction2(class SetUpNotificationsAction extends Action2 {
 		const quickInputService = accessor.get(IQuickInputService);
 		const secretStorageService = accessor.get(ISecretStorageService);
 		const configurationService = accessor.get(IConfigurationService);
-		const requestService = accessor.get(IRequestService);
+		const httpService = accessor.get(ICreaEditorServerHttpService);
 		const notificationService = accessor.get(INotificationService);
 		const instantiationService = accessor.get(IInstantiationService);
 		const current = await readTarget(secretStorageService);
@@ -197,7 +192,7 @@ registerAction2(class SetUpNotificationsAction extends Action2 {
 				await instantiationService.invokeFunction(showTopicDialog, current!);
 				return;
 			case 'test': {
-				const error = await sendTestNotification(requestService, current!);
+				const error = await sendTestNotification(httpService, current!);
 				if (error) {
 					notificationService.error(error);
 				} else {

@@ -140,6 +140,8 @@ import { RemoteAccessMainService } from '../../platform/agentHost/electron-main/
 import { REMOTE_ACCESS_CHANNEL_NAME } from '../../platform/agentHost/common/remoteAccess.js';
 import { CreaEditorDelegationMainService } from '../../platform/agentHost/electron-main/creaeditorDelegationMainService.js';
 import { CREAEDITOR_DELEGATION_CHANNEL_NAME } from '../../platform/agentHost/common/creaeditorDelegation.js';
+import { NodeCreaEditorServerHttpService } from '../../platform/agentHost/node/creaeditorServerHttpClient.js';
+import { CREAEDITOR_SERVER_HTTP_CHANNEL_NAME } from '../../platform/agentHost/common/creaeditorServerHttp.js';
 import { NODE_REMOTE_RESOURCE_CHANNEL_NAME, NODE_REMOTE_RESOURCE_IPC_METHOD_NAME, NodeRemoteResourceResponse, NodeRemoteResourceRouter } from '../../platform/remote/common/electronRemoteResources.js';
 import { Lazy } from '../../base/common/lazy.js';
 import { IAuxiliaryWindowsMainService } from '../../platform/auxiliaryWindow/electron-main/auxiliaryWindows.js';
@@ -779,6 +781,9 @@ export class CodeApplication extends Disposable {
 		// CreaEditor: Delegate to Server (git, session files and the server's code receiver).
 		const delegationMainService = this._register(appInstantiationService.createInstance(CreaEditorDelegationMainService));
 		mainProcessElectronServer.registerChannel(CREAEDITOR_DELEGATION_CHANNEL_NAME, ProxyChannel.fromService(delegationMainService, this._store));
+
+		// CreaEditor: CreaEditor Server API requests and ntfy test notifications from windows (no CORS/CSP here).
+		mainProcessElectronServer.registerChannel(CREAEDITOR_SERVER_HTTP_CHANNEL_NAME, ProxyChannel.fromService(new NodeCreaEditorServerHttpService(), this._store));
 
 		// Metered connection telemetry
 		appInstantiationService.invokeFunction(accessor => {
