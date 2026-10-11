@@ -23,7 +23,7 @@ import { IDelegationProcessRunner, nodeDelegationProcessRunner } from '../../../
 import { getClaudeConfigDir, getCopilotCliHome, installSessionFiles } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
 import { resolveDefaultCodexHome } from '../../../platform/agentHost/node/codex/codexAccountHomes.js';
 import { AgentHostCodexAgentCodexHomeEnvVar } from '../../../platform/agentHost/common/agentService.js';
-import { assertDelegationId, createResultBundle, IDelegationStoreLayout, listKnownCommits, openPullRequestFromServer, prepareDelegationWorktree } from '../../../platform/agentHost/node/creaeditorDelegation/delegationWorktrees.js';
+import { assertDelegationId, createResultBundle, IDelegationStoreLayout, listKnownCommits, nameExistingDelegationRepositories, openPullRequestFromServer, prepareDelegationWorktree } from '../../../platform/agentHost/node/creaeditorDelegation/delegationWorktrees.js';
 import { FileSecretStore } from '../../../platform/agentHost/node/shared/fileSecretStore.js';
 import type { IRemoteAccessApiHandler } from '../../../platform/agentHost/node/remoteAccess/remoteAccessServer.js';
 import type { IRemoteAccessDevice } from '../../../platform/agentHost/node/remoteAccess/remoteAccessAuth.js';
@@ -111,6 +111,23 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 		fs.mkdirSync(this._downloads, { recursive: true, mode: 0o700 });
 		this._store = new FileSecretStore(layout.secrets);
 		this._removeStaleTransfers();
+		this._nameExistingRepositories();
+	}
+
+	/** Bare repositories from before they kept their repository's name get it from their chats' worktree folders. */
+	private _nameExistingRepositories(): void {
+		const records: IDelegationRecord[] = [];
+		for (const name of fs.readdirSync(this._options.layout.delegations)) {
+			if (!name.endsWith('.json')) {
+				continue;
+			}
+			try {
+				records.push(JSON.parse(fs.readFileSync(join(this._options.layout.delegations, name), 'utf8')) as IDelegationRecord);
+			} catch {
+				// Not a record.
+			}
+		}
+		nameExistingDelegationRepositories(this._options.layout, records.filter(record => typeof record?.repoId === 'string' && typeof record.shortId === 'string' && typeof record.worktree === 'string'));
 	}
 
 	/** The key pair (created on first use). Call once at startup so the agent host can read it. */

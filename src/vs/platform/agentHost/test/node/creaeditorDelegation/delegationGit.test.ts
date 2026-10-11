@@ -8,13 +8,15 @@ import { execFileSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import { tmpdir } from 'os';
-import { join } from '../../../../../base/common/path.js';
+import { join, resolve } from '../../../../../base/common/path.js';
 import { getRandomTestPath } from '../../../../../base/test/node/testUtils.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { DelegationErrorCode } from '../../../common/creaeditorDelegation.js';
 import { DelegationError, packWorkspace, readDelegationRepository } from '../../../node/creaeditorDelegation/delegationPack.js';
 import { IDelegationProcessOptions, IDelegationProcessResult, IDelegationProcessRunner, nodeDelegationProcessRunner } from '../../../node/creaeditorDelegation/delegationProcess.js';
-import { createResultBundle, importResultBundle, IDelegationStoreLayout, listKnownCommits, openPullRequestFromServer, parseGitHubRemote, prepareDelegationWorktree } from '../../../node/creaeditorDelegation/delegationWorktrees.js';
+import { createResultBundle, getBareRepositoryPath, importResultBundle, IDelegationStoreLayout, listKnownCommits, nameExistingDelegationRepositories, openPullRequestFromServer, parseGitHubRemote, prepareDelegationWorktree } from '../../../node/creaeditorDelegation/delegationWorktrees.js';
+import { DELEGATION_REPOSITORY_NAME_FILE, getRepositoryDisplayName } from '../../../node/creaeditorDelegation/delegationRepositoryName.js';
+import { URI } from '../../../../../base/common/uri.js';
 
 const IDENTITY = { GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com' };
 
@@ -133,6 +135,22 @@ suite('CreaEditor Delegation - git', function () {
 			laptopTempRefs: '',
 			origin: 'https://github.com/creacoon/example.git',
 		});
+	});
+
+	test('the bare repository shows as the repository\'s name, also for repositories from before it kept one', async () => {
+		const { packed, prepared } = await delegate('d1');
+		const bare = getBareRepositoryPath(layout, packed.repoId);
+		// The worktree's common dir is the bare repository: the Agents window groups the chat under it.
+		const commonDir = fs.realpathSync(resolve(prepared.worktree, run(prepared.worktree, 'rev-parse', '--git-common-dir')));
+		const named = getRepositoryDisplayName(URI.file(bare));
+		fs.rmSync(join(bare, DELEGATION_REPOSITORY_NAME_FILE));
+		const unnamed = getRepositoryDisplayName(URI.file(bare));
+		nameExistingDelegationRepositories(layout, [{ repoId: packed.repoId, shortId: 'd1', worktree: prepared.worktree }]);
+
+		assert.deepStrictEqual(
+			[commonDir === fs.realpathSync(bare), named, unnamed, getRepositoryDisplayName(URI.file(bare)), getRepositoryDisplayName(URI.file(laptop))],
+			[true, 'example', `${packed.repoId}.git`, 'example', 'laptop'],
+		);
 	});
 
 	test('includes secret-looking files only when asked', async () => {

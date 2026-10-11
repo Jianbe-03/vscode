@@ -8,6 +8,7 @@ import { basename } from '../../../../base/common/path.js';
 import { URI } from '../../../../base/common/uri.js';
 import type { IAgentSessionProjectInfo } from '../../common/agent.js';
 import { tryResolvePrimaryWorktreeRoot, type IAgentHostGitService } from '../../common/agentHostGitService.js';
+import { getRepositoryDisplayName } from '../creaeditorDelegation/delegationRepositoryName.js';
 
 export interface ICopilotSessionContext {
 	readonly cwd?: string;
@@ -26,7 +27,8 @@ export async function resolveGitProject(workingDirectory: URI | undefined, gitSe
 	}
 
 	const uri = await tryResolvePrimaryWorktreeRoot(gitService, repositoryRoot) ?? repositoryRoot;
-	return { uri, displayName: basename(uri.fsPath) || uri.toString() };
+	// CreaEditor: a delegated chat's repository is a bare repository on the server: show its name.
+	return { uri, displayName: getRepositoryDisplayName(uri) };
 }
 
 export function projectFromRepository(repository: string): IAgentSessionProjectInfo | undefined {

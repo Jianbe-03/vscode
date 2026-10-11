@@ -9,7 +9,6 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { appendEscapedMarkdownInlineCode } from '../../../../base/common/htmlContent.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { Schemas } from '../../../../base/common/network.js';
-import { basename } from '../../../../base/common/path.js';
 import { getComparisonKey, isEqual } from '../../../../base/common/resources.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
@@ -27,6 +26,7 @@ import { getRepositoryRootFromWorktree, getWorktreesRoot } from '../../common/wo
 import { AH_META_IS_ARCHIVED_DB_KEY, AH_META_IS_DONE_DB_KEY, ResponsePart, ResponsePartKind, Turn } from '../../common/state/sessionState.js';
 import { getServerGatewayKeys } from './serverGatewayKeys.js';
 import { AGENT_BRANCH_PREFIX, IAgentBranchNameGenerator } from './agentBranchNameGenerator.js';
+import { getRepositoryDisplayName } from '../creaeditorDelegation/delegationRepositoryName.js';
 
 export const IAgentHostWorktreeIsolation = createDecorator<IAgentHostWorktreeIsolation>('agentHostWorktreeIsolation');
 
@@ -1746,7 +1746,8 @@ export class NullAgentHostWorktreeIsolation implements IAgentHostWorktreeIsolati
  * project via `resolveGitProject`.
  */
 function projectFromRepositoryRoot(repositoryRoot: URI): IAgentSessionProjectInfo {
-	return { uri: repositoryRoot, displayName: basename(repositoryRoot.fsPath) || repositoryRoot.toString() };
+	// CreaEditor: a delegated chat's repository is a bare repository on the server: show its name.
+	return { uri: repositoryRoot, displayName: getRepositoryDisplayName(repositoryRoot) };
 }
 
 function deriveRepositoryRootFromWorktree(worktree: URI): URI | undefined {

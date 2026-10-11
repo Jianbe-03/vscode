@@ -14,6 +14,7 @@ import { join } from '../../../../base/common/path.js';
 import { CREAEDITOR_DELEGATION_BRANCH_PREFIX, DelegationErrorCode, slugifyDelegationName } from '../../common/creaeditorDelegation.js';
 import { bundleFetchRefspecs, DelegationError, filterExistingCommits, snapshotWorkingTree } from './delegationPack.js';
 import { delegationCommitIdentity, git, gitSucceeds, IDelegationProcessRunner, nodeDelegationProcessRunner } from './delegationProcess.js';
+import { readDelegationRepositoryName, writeDelegationRepositoryName } from './delegationRepositoryName.js';
 
 /** How many known commits the server reports at most (the newest refs). */
 const MAX_KNOWN_COMMITS = 64;
@@ -120,6 +121,10 @@ export async function prepareDelegationWorktree(layout: IDelegationStoreLayout, 
 	const worktree = getDelegationWorktreePath(layout, request);
 	const branch = getDelegationBranch(request.shortId);
 	await ensureBareRepository(bare, runner);
+	if (request.repoName) {
+		// The Agents window shows the bare repository (the worktrees' common dir) by this name.
+		writeDelegationRepositoryName(bare, request.repoName);
+	}
 
 	if (request.bundleFile) {
 		const verify = await runner.run('git', ['bundle', 'verify', '-q', request.bundleFile], { cwd: bare });
@@ -167,6 +172,31 @@ export async function prepareDelegationWorktree(layout: IDelegationStoreLayout, 
 	const workingDirectory = request.subPath ? join(worktree, ...request.subPath.split('/')) : worktree;
 	fs.mkdirSync(workingDirectory, { recursive: true });
 	return { worktree, workingDirectory, branch };
+}
+
+/**
+ * Names bare repositories that were created before they kept their repository's name, from the
+ * worktree folders of their delegated chats (`<repository name>-<shortId>`).
+ */
+export function nameExistingDelegationRepositories(layout: IDelegationStoreLayout, records: readonly { readonly repoId: string; readonly shortId: string; readonly worktree: string }[]): void {
+	for (const record of records) {
+		let bare: string;
+		try {
+			bare = getBareRepositoryPath(layout, record.repoId);
+		} catch {
+			continue;
+		}
+		const folder = record.worktree.split(/[\\/]/).pop() ?? '';
+		const suffix = `-${record.shortId}`;
+		if (!folder.endsWith(suffix) || folder.length === suffix.length || !fs.existsSync(join(bare, 'HEAD')) || readDelegationRepositoryName(bare)) {
+			continue;
+		}
+		try {
+			writeDelegationRepositoryName(bare, folder.slice(0, -suffix.length));
+		} catch {
+			// Best effort: the Agents window then shows the folder's id.
+		}
+	}
 }
 
 /** Removes the worktree of a delegated chat and its branch (when the user deletes the chat on the server). */
