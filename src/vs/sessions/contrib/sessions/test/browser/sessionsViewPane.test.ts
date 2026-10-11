@@ -180,6 +180,9 @@ suite('Sessions - SessionsViewPane', () => {
 			currentBodyWidth: 300,
 			currentBodyHeight: 600,
 			didInitializePaneSizes: false,
+			// No Agents pane in this sidebar, so the Customizations pane follows the Sessions list directly.
+			agentsTreeSection: undefined,
+			get customizationsPaneIndex(): number { return customizationsPaneIndex.call(host); },
 			getCustomizationsPaneHeight: () => 200,
 			layoutSidebarSplitView: (): void => layoutPane.call(host),
 			removeCustomizationsPane: (): void => {
@@ -194,6 +197,7 @@ suite('Sessions - SessionsViewPane', () => {
 		};
 		const updatePane = Reflect.get(SessionsView.prototype, 'updateCustomizationsPane') as (this: typeof host) => void;
 		const layoutPane = Reflect.get(SessionsView.prototype, 'layoutSidebarSplitView') as (this: typeof host) => void;
+		const customizationsPaneIndex = Object.getOwnPropertyDescriptor(SessionsView.prototype, 'customizationsPaneIndex')!.get as (this: typeof host) => number;
 		const focusCustomizations = SessionsView.prototype.focusCustomizations as (this: typeof host) => void;
 		const snapshot = () => ({
 			panes: splitView.length,
