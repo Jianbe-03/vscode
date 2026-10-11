@@ -391,10 +391,15 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 
 	let includeSecretFiles = false;
 	if (inspection.skippedSecretFiles.length) {
+		const single = inspection.skippedSecretFiles.length === 1;
 		const choice = await quickInputService.pick([
-			{ id: 'keep', label: localize('delegation.keepSecrets', "Keep Them on This Computer"), detail: inspection.skippedSecretFiles.slice(0, 5).join(', ') + (inspection.skippedSecretFiles.length > 5 ? ', ...' : '') },
-			{ id: 'send', label: localize('delegation.sendSecrets', "Send Them Too"), detail: localize('delegation.sendSecretsDetail', "Only if the chat needs them; they end up in the server's worktree.") },
-		], { placeHolder: localize('delegation.secretsQuestion', "{0} untracked files look like secrets (.env, keys). Send them to {1}?", inspection.skippedSecretFiles.length, server.name) });
+			{ id: 'keep', label: single ? localize('delegation.keepSecret', "Keep It on This Computer") : localize('delegation.keepSecrets', "Keep Them on This Computer"), detail: inspection.skippedSecretFiles.slice(0, 5).join(', ') + (inspection.skippedSecretFiles.length > 5 ? ', ...' : '') },
+			{ id: 'send', label: single ? localize('delegation.sendSecret', "Send It Too") : localize('delegation.sendSecrets', "Send Them Too"), detail: single ? localize('delegation.sendSecretDetail', "Only if the chat needs it; it ends up in the server's worktree.") : localize('delegation.sendSecretsDetail', "Only if the chat needs them; they end up in the server's worktree.") },
+		], {
+			placeHolder: single
+				? localize('delegation.secretQuestion', "1 untracked file looks like a secret (.env, keys). Send it to {0}?", server.name)
+				: localize('delegation.secretsQuestion', "{0} untracked files look like secrets (.env, keys). Send them to {1}?", inspection.skippedSecretFiles.length, server.name)
+		});
 		if (!choice) {
 			return;
 		}
