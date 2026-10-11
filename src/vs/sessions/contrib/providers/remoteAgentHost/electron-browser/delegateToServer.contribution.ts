@@ -763,6 +763,7 @@ async function takeBackHereAction(accessor: ServicesAccessor, context: Delegatio
 	const sessionsManagementService = accessor.get(ISessionsManagementService);
 	const sessionsService = accessor.get(ISessionsService);
 	const logService = accessor.get(ILogService);
+	const serversService = accessor.get(ICreaEditorServersService);
 	const store = getDelegatedChats(accessor);
 	const chat = await pickDelegatedChat(accessor, context, localize('delegation.pickTakeBack', "Take back which chat?"));
 	if (!chat) {
@@ -778,7 +779,11 @@ async function takeBackHereAction(accessor: ServicesAccessor, context: Delegatio
 	if (!confirmed) {
 		return;
 	}
-	const remote = chat.remoteSessionResource ? sessionsManagementService.getSession(URI.parse(chat.remoteSessionResource)) : undefined;
+	// The server's chat as recorded, else (no record of it, e.g. it started later) the one in its worktree.
+	const server = serversService.servers.get().find(candidate => candidate.id === chat.serverId);
+	const authority = server ? agentHostAuthority(serversService.getAgentHostAddress(server)) : undefined;
+	const remote = (chat.remoteSessionResource ? sessionsManagementService.getSession(URI.parse(chat.remoteSessionResource)) : undefined)
+		?? (authority ? findServerChat(sessionsManagementService, authority, chat) : undefined);
 	if (remote) {
 		try {
 			if (remote.status.get() === SessionStatus.InProgress || remote.status.get() === SessionStatus.NeedsInput) {
