@@ -3165,15 +3165,18 @@ export class CopilotAgent extends Disposable implements IAgent {
 				let externalClientName: string | undefined;
 				if (!adoptable) {
 					const clientName = s.isRemote ? undefined : s.clientName;
-					if (clientName === undefined || !COPILOT_EXTERNAL_SESSION_CLIENT_NAMES.has(clientName)) {
+					// CreaEditor: a chat delegated to this server (Delegate to Server) was created by the laptop's
+					// agent host, so its client name is not the CLI's; its worktree marks it as importable, at any age.
+					const delegated = getServerGatewayKeys()?.findWorkContext(workingDirectory.fsPath) !== undefined;
+					if (!delegated && (clientName === undefined || !COPILOT_EXTERNAL_SESSION_CLIENT_NAMES.has(clientName))) {
 						unsupportedClientName++;
 						return undefined;
 					}
-					if (!Number.isFinite(modifiedTime) || modifiedTime < earliestExternalModifiedTime) {
+					if (!delegated && (!Number.isFinite(modifiedTime) || modifiedTime < earliestExternalModifiedTime)) {
 						outsideImportWindow++;
 						return undefined;
 					}
-					externalClientName = clientName;
+					externalClientName = delegated ? 'creaeditor-delegation' : clientName;
 				}
 				const discoveredChat = {
 					chat: URI.parse(buildDefaultChatUri(session)),
