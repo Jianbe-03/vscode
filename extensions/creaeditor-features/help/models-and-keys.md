@@ -44,7 +44,7 @@ Each key has its own name, presets, guardrails and models. The model picker show
 
 With several keys, the model picker shows what is left of each key next to its name, for example "Work key · $12.40 left of $50", or "$3.10 spent this month" for a key without a limit. Point at a model to see the same in its hover. CreaEditor reads the limit every 5 minutes while the window has focus, and shortly after requests.
 
-![The model picker with the limit and balance of each key](images/key-balance.png)
+<img src="images/key-balance.png" alt="The model picker with the limit and balance of each key" width="700">
 
 Once a key shows its limit, the credit card button next to **Other Models** opens the [AI Costs](costs-and-budgets.md) page.
 

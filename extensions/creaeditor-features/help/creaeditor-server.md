@@ -72,7 +72,7 @@ CreaEditor reads the pairing code the installer prints and pairs this computer r
 3. Choose **Connect by Address or Pairing Link** and paste the link. Just the address works too; CreaEditor then asks for the code. A bare `100.x.y.z` means port 31600.
 4. Give the server a name, such as "Office Server". A public server also asks for its password.
 
-![Add CreaEditor Server, with the field for the address or pairing link](images/server-add.png)
+<img src="images/server-add.png" alt="Add CreaEditor Server, with the field for the address or pairing link" width="612">
 
 CreaEditor keeps the device key in its secret storage (never in settings) and connects. The server's chats now show in the Agents window, grouped under the server.
 
@@ -80,7 +80,7 @@ CreaEditor keeps the device key in its secret storage (never in settings) and co
 
 Run **CreaEditor Servers** (Command Palette, or **Manage** in the folder picker) to see every server:
 
-![The CreaEditor Servers list with status, version, CPU, memory and chats](images/servers-list.png)
+<img src="images/servers-list.png" alt="The CreaEditor Servers list with status, version, CPU, memory and chats" width="612">
 
 - **Online** or **Offline** (with when it was last seen), its version, and the CPU and memory of the server machine.
 - Running and queued chats, such as "3 of 4 chats running · 2 queued", and whether it is public.
@@ -92,7 +92,7 @@ Click a server for its actions: **Open in Browser**, **Pair Phone**, **Sign In t
 1. In **CreaEditor Servers**, click the phone button of the server (or the server, then **Pair Phone**).
 2. Scan the QR code with your phone. It holds a fresh one-time pairing code, so the phone pairs as soon as it opens the page.
 
-![Pair Phone: a QR code with a fresh pairing code for the server](images/server-pair-phone.png)
+<img src="images/server-pair-phone.png" alt="Pair Phone: a QR code with a fresh pairing code for the server" width="453">
 
 ### Accounts on the server
 
@@ -114,11 +114,11 @@ You can start a chat on the server directly, in a repository it has from an earl
 4. The branch picker next to it starts on the newest branch of the repository (usually the branch of your latest delegated chat). Pick another if you like.
 5. Type your request and press Enter.
 
-![A new chat on the server, with New Worktree locked on and the branch picker](images/server-new-chat.png)
+<img src="images/server-new-chat.png" alt="A new chat on the server, with New Worktree locked on and the branch picker" width="700">
 
 The first answer starts with "Created isolated worktree for branch ...", and the chat works in that folder from then on.
 
-![The first answer: Created isolated worktree for branch ...](images/server-new-chat-worktree.png)
+<img src="images/server-new-chat-worktree.png" alt="The first answer: Created isolated worktree for branch ..." width="700">
 
 ### When the server no longer knows this computer
 
@@ -128,7 +128,7 @@ If the server was reset, or this computer was signed out on it, the server refus
 - A notification says "*Office Server* no longer knows this computer (it was signed out, or its data was reset). Pair again to use its chats."
 - The banner on the server's chats says "*Office Server* no longer knows this computer." with **Pair Again**.
 
-![The banner on a server chat: the server no longer knows this computer, with Pair Again](images/server-needs-pairing.png)
+<img src="images/server-needs-pairing.png" alt="The banner on a server chat: the server no longer knows this computer, with Pair Again" width="700">
 
 To fix it:
 

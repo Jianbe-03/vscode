@@ -23,7 +23,7 @@ It uses [ntfy](https://ntfy.sh): a free app for iOS and Android. No account is n
 4. In the ntfy app, tap **+** (Subscribe to Topic) and scan the QR code, or type the topic.
 5. Back in CreaEditor, click **Send Test Notification**. It shows on your phone within a few seconds.
 
-![Set Up Notifications with the QR code of the topic](images/notifications-setup.png)
+<img src="images/notifications-setup.png" alt="Set Up Notifications with the QR code of the topic" width="453">
 
 Run **Set Up Notifications** again at any time to show the QR code, send a test, use a new topic, or turn notifications off.
 

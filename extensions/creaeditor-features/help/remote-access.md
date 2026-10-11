@@ -26,11 +26,11 @@ Remote Access lets you use the Agents window of your Mac from your phone or anot
 3. Scan the QR code with your phone's camera and open the link.
 4. The **Pair This Device** page asks for a device name. It suggests one, such as "iPhone (Safari)". Keep it or type another, and tap **Pair**.
 
-   ![The Pair This Device page on the phone](images/remote-access-pair-page.png)
+   <img src="images/remote-access-pair-page.png" alt="The Pair This Device page on the phone" width="375">
 
 5. The Agents window opens in the phone layout. Tip: add it to your home screen for an app-like window.
 
-![The Remote Access dialog with the address, the QR code and the paired devices](images/remote-access-dialog.png)
+<img src="images/remote-access-dialog.png" alt="The Remote Access dialog with the address, the QR code and the paired devices" width="572">
 
 Pairing codes work once and expire after 10 minutes; **New Code** makes another. The device remembers its key, so next time it only needs the address.
 
@@ -38,7 +38,7 @@ Pairing codes work once and expire after 10 minutes; **New Code** makes another.
 
 ### What you can do from the phone
 
-![The Agents window in the phone layout](images/remote-access-phone.png)
+<img src="images/remote-access-phone.png" alt="The Agents window in the phone layout" width="375">
 
 - See all sessions and chats live, the same as in every window.
 - Open a chat and follow its output as it is written.
@@ -52,7 +52,7 @@ Anything you start runs on the Mac. The phone is only a window onto it.
 
 The **Devices** list in the dialog shows every paired device with when it was last seen. **Sign Out** ends that device's key and closes its connections at once.
 
-![The list of paired devices, each with Sign Out](images/remote-access-devices.png)
+<img src="images/remote-access-devices.png" alt="The list of paired devices, each with Sign Out" width="554">
 
 ### Public access (optional)
 

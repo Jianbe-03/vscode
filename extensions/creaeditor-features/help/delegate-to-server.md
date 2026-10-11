@@ -29,11 +29,11 @@ On the server, the chat works in its **own worktree** on the branch `creaeditor/
 4. If untracked files look like secrets, CreaEditor asks, for example "1 untracked file looks like a secret (.env, keys). Send it to Office Server?". Choose **Keep It on This Computer** (the default answer you want most of the time) or **Send It Too** (only if the chat needs it; it ends up in the server's worktree).
 5. If the chat is running, confirm **Stop and Delegate**. The current turn stops here and the server continues from there.
 
-![The chat context menu with Delegate to Server...](images/delegate-menu.png)
+<img src="images/delegate-menu.png" alt="The chat context menu with Delegate to Server..." width="403">
 
-![How should the results come back?](images/delegate-results.png)
+<img src="images/delegate-results.png" alt="How should the results come back?" width="612">
 
-![The question about untracked files that look like secrets](images/delegate-secrets.png)
+<img src="images/delegate-secrets.png" alt="The question about untracked files that look like secrets" width="612">
 
 A notification shows the progress ("Packing code...", "Sending code... 12 MB / 40 MB", "Preparing the worktree on Office Server...") and ends with "Delegated to Office Server: the chat continues there, so this computer can be turned off."
 
@@ -43,7 +43,7 @@ In the editor window, **Delegate to Server...** (under **Continue Chat in...** o
 
 The chat now runs on the server, grouped under its repository and the server's name, such as "ws2 [Office Server]". Open it like any other chat: send messages, approve tools, stop it.
 
-![The delegated chat running on the server](images/delegated-chat.png)
+<img src="images/delegated-chat.png" alt="The delegated chat running on the server" width="900">
 
 On the laptop, the original chat is archived and locked. Instead of its input box it says "This chat continues on Office Server." with **Open on Server**, **Bring Back Changes** (or **Open PR from the Server**) and **Take Back Here**.
 
@@ -53,7 +53,7 @@ While CreaEditor runs, a notification tells you when a delegated chat finishes o
 
 Run **Show Delegated Chats** from the Command Palette. It lists every delegated chat with its server, state (running, waiting for approval, done, server offline), branch and how its results come back. Pick a chat for **Open on Server**, its results action, **Change How Results Come Back** or **Take Back Here**.
 
-![Show Delegated Chats](images/delegated-chats-list.png)
+<img src="images/delegated-chats-list.png" alt="Show Delegated Chats" width="612">
 
 ### Bring the results back
 
@@ -68,7 +68,7 @@ Run **Show Delegated Chats** from the Command Palette. It lists every delegated 
 
 **Checkout** and **Merge** refuse while you have uncommitted changes. A merge with conflicts is undone, so nothing is left half-merged.
 
-![Bring Back Changes: the changes are in a local branch, with Compare, Checkout and Merge](images/bring-back-changes.png)
+<img src="images/bring-back-changes.png" alt="Bring Back Changes: the changes are in a local branch, with Compare, Checkout and Merge" width="612">
 
 You can bring back changes as often as you like while the chat keeps working; each time you get the latest state.
 
@@ -86,7 +86,7 @@ To switch between the two, use **Change How Results Come Back** in the chat head
 1. Click **Take Back Here** on the locked chat, in its header menu, or in **Show Delegated Chats**.
 2. Confirm. The chat stops on the server and is archived there. The laptop's chat is unlocked and continues **from where it was delegated**.
 
-![Take Back Here: confirm that the chat continues here](images/take-back.png)
+<img src="images/take-back.png" alt="Take Back Here: confirm that the chat continues here" width="460">
 
 Important: the conversation on the server stays on the server, and its code does not come along by itself. If the server did useful work, use **Bring Back Changes** *before* taking the chat back.
 

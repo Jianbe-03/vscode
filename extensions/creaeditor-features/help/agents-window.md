@@ -4,7 +4,7 @@ The Agents window is a separate CreaEditor window made for working with AI agent
 
 ## How it works
 
-![The Agents window: the Sessions list on the left, the chat in the middle, Changes and Files on the right](../media/agents-window.png)
+<img src="../media/agents-window.png" alt="The Agents window: the Sessions list on the left, the chat in the middle, Changes and Files on the right" width="720">
 
 - **On the left**, the **Sessions** list, with the buttons New, Filter and Find at the top, and four CreaEditor buttons: **Toggle Agents Tree**, **Show AI Costs** (credit card), **Show Subscription Usage** (pulse) and **Stop All Chats** (stop). Below the list is the **Agents** section.
 - **In the middle**, the chat and its input box. Above the input box you pick the folder (or a server's repository); below it the agent and the model.
@@ -25,7 +25,7 @@ The agents (Claude, Codex, Copilot CLI) run in a separate background process cal
 
 The **Agents** section is a live map of your agents. Every chat or session is a card, with lines to the subagents it started, and on to their own subagents.
 
-![The Agents tree with a chat, its subagents and their subagents](images/agents-tree.png)
+<img src="images/agents-tree.png" alt="The Agents tree with a chat, its subagents and their subagents" width="280">
 
 - Each card shows the task, status, model and how long it ran, and updates live. Its colored edge shows the status: running, waiting for confirmation, done or failed.
 - Click a card to jump to that chat. The arrow on a card folds its subagents. The arrow keys and Enter work too.
@@ -59,7 +59,7 @@ To make your own director, copy the built-in one into `.github/agents/` and give
 
 **Stop All Chats** stops every running chat in every window and drops queued messages. The chats keep what they did so far. When more than one chat runs, it asks first.
 
-![The Stop All Chats button at the top of the Sessions list](images/stop-all-chats.png)
+<img src="images/stop-all-chats.png" alt="The Stop All Chats button at the top of the Sessions list" width="453">
 
 Use the stop button at the top of the Sessions list, or run **Stop All Chats** from the Command Palette.
 

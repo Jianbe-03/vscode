@@ -29,7 +29,7 @@ Use any of these:
 
 The **Overview** tab shows the total per issue, and per chat within each issue. Filter by period (last 7, 30 or 90 days, or all time), by gateway or by text, and click **Export CSV** to download everything.
 
-![The Overview tab of AI Costs, with costs per issue and per chat](images/ai-costs-overview.png)
+<img src="images/ai-costs-overview.png" alt="The Overview tab of AI Costs, with costs per issue and per chat" width="900">
 
 ### The Advanced tab
 
@@ -44,7 +44,7 @@ The **Advanced** tab is for digging deeper.
 
 The tab and its filters are remembered the next time you open the page.
 
-![The Advanced tab with filter chips, the Machine filter and charts](images/ai-costs-advanced.png)
+<img src="images/ai-costs-advanced.png" alt="The Advanced tab with filter chips, the Machine filter and charts" width="900">
 
 **Machine** is "This computer" for requests made on your Mac, or the name of a CreaEditor Server for requests the server made itself, for example for a [delegated chat](delegate-to-server.md). Every request in the table shows its machine.
 
@@ -52,7 +52,7 @@ The tab and its filters are remembered the next time you open the page.
 
 As soon as a chat has a cost, its header shows it, subagents included: in the chat view title, the chat editor title, and the session title bar in the Agents window. Point at it to see requests and tokens; click it to open AI Costs filtered to that chat.
 
-![The cost of a chat in its header](images/chat-cost.png)
+<img src="images/chat-cost.png" alt="The cost of a chat in its header" width="700">
 
 ### Subscriptions and Keys sections
 
@@ -68,7 +68,7 @@ As soon as a chat has a cost, its header shows it, subagents included: in the ch
 5. Choose how often it starts over: **Per Day**, **Per Week** (from Monday) or **Per Month**.
 6. Choose what happens when it is used up: **Warn Only** (a notification at 80% and 100%) or **Warn and Stop** (also refuse requests once the budget is used up).
 
-![The Budgets section of AI Costs](images/budgets.png)
+<img src="images/budgets.png" alt="The Budgets section of AI Costs" width="700">
 
 When a budget reaches 80% and 100%, a notification says so, once per period, with **Open AI Costs** and **Edit Budget**. With **Warn and Stop**, requests of that key, issue or repository, subagents included, are refused before they are sent, with a message such as "The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page."
 

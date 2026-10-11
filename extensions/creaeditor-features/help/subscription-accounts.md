@@ -40,7 +40,7 @@ With **Sign In with the Browser**, the Claude CLI opens claude.ai for you. If th
 
 With two or more accounts, choosing a Claude or Codex model in the model picker opens a list with **Pool (Automatic)** and every account, with what each has left. Used-up and signed-out accounts are greyed out.
 
-![The model picker with the account list of the Claude pool](images/account-picker.png)
+<img src="images/account-picker.png" alt="The model picker with the account list of the Claude pool" width="662">
 
 1. Click the model button below the chat input.
 2. Point at the Claude (or Codex) model and pick an account, or **Pool (Automatic)**.
@@ -67,7 +67,7 @@ How the turn continues: a turn that had not started yet is sent again exactly as
 
 Open it with **Show Subscription Usage**, the pulse button next to AI Costs at the top of the Sessions list in the Agents window, the status bar item in the editor window, or **Show Usage** on a warning.
 
-![The Subscription Usage page with accounts and their usage history](images/subscription-usage.png)
+<img src="images/subscription-usage.png" alt="The Subscription Usage page with accounts and their usage history" width="900">
 
 - Per provider, a card shows the pool's average share left, how many accounts are available and the first reset.
 - One row per account shows its email, plan, status and a bar per usage window ("38% left · resets in 3h").
@@ -97,7 +97,7 @@ Shortly before the cache expires, CreaEditor compacts the idle chat: it runs the
 
 The chat shows it as a turn labeled "Compacted automatically: the prompt cache was about to expire", followed by "Conversation compacted". It does not send a phone notification and does not mark the chat as unread.
 
-![A chat that was compacted automatically](images/auto-compact.png)
+<img src="images/auto-compact.png" alt="A chat that was compacted automatically" width="554">
 
 ### When it happens
 
