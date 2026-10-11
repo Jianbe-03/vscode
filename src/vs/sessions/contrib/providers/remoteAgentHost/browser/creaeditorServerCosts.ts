@@ -5,10 +5,11 @@
 
 // CreaEditor: brings the AI costs of CreaEditor Servers to this computer and their budgets to the
 // servers (see `platform/agentHost/common/creaeditorCosts.ts`). Every few minutes while the Agents
-// window has focus (and when a server connects), it pulls each server's new ledger entries into
-// `<global storage>/creaeditor-server-costs/<serverId>.json`, which the copilot extension merges into
-// AI Costs with the server as the machine, and pushes the hard-stop budgets with what this computer
-// and the other servers spent in their periods.
+// window is open (and when a server connects), it pulls each server's new ledger entries into
+// `<global storage>/creaeditor-server-costs/<serverId>.json` of the DEFAULT profile (the Agents window
+// runs in a built-in profile; every window's copilot extension reads that same folder and merges it into
+// AI Costs with the server as the machine), and pushes the hard-stop budgets with what this computer
+// and the other servers spent in their periods. Only the Agents window pulls (it has the servers).
 
 import { IntervalTimer, RunOnceScheduler, Sequencer } from '../../../../../base/common/async.js';
 import { VSBuffer } from '../../../../../base/common/buffer.js';
@@ -22,6 +23,7 @@ import { ILogService } from '../../../../../platform/log/common/log.js';
 import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase } from '../../../../../workbench/common/contributions.js';
 import { IHostService } from '../../../../../workbench/services/host/browser/host.js';
 import { IUserDataProfileService } from '../../../../../workbench/services/userDataProfile/common/userDataProfile.js';
+import { IUserDataProfilesService } from '../../../../../platform/userDataProfile/common/userDataProfile.js';
 import { ICreaEditorServer, ICreaEditorServersService } from './creaeditorServers.js';
 
 const SYNC_INTERVAL_MS = 5 * 60_000;
@@ -40,6 +42,11 @@ export function parseServerCostsCache(text: string | undefined, server: ICreaEdi
 		// Start over.
 	}
 	return { serverId: server.id, serverName: server.name, cursor: 0, entries: [] };
+}
+
+/** The cache file of a server's costs in a global storage folder (use the default profile's, which every window reads). */
+export function getServerCostsCacheFile(globalStorage: URI, serverId: string): URI {
+	return URI.joinPath(globalStorage, CREAEDITOR_SERVER_COSTS_CACHE_FOLDER, `${serverId}.json`);
 }
 
 /** Reads a JSON lines ledger, skipping broken lines. */
@@ -70,6 +77,7 @@ export class CreaEditorServerCostsSync extends Disposable implements IWorkbenchC
 		@IRemoteAgentHostService remoteAgentHostService: IRemoteAgentHostService,
 		@IFileService private readonly _fileService: IFileService,
 		@IUserDataProfileService private readonly _userDataProfileService: IUserDataProfileService,
+		@IUserDataProfilesService private readonly _userDataProfilesService: IUserDataProfilesService,
 		@IConfigurationService private readonly _configurationService: IConfigurationService,
 		@IHostService private readonly _hostService: IHostService,
 		@ILogService private readonly _logService: ILogService,
@@ -81,24 +89,30 @@ export class CreaEditorServerCostsSync extends Disposable implements IWorkbenchC
 				this._soon.schedule();
 			}
 		}));
-		this._timer.cancelAndSet(() => {
-			if (this._hostService.hasFocus) {
-				this._syncAll();
+		// Also while another window has focus: the AI Costs page there shows what this window pulls.
+		this._timer.cancelAndSet(() => this._syncAll(), SYNC_INTERVAL_MS);
+		this._register(this._hostService.onDidChangeFocus(focused => {
+			if (focused) {
+				this._soon.schedule();
 			}
-		}, SYNC_INTERVAL_MS);
+		}));
 		this._soon.schedule();
 	}
 
-	private get _globalStorage(): URI {
-		return this._userDataProfileService.currentProfile.globalStorageHome;
+	/** The global storage folders whose files every window reads: the default profile's, then this window's own (if another). */
+	private get _globalStorages(): URI[] {
+		const shared = this._userDataProfilesService.defaultProfile.globalStorageHome;
+		const own = this._userDataProfileService.currentProfile.globalStorageHome;
+		return own.toString() === shared.toString() ? [shared] : [shared, own];
 	}
 
-	private _cacheFile(serverId: string): URI {
-		return URI.joinPath(this._globalStorage, CREAEDITOR_SERVER_COSTS_CACHE_FOLDER, `${serverId}.json`);
+	private _cacheFile(serverId: string, globalStorage = this._globalStorages[0]): URI {
+		return getServerCostsCacheFile(globalStorage, serverId);
 	}
 
-	private _syncAll(): void {
-		void this._sequencer.queue(async () => {
+	/** Pulls the costs of every server and pushes the budgets now. */
+	syncNow(): Promise<void> {
+		return this._sequencer.queue(async () => {
 			const servers = this._serversService.servers.get();
 			if (!servers.length) {
 				return;
@@ -111,14 +125,21 @@ export class CreaEditorServerCostsSync extends Disposable implements IWorkbenchC
 		}).catch(error => this._logService.warn('[CreaEditor Server Costs] Sync failed', error));
 	}
 
+	private _syncAll(): void {
+		void this.syncNow();
+	}
+
 	/** Pulls new entries of one server into its cache file; answers the cache (unchanged when offline). */
 	private async _pull(server: ICreaEditorServer): Promise<ICreaEditorServerCostsCache> {
 		const file = this._cacheFile(server.id);
-		let text: string | undefined;
-		try {
-			text = (await this._fileService.readFile(file)).value.toString();
-		} catch {
-			text = undefined;
+		let text = await this._readText(file);
+		// Earlier versions kept the cache in this window's own profile, which other windows do not read.
+		const oldFile = this._globalStorages.length > 1 ? this._cacheFile(server.id, this._globalStorages[1]) : undefined;
+		const oldText = oldFile ? await this._readText(oldFile) : undefined;
+		let migrated = false;
+		if (text === undefined && oldText !== undefined) {
+			text = oldText;
+			migrated = true;
 		}
 		const cache = parseServerCostsCache(text, server);
 		let entries = cache.entries;
@@ -144,10 +165,21 @@ export class CreaEditorServerCostsSync extends Disposable implements IWorkbenchC
 			after = answer.cursor;
 		}
 		const updated: ICreaEditorServerCostsCache = { serverId: server.id, serverName: server.name, cursor, entries };
-		if (changed || cursor !== cache.cursor) {
+		if (changed || migrated || cursor !== cache.cursor) {
 			await this._fileService.writeFile(file, VSBuffer.fromString(JSON.stringify(updated)));
 		}
+		if (oldFile && oldText !== undefined) {
+			await this._fileService.del(oldFile).catch(() => undefined);
+		}
 		return updated;
+	}
+
+	private async _readText(file: URI): Promise<string | undefined> {
+		try {
+			return (await this._fileService.readFile(file)).value.toString();
+		} catch {
+			return undefined;
+		}
 	}
 
 	private async _pushBudgets(servers: readonly ICreaEditorServer[], caches: ReadonlyMap<string, ICreaEditorServerCostsCache>): Promise<void> {
@@ -155,10 +187,10 @@ export class CreaEditorServerCostsSync extends Disposable implements IWorkbenchC
 		const hardStops = budgets.filter(budget => budget.hardStop);
 		let local: IGatewayCostEntryLike[] = [];
 		if (hardStops.length) {
-			try {
-				local = parseLedgerLines((await this._fileService.readFile(URI.joinPath(this._globalStorage, ...COPILOT_GATEWAY_LEDGER_PATH))).value.toString());
-			} catch {
-				local = [];
+			// Each profile's copilot extension keeps its own ledger: the editor window's and this window's.
+			for (const globalStorage of this._globalStorages) {
+				const text = await this._readText(URI.joinPath(globalStorage, ...COPILOT_GATEWAY_LEDGER_PATH));
+				local = text ? mergeCostEntries(local, parseLedgerLines(text)) : local;
 			}
 		}
 		const now = Date.now();

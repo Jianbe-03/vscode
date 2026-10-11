@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, test } from 'vitest';
-import { parseServerCostsFile } from '../gatewayTrackingService';
+import { getServerCostsFolderPath, parseServerCostsFile } from '../gatewayTrackingService';
 
 describe('parseServerCostsFile (CreaEditor)', () => {
 	test('tags the entries of a server cache with the server and skips anything malformed', () => {
@@ -23,5 +23,21 @@ describe('parseServerCostsFile (CreaEditor)', () => {
 			broken: parseServerCostsFile('{'),
 			noName: parseServerCostsFile(JSON.stringify({ entries: [] })),
 		}).toEqual({ entries: [['a', 'build-box', 0.1]], broken: [], noName: [] });
+	});
+});
+
+describe('getServerCostsFolderPath (CreaEditor)', () => {
+	test('is in the default profile\'s global storage whatever profile the extension runs in', () => {
+		expect([
+			getServerCostsFolderPath('/tmp/ud/User/globalStorage/github.copilot-chat'),
+			getServerCostsFolderPath('/tmp/ud/User/profiles/builtin/agents/globalStorage/github.copilot-chat'),
+			getServerCostsFolderPath('/tmp/ud/User/profiles/-5a1b2c3d/globalStorage/github.copilot-chat/'),
+			getServerCostsFolderPath('/c:/Users/me/AppData/Roaming/CreaEditor/User/profiles/x/globalStorage/github.copilot-chat'),
+		]).toEqual([
+			'/tmp/ud/User/globalStorage/creaeditor-server-costs',
+			'/tmp/ud/User/globalStorage/creaeditor-server-costs',
+			'/tmp/ud/User/globalStorage/creaeditor-server-costs',
+			'/c:/Users/me/AppData/Roaming/CreaEditor/User/globalStorage/creaeditor-server-costs',
+		]);
 	});
 });

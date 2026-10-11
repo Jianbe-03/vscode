@@ -45,6 +45,25 @@ export interface IGatewayCostEntry {
 
 export type GatewayCostEntryUpdate = Partial<Pick<IGatewayCostEntry, 'gatewayRequestId' | 'promptTokens' | 'completionTokens' | 'cachedTokens' | 'cost' | 'costSource'>>;
 
+/**
+ * CreaEditor: costs pulled from CreaEditor Servers, one `<serverId>.json` per server. Written by the
+ * Agents window (see `src/vs/sessions/contrib/providers/remoteAgentHost/browser/creaeditorServerCosts.ts`
+ * and `CREAEDITOR_SERVER_COSTS_CACHE_FOLDER` in `src/vs/platform/agentHost/common/creaeditorCosts.ts`).
+ */
+export const SERVER_COSTS_FOLDER = 'creaeditor-server-costs';
+
+/**
+ * CreaEditor: the folder of {@link SERVER_COSTS_FOLDER} for an extension whose global storage is at
+ * `globalStoragePath` (`<User>/[profiles/<profile>/]globalStorage/<extension>`, a URI path). It is in
+ * the default profile's global storage whatever profile the extension runs in (the Agents window
+ * runs in a built-in profile), so every window reads the same costs.
+ */
+export function getServerCostsFolderPath(globalStoragePath: string): string {
+	const profile = /^(?<user>.*\/User)\/profiles\/.+\/globalStorage\/[^/]+\/?$/.exec(globalStoragePath);
+	const globalStorage = profile?.groups ? `${profile.groups.user}/globalStorage` : globalStoragePath.replace(/\/[^/]+\/?$/, '');
+	return `${globalStorage}/${SERVER_COSTS_FOLDER}`;
+}
+
 /** CreaEditor: reads one CreaEditor Server's cost cache file; its entries tagged with the server's name. */
 export function parseServerCostsFile(content: string): IGatewayCostEntry[] {
 	try {

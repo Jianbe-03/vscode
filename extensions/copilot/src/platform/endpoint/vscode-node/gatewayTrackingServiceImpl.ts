@@ -17,17 +17,9 @@ import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { URI } from '../../../util/vs/base/common/uri';
 import { BACKGROUND_CHAT_ID, detectIssueFromBranch, detectIssueFromText, IChatIssue, IChatWorkContext, isJiraIssue, repoFromRemoteUrl } from '../common/gatewayTracking';
-import { GatewayCostEntryUpdate, IGatewayCostEntry, IGatewayTrackingService, parseServerCostsFile } from '../common/gatewayTrackingService';
+import { GatewayCostEntryUpdate, getServerCostsFolderPath, IGatewayCostEntry, IGatewayTrackingService, parseServerCostsFile } from '../common/gatewayTrackingService';
 
 const LEDGER_FILE = 'creaeditor-gateway-costs.jsonl';
-/**
- * CreaEditor: costs pulled from CreaEditor Servers, one `<serverId>.json` per server, next to the
- * extensions' global storage folders. Written by the Agents window (see
- * `src/vs/sessions/contrib/providers/remoteAgentHost/browser/creaeditorServerCosts.ts` and
- * `CREAEDITOR_SERVER_COSTS_CACHE_FOLDER` in `src/vs/platform/agentHost/common/creaeditorCosts.ts`);
- * only read here.
- */
-const SERVER_COSTS_FOLDER = 'creaeditor-server-costs';
 /** Oldest entries are dropped beyond this many, to bound memory and file size. */
 const MAX_ENTRIES = 50_000;
 const MAX_TITLE_LENGTH = 120;
@@ -204,8 +196,9 @@ export class GatewayTrackingService extends Disposable implements IGatewayTracki
 	}
 
 	private get _serverCostsUri(): URI | undefined {
+		// The default profile's, read by every window whatever its profile (see getServerCostsFolderPath).
 		const storage = this._extensionContext.globalStorageUri;
-		return storage ? URI.joinPath(storage, '..', SERVER_COSTS_FOLDER) : undefined;
+		return storage ? URI.from({ scheme: storage.scheme, authority: storage.authority, path: getServerCostsFolderPath(storage.path) }) : undefined;
 	}
 
 	private _watchServerCosts(): void {
