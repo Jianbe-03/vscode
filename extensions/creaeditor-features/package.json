@@ -96,6 +96,18 @@
         "description": "%walkthrough.description%",
         "steps": [
           {
+            "id": "guide",
+            "title": "%step.guide.title%",
+            "description": "%step.guide.description%",
+            "media": {
+              "image": "media/guide.svg",
+              "altText": "%step.guide.title%"
+            },
+            "completionEvents": [
+              "onCommand:creaeditor.help.open"
+            ]
+          },
+          {
             "id": "look",
             "title": "%step.look.title%",
             "description": "%step.look.description%",
@@ -312,6 +324,18 @@
             },
             "completionEvents": [
               "onCommand:workbench.action.chat.showSubscriptionUsage"
+            ]
+          },
+          {
+            "id": "autoCompact",
+            "title": "%step.autoCompact.title%",
+            "description": "%step.autoCompact.description%",
+            "media": {
+              "image": "media/auto-compact.svg",
+              "altText": "%step.autoCompact.title%"
+            },
+            "completionEvents": [
+              "onSettingChanged:creaeditor.claude.compactBeforeCacheExpires"
             ]
           },
           {

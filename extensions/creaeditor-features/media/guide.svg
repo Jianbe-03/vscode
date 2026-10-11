@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="600" rx="16" fill="#16152D"/>
+	<text x="40" y="72" fill="#F8F7FA" font-size="26" font-weight="600">CreaEditor Guide</text>
+	<text x="40" y="104" fill="#BCBBCA" font-size="15">Every feature, step by step, with pictures. Help &gt; CreaEditor Guide.</text>
+
+	<g font-size="15">
+		<rect x="40" y="136" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="64" y="172" fill="#F8F7FA" font-weight="600">Models and Keys</text>
+		<text x="64" y="198" fill="#BCBBCA" font-size="14">OpenRouter, LiteLLM, the key lock</text>
+		<rect x="492" y="136" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="516" y="172" fill="#F8F7FA" font-weight="600">Costs and Budgets</text>
+		<text x="516" y="198" fill="#BCBBCA" font-size="14">AI Costs, alerts and a hard stop</text>
+
+		<rect x="40" y="240" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="64" y="276" fill="#F8F7FA" font-weight="600">Subscription Accounts</text>
+		<text x="64" y="302" fill="#BCBBCA" font-size="14">Pooled Claude and Codex plans</text>
+		<rect x="492" y="240" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="516" y="276" fill="#F8F7FA" font-weight="600">The Agents Window</text>
+		<text x="516" y="302" fill="#BCBBCA" font-size="14">Agents tree, chat groups, Jira</text>
+
+		<rect x="40" y="344" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="64" y="380" fill="#F8F7FA" font-weight="600">Remote Access</text>
+		<text x="64" y="406" fill="#BCBBCA" font-size="14">Your agents on your phone</text>
+		<rect x="492" y="344" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="516" y="380" fill="#F8F7FA" font-weight="600">CreaEditor Server</text>
+		<text x="516" y="406" fill="#BCBBCA" font-size="14">Agents on a machine that is always on</text>
+
+		<rect x="40" y="448" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="64" y="484" fill="#F8F7FA" font-weight="600">Delegate to Server</text>
+		<text x="64" y="510" fill="#BCBBCA" font-size="14">Hand a chat over, bring the results back</text>
+		<rect x="492" y="448" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="516" y="484" fill="#F8F7FA" font-weight="600">Notifications</text>
+		<text x="516" y="510" fill="#BCBBCA" font-size="14">A push message when a chat needs you</text>
+	</g>
+</svg>
