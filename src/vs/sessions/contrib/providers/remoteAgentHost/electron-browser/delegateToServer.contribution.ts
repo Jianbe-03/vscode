@@ -255,6 +255,14 @@ function getRemoteModelId(session: ISession, authority: string): string | undefi
 	return provider && modelId && colon > 0 ? `${remoteAgentHostSessionTypeId(authority, provider)}:${modelId.slice(colon + 1)}` : undefined;
 }
 
+/**
+ * Trusts folders of a server for its chats: the code in a delegated chat's worktree is this computer's
+ * own, so its chats open without the workspace trust question.
+ */
+async function trustServerWorktrees(workspaceTrustManagementService: IWorkspaceTrustManagementService, authority: string, folders: readonly string[]): Promise<void> {
+	await workspaceTrustManagementService.setUrisTrust(folders.filter(folder => !!folder).map(folder => toAgentHostUri(URI.file(folder), authority)), true);
+}
+
 /** Starts the chat on the server with a transcript of the conversation (agents whose sessions cannot move). */
 async function continueWithTranscript(accessor: ServicesAccessor, session: ISession, server: ICreaEditorServer, authority: string, result: IDelegateResult): Promise<URI | undefined> {
 	const sessionsManagementService = accessor.get(ISessionsManagementService);
@@ -450,6 +458,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		title,
 		localSessionResource: session.resource.toString(),
 		folder: folderUri.fsPath,
+		worktree: result.record.worktree,
 		baseCommit: result.record.baseCommit,
 		branch: result.record.branch,
 		resultsMode: modePick.mode,
@@ -461,8 +470,9 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 	let remoteResource: URI | undefined;
 	let transcriptOnly = !result.sessionFilesSent;
 	if (connected) {
-		// The worktree holds this computer's own code: trust it like the folder it came from.
-		await workspaceTrustManagementService.setUrisTrust([toAgentHostUri(URI.file(result.record.worktree), connected.authority)], true).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
+		// The worktree holds this computer's own code: trust it like the folder it came from, and the
+		// server's folder of delegated worktrees (a chat there may work in a worktree next to it).
+		await trustServerWorktrees(workspaceTrustManagementService, connected.authority, [serverInfo.worktreesDir, result.record.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
 		if (result.accountsEnvelope) {
 			try {
 				await connected.connection.authenticate({ resource: `${CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}${result.record.delegationId}`, token: JSON.stringify(result.accountsEnvelope) });
