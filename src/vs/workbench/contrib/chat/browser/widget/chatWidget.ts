@@ -106,7 +106,7 @@ import { IAgentSessionsService } from '../agentSessions/agentSessionsService.js'
 import { IChatDebugService } from '../../common/chatDebugService.js';
 import { getChatSessionType } from '../../common/model/chatUri.js';
 import { ICustomizationHarnessService } from '../../common/customizationHarnessService.js';
-import { CHAT_READ_ONLY_BANNER_HEIGHT, ChatReadOnlyBanner, IChatLockNotice } from './chatReadOnlyBanner.js';
+import { ChatReadOnlyBanner, IChatLockNotice } from './chatReadOnlyBanner.js';
 import { IChatSubmitRequestHandlerService } from '../chatSubmitRequestHandlerService.js';
 import { getChatPetListPadding } from './chatPetWidget.js';
 import { IChatPetWidgetService } from './chatPetWidgetService.js';
@@ -4024,7 +4024,8 @@ export class ChatWidget extends Disposable implements IChatWidget {
 		const chatSuggestNextWidgetHeight = this.chatSuggestNextWidget.height;
 
 		const inputHeight = this._inputVisible ? this.inputPart.height.get() : this.inputPart.element.offsetHeight;
-		const readOnlyBannerHeight = this.readOnlyBanner?.visible ? CHAT_READ_ONLY_BANNER_HEIGHT : 0;
+		// CreaEditor: a lock notice wraps, so its height depends on the width.
+		const readOnlyBannerHeight = this.readOnlyBanner?.height ?? 0;
 		const lastElementVisible = this.listWidget.isScrolledToBottom;
 		const lastItem = this.listWidget.lastItem;
 

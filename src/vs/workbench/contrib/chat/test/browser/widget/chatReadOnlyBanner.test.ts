@@ -17,15 +17,16 @@ suite('ChatReadOnlyBanner - CreaEditor lock notice', () => {
 		const read = () => ({
 			text: banner.domNode.querySelector('.chat-readonly-banner-text')?.textContent,
 			actions: [...banner.domNode.querySelectorAll('.chat-readonly-banner-action')].map(action => action.textContent),
+			wraps: banner.domNode.classList.contains('lock-notice'),
 		});
 		banner.setNotice({ message: 'This chat continues on Office.', actions: [{ label: 'Open on Server', run: () => ran.push('open') }, { label: 'Take Back Here', run: () => ran.push('back') }] });
 		const locked = read();
 		(banner.domNode.querySelectorAll('.chat-readonly-banner-action')[1] as HTMLElement).click();
 		banner.setNotice(undefined);
 		assert.deepStrictEqual({ locked, ran, unlocked: read() }, {
-			locked: { text: 'This chat continues on Office.', actions: ['Open on Server', 'Take Back Here'] },
+			locked: { text: 'This chat continues on Office.', actions: ['Open on Server', 'Take Back Here'], wraps: true },
 			ran: ['back'],
-			unlocked: { text: 'Archived sessions are read-only.', actions: [] },
+			unlocked: { text: 'Archived sessions are read-only.', actions: [], wraps: false },
 		});
 	});
 });

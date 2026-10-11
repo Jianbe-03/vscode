@@ -40,6 +40,46 @@
 	white-space: nowrap;
 }
 
+/*
+ * CreaEditor: a lock notice (a chat that continues on a server) says why and what to do: the message on
+ * its own line(s) next to the icon, its actions below it, both wrapping at narrow widths.
+ */
+.chat-readonly-banner.lock-notice {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	align-items: start;
+	justify-content: stretch;
+	column-gap: var(--vscode-spacing-size60);
+	row-gap: var(--vscode-spacing-size40);
+	flex: 0 0 auto;
+	height: auto;
+	padding: var(--vscode-spacing-size60) var(--vscode-spacing-size100);
+	line-height: 18px;
+}
+
+.chat-readonly-banner.lock-notice.hidden {
+	display: none;
+}
+
+.chat-readonly-banner.lock-notice .chat-readonly-banner-icon {
+	height: 18px;
+}
+
+.chat-readonly-banner.lock-notice .chat-readonly-banner-text {
+	overflow: visible;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
+.chat-readonly-banner.lock-notice .chat-readonly-banner-actions {
+	grid-column: 2;
+	flex-wrap: wrap;
+	flex-shrink: 1;
+	column-gap: var(--vscode-spacing-size120);
+	row-gap: var(--vscode-spacing-size20);
+	min-width: 0;
+}
+
 /* CreaEditor: the actions of a lock notice (e.g. Open on Server, Take Back Here). */
 .chat-readonly-banner-actions {
 	display: flex;

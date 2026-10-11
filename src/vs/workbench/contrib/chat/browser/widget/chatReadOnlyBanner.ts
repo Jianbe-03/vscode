@@ -63,6 +63,7 @@ export class ChatReadOnlyBanner extends Disposable {
 		this._noticeDisposables.clear();
 		dom.clearNode(this._actions);
 		this._text.textContent = notice?.message ?? this._defaultMessage;
+		this.domNode.classList.toggle('lock-notice', !!notice);
 		for (const action of notice?.actions ?? []) {
 			const link = dom.append(this._actions, dom.$('a.chat-readonly-banner-action', { role: 'button', tabIndex: 0 }));
 			link.textContent = action.label;
@@ -81,6 +82,14 @@ export class ChatReadOnlyBanner extends Disposable {
 
 	get visible(): boolean {
 		return this._visible;
+	}
+
+	/** The height the banner takes: one line, or (CreaEditor) a lock notice's wrapped lines at the current width. */
+	get height(): number {
+		if (!this._visible) {
+			return 0;
+		}
+		return this.domNode.classList.contains('lock-notice') ? this.domNode.offsetHeight || CHAT_READ_ONLY_BANNER_HEIGHT : CHAT_READ_ONLY_BANNER_HEIGHT;
 	}
 
 	setVisible(visible: boolean): void {
