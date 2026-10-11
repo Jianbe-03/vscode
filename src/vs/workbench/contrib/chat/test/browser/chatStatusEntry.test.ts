@@ -6,7 +6,6 @@
 import assert from 'assert';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
-import { isWeb } from '../../../../../base/common/platform.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { IInlineCompletionsService } from '../../../../../editor/browser/services/inlineCompletionsService.js';
 import { ContextKeyExpression, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -23,7 +22,6 @@ import { ChatQuotaResumeState, ChatStatusBarEntry, computeQuotaResumeState } fro
 import { IChatStatusItemService } from '../../browser/chatStatus/chatStatusItemService.js';
 import { ChatStatusPromo } from '../../browser/chatStatus/chatStatusPromo.js';
 import { UpdateTitleBarChatInProgressContext, UpdateTitleBarContext, UpdateTitleBarEditorVisibleContext } from '../../../update/common/update.js';
-import { CHAT_SETUP_ACTION_ID } from '../../browser/actions/chatActions.js';
 
 type Quotas = IChatEntitlementService['quotas'];
 
@@ -268,7 +266,7 @@ suite('ChatStatusBarEntry', () => {
 		assert.deepStrictEqual(fixture.promoQueries, [false, true]);
 	});
 
-	test('toggles the dashboard while preserving the sign-in command', () => {
+	test('toggles the dashboard whether signed in or out', () => {
 		const signedIn = createEntry({ entitlement: ChatEntitlement.Free, quotas: { premiumChat: available } });
 		const signedOut = createEntry({ entitlement: ChatEntitlement.Unknown });
 
@@ -277,7 +275,8 @@ suite('ChatStatusBarEntry', () => {
 			signedOut: signedOut.statusbar.current?.command,
 		}, {
 			signedIn: ToggleTooltipCommand,
-			signedOut: CHAT_SETUP_ACTION_ID,
+			// CreaEditor: there is no Copilot sign-in, so signed out the entry opens the dashboard too.
+			signedOut: ToggleTooltipCommand,
 		});
 	});
 
@@ -288,13 +287,12 @@ suite('ChatStatusBarEntry', () => {
 		assert.strictEqual(persistedState(storageService), 'blocked');
 	});
 
-	test('keeps Sign In visible in the status bar only while Update owns the title bar', () => {
+	test('never shows Sign In in the status bar, even while Update owns the title bar', () => {
 		const withoutUpdate = createEntry({ entitlement: ChatEntitlement.Unknown });
 		const withUpdate = createEntry({ entitlement: ChatEntitlement.Unknown, updateTitleBar: true });
 		const whileDebugging = createEntry({ entitlement: ChatEntitlement.Unknown, updateTitleBar: true, inDebugMode: true });
 		const whileChatInProgress = createEntry({ entitlement: ChatEntitlement.Unknown, updateTitleBar: true, updateTitleBarChatInProgress: true });
 		const inZenMode = createEntry({ entitlement: ChatEntitlement.Unknown, updateTitleBar: true, inZenMode: true });
-		const defaultStatusText = isWeb ? '$(copilot) Sign In' : '$(copilot)';
 
 		assert.deepStrictEqual({
 			text: {
@@ -312,12 +310,13 @@ suite('ChatStatusBarEntry', () => {
 				inZenMode: inZenMode.updateTitleBarVisible,
 			},
 		}, {
+			// CreaEditor: chat runs on bring-your-own-key models, so Copilot sign-in is never offered.
 			text: {
-				withoutUpdate: defaultStatusText,
-				withUpdate: '$(copilot) Sign In',
-				whileDebugging: defaultStatusText,
-				whileChatInProgress: defaultStatusText,
-				inZenMode: '$(copilot) Sign In',
+				withoutUpdate: '$(copilot)',
+				withUpdate: '$(copilot)',
+				whileDebugging: '$(copilot)',
+				whileChatInProgress: '$(copilot)',
+				inZenMode: '$(copilot)',
 			},
 			visibility: {
 				withoutUpdate: false,

@@ -408,7 +408,8 @@ export class ChatStatusBarEntry extends Disposable implements IWorkbenchContribu
 				ariaLabel = localize('completionsSnoozedStatus', "Inline suggestions snoozed");
 			}
 
-			else {
+			// CreaEditor: a signed-out user (no Copilot) is offered no Copilot model sale and is not enrolled in its experiment.
+			else if (this.chatEntitlementService.entitlement !== ChatEntitlement.Unknown) {
 				const promo = this.promo?.getEntryProps(this.layoutService.isVisible(Parts.STATUSBAR_PART, mainWindow)
 					&& this.statusbarService.isEntryVisible('chat.statusBarEntry'));
 				if (promo) {
