@@ -10172,7 +10172,7 @@ suite('AgentHostChatContribution', () => {
 			});
 		});
 
-		test('shows a missing subagent chat error instead of an empty editable chat', async () => {
+		test('shows a missing subagent chat notice instead of an empty editable chat', async () => {
 			const { sessionHandler, agentHostService } = createContribution(disposables);
 			const sessionUri = AgentSession.uri('copilot', 'missing-subagent');
 			const childChatUri = buildSubagentChatUri(sessionUri.toString(), 'tc-missing');
@@ -10201,13 +10201,14 @@ suite('AgentHostChatContribution', () => {
 			assert.deepStrictEqual({
 				history: chatSession.history.map(item => item.type === 'request'
 					? { type: item.type, isSystemInitiated: item.isSystemInitiated }
-					: { type: item.type, error: item.errorDetails?.message }),
+					: { type: item.type, error: item.errorDetails?.message, parts: item.parts.map(part => part.kind === 'markdownContent' ? part.content.value : part.kind) }),
 				isReadOnly: chatSession.isReadOnly?.get(),
 				draftChanges: agentHostService.dispatchedActions.filter(entry => entry.channel === childChatUri && entry.action.type === ActionType.ChatDraftChanged).length,
 			}, {
+				// CreaEditor: a calm notice replaces the raw "Resource not found" error.
 				history: [
 					{ type: 'request', isSystemInitiated: true },
-					{ type: 'response', error: error.message },
+					{ type: 'response', error: undefined, parts: ['This subagent chat is no longer available.'] },
 				],
 				isReadOnly: true,
 				draftChanges: 0,
