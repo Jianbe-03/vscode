@@ -75,10 +75,23 @@ export const CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID = 'creaeditor.delegation.
 /** Set GitHub Token on Server. */
 export const CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID = 'creaeditor.delegation.setServerGitHubToken';
 
+/**
+ * A name as one part of a git ref or a folder name: lower case, runs of other characters than
+ * letters, digits, `.`, `_` and `-` as one `-` ("Office Server" is `office-server`); undefined when
+ * nothing is left.
+ */
+export function slugifyDelegationName(name: string): string | undefined {
+	return name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/\.{2,}/g, '.').replace(/^[-.]+|[-.]+$/g, '').slice(0, 60).replace(/[-.]+$/, '') || undefined;
+}
+
 /** The local branch Bring Back Changes creates: `creaeditor/from-<server>/<shortId>`. */
 export function getBroughtBackBranchName(serverName: string, shortId: string): string {
-	const server = serverName.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-.]+|[-.]+$/g, '').replace(/\.{2,}/g, '.') || 'server';
-	return `creaeditor/from-${server}/${shortId}`;
+	return `${getBroughtBackBranchPrefix(serverName)}${shortId}`;
+}
+
+/** The start of the branches Bring Back Changes creates for a server: `creaeditor/from-<server>/`. */
+export function getBroughtBackBranchPrefix(serverName: string): string {
+	return `creaeditor/from-${slugifyDelegationName(serverName) ?? 'server'}/`;
 }
 
 export const enum DelegationErrorCode {

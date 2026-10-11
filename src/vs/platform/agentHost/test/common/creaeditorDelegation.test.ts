@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { DelegationAgentKind, getAgentSessionIdFromStateFile, getDelegationAgentKind, getDelegationAgentProvider, parseDelegationGatewayModel } from '../../common/creaeditorDelegation.js';
+import { DelegationAgentKind, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getBroughtBackBranchPrefix, getDelegationAgentKind, getDelegationAgentProvider, parseDelegationGatewayModel, slugifyDelegationName } from '../../common/creaeditorDelegation.js';
 
 suite('CreaEditor Delegation - agents and keys', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -45,5 +45,21 @@ suite('CreaEditor Delegation - agents and keys', () => {
 			undefined,
 			undefined,
 		]);
+	});
+
+	test('builds refs and folder names from names with spaces', () => {
+		assert.deepStrictEqual({
+			branch: getBroughtBackBranchName('Office Server', 'ab12cd34'),
+			prefix: getBroughtBackBranchPrefix('Office Server'),
+			odd: getBroughtBackBranchPrefix('  ..My  Mac (2)!.. '),
+			empty: getBroughtBackBranchPrefix('***'),
+			slugs: ['ws2', 'My Repo.git', '../..', 'a'.repeat(80)].map(slugifyDelegationName),
+		}, {
+			branch: 'creaeditor/from-office-server/ab12cd34',
+			prefix: 'creaeditor/from-office-server/',
+			odd: 'creaeditor/from-my-mac-2/',
+			empty: 'creaeditor/from-server/',
+			slugs: ['ws2', 'my-repo.git', undefined, 'a'.repeat(60)],
+		});
 	});
 });
