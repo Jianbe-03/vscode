@@ -13,6 +13,8 @@ CreaEditor is Creacoon's build of Visual Studio Code (based on VS Code 1.140.0).
 
 **Help → CreaEditor Features** opens a tour of all of this, with pictures.
 
+**Help → CreaEditor Guide** opens the help pages: every feature explained step by step for people new to CreaEditor, with diagrams and screenshots. They are Markdown files in `extensions/creaeditor-features/help/` (images in `help/images/`), opened in the Markdown preview by the command `creaeditor.help.open` (with a page name such as `delegate-to-server`); the **Learn More** buttons of the features tour use it too. When a feature changes, update its page there as well as this file.
+
 ## Installing (macOS)
 
 1. Open `CreaEditor-darwin-arm64.dmg` and drag **CreaEditor** to **Applications**.
