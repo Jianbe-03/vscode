@@ -49,6 +49,7 @@ import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { ActiveClientToolSet } from '../activeClientState.js';
 import { CodexChatDiscovery } from './codexChatDiscovery.js';
 import { parseDelegationAccountsResource, tryOpenServerDelegationAccounts } from '../creaeditorDelegation/delegationAccounts.js';
+import { findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
 import { CodexChatHistory } from './codexChatHistory.js';
 import type { InitializeResponse } from './protocol/generated/InitializeResponse.js';
 import { applyMcpServerRuntimeStates, McpCustomizationController } from '../shared/mcpCustomizationController.js';
@@ -2790,9 +2791,12 @@ export class CodexAgent extends Disposable implements IAgent {
 			this._customizationReadRoots(session, plugins),
 		]);
 		const customization = await codexCustomizationConfig(workspaceAgents.agents, plugins, session.agent, this._fileService);
+		// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's ~/.codex/AGENTS.md.
+		const delegatedInstructions = findDelegatedUserCustomizations(this._customizationWorkingDirectories(session)[0]?.fsPath)?.codexInstructions;
 		const developerInstructions = [
 			customization.developerInstructions,
 			session.managedWorkingDirectory ? AGENT_HOST_WORKSPACELESS_INSTRUCTIONS : '',
+			delegatedInstructions ? formatDelegatedUserInstructions(delegatedInstructions) : '',
 		].filter(instruction => instruction.length > 0).join('\n\n');
 		const config: Record<string, JsonValue> = skillReadRoots.length ? codexPermissionProfileReadRoots(skillReadRoots) : {};
 		let skillPermissionProfile: string | undefined;

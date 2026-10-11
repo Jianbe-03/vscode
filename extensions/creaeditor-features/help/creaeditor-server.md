@@ -98,7 +98,7 @@ Click a server for its actions: **Open in Browser**, **Pair Phone**, **Sign In t
 
 The server needs its own Claude or Codex login to run chats. There are two ways to give it one:
 
-- **Sent from your laptop.** When you [delegate a chat](delegate-to-server.md), the Claude setup-token accounts it needs (and, for Copilot CLI chats, the OpenRouter or LiteLLM key) go along, encrypted so only the server's agent host can read them.
+- **Sent from your laptop.** When you [delegate a chat](delegate-to-server.md), the Claude setup-token accounts it needs (and, for Copilot CLI chats, the OpenRouter or LiteLLM key) go along, encrypted so only the server's agent host can read them. Your personal agents, skills and instructions (`~/.claude`, `~/.copilot`, `~/.codex/AGENTS.md`) go along too, for that chat only; see [What your server uses from your laptop](delegate-to-server.md#what-your-server-uses-from-your-laptop).
 - **Log in once on the server.** Browser-login Claude accounts and Codex logins cannot be moved. In **CreaEditor Servers**, click the server, then **Sign In to an Account on This Server...**:
   - **Claude: Sign In with a Browser**: the server starts the Claude sign-in; CreaEditor opens the sign-in page on your laptop, and you paste back the code the page shows.
   - **Claude: Paste a Setup-Token**: paste a token from `claude setup-token`. The server keeps it encrypted.

@@ -24,6 +24,7 @@ import { McpServerType } from '../../../mcp/common/mcpPlatformTypes.js';
 import type { IMcpServerDefinition } from '../../../agentPlugins/common/pluginParsers.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { resolveMcpServerWorkingDirectory } from '../shared/mcpServerWorkingDirectory.js';
+import { findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
 
 type ClaudeSdkDeniedMcpServerSpec = NonNullable<Settings['deniedMcpServers']>[number];
 
@@ -173,6 +174,14 @@ export async function buildOptions(
 		}];
 	}
 
+	// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's personal agents,
+	// skills and commands (a plugin of this session only) and CLAUDE.md (appended to its system prompt).
+	const delegated = findDelegatedUserCustomizations(input.workingDirectory.fsPath);
+	const plugins = [
+		...(input.plugins ?? []).map(plugin => ({ type: 'local' as const, path: plugin.uri.fsPath, skipMcpDiscovery: plugin.skipMcpDiscovery })),
+		...(delegated?.claudePluginDir ? [{ type: 'local' as const, path: delegated.claudePluginDir, skipMcpDiscovery: true }] : []),
+	];
+
 	return {
 		cwd: input.workingDirectory.fsPath,
 		...(input.additionalDirectories && input.additionalDirectories.length > 0
@@ -196,9 +205,7 @@ export async function buildOptions(
 			: { sessionId: input.sessionId }),
 		...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
 		...(input.allowedTools && input.allowedTools.length > 0 ? { allowedTools: [...input.allowedTools] } : {}),
-		...(input.plugins && input.plugins.length > 0
-			? { plugins: input.plugins.map(plugin => ({ type: 'local' as const, path: plugin.uri.fsPath, skipMcpDiscovery: plugin.skipMcpDiscovery })) }
-			: {}),
+		...(plugins.length > 0 ? { plugins } : {}),
 		...(input.agent ? { agent: input.agent } : {}),
 		settingSources: ['user', 'project', 'local'],
 		settings: {
@@ -207,7 +214,7 @@ export async function buildOptions(
 				? { deniedMcpServers: [...input.deniedMcpServers] }
 				: {}),
 		},
-		systemPrompt: { type: 'preset', preset: 'claude_code' },
+		systemPrompt: { type: 'preset', preset: 'claude_code', ...(delegated?.claudeMemory ? { append: formatDelegatedUserInstructions(delegated.claudeMemory) } : {}) },
 		...(Object.keys(hooks).length > 0 ? { hooks } : {}),
 		stderr: logStderr,
 	};

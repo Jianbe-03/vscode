@@ -417,6 +417,8 @@ export interface IDelegateResult {
 	readonly skippedSecretFiles: readonly string[];
 	/** Session files were sent: the agent resumes the same session. False: use the transcript fallback. */
 	readonly sessionFilesSent: boolean;
+	/** How many of the user's personal agents, skills and instructions files went along (see `delegationUserCustomizations.ts`). */
+	readonly userCustomizationFiles?: number;
 	/**
 	 * The accounts and the chat's work context, encrypted for the server's agent host (see
 	 * {@link CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX}). Always sent: it also tells the server's

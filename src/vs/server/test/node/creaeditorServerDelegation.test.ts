@@ -265,6 +265,37 @@ suite('CreaEditor Server - Delegate to Server', function () {
 		});
 	});
 
+	test('sends the personal agents, skills and instructions sealed, and keeps them for that chat only', async () => {
+		const homes = { claudeConfigDir: join(dir, 'laptop-claude'), copilotHome: join(dir, 'laptop-copilot'), codexHome: join(dir, 'laptop-codex') };
+		fs.mkdirSync(join(homes.claudeConfigDir, 'agents'), { recursive: true });
+		fs.writeFileSync(join(homes.claudeConfigDir, 'agents', 'reviewer.md'), 'Review.\n');
+		fs.writeFileSync(join(homes.claudeConfigDir, 'CLAUDE.md'), 'Be kind.\n');
+		fs.writeFileSync(join(homes.claudeConfigDir, '.credentials.json'), '{"FAKE":true}\n');
+		fs.mkdirSync(homes.codexHome, { recursive: true });
+		fs.writeFileSync(join(homes.codexHome, 'AGENTS.md'), 'Be brief.\n');
+		const target = { serverId: 's1', name: 'Test Server', serverUrl, deviceKey };
+		const request = { server: target, folder: laptop, title: 'T', resultsMode: DelegationResultsMode.BringBack, includeSecretFiles: false, maxUploadBytes: 1e9, agent: DelegationAgentKind.Transcript, sourceName: 'Laptop' };
+		const result = await delegateChat(request, { ...homes, sendUserCustomizations: true });
+		const without = await delegateChat(request, homes);
+		const stored = join(dir, 'server', 'user-customizations', result.record.delegationId);
+		const forged = await new DelegationHttpClient(target).sendUserCustomizations(result.record.delegationId, { version: 1, ephemeralPublicKey: '', iv: '', tag: '', data: '' }).then(() => 'accepted', (error: DelegationError) => error.code);
+		assert.deepStrictEqual({
+			sent: [result.userCustomizationFiles, without.userCustomizationFiles],
+			files: [fs.readFileSync(join(stored, 'claude', 'agents', 'reviewer.md'), 'utf8'), fs.readFileSync(join(stored, 'claude', 'CLAUDE.md'), 'utf8'), fs.readFileSync(join(stored, 'codex', 'AGENTS.md'), 'utf8')],
+			credentials: fs.existsSync(join(stored, 'claude', '.credentials.json')),
+			worktrees: JSON.parse(fs.readFileSync(join(stored, 'manifest.json'), 'utf8')).worktrees.includes(result.record.worktree),
+			folders: fs.readdirSync(join(dir, 'server', 'user-customizations')),
+			forged,
+		}, {
+			sent: [3, undefined],
+			files: ['Review.\n', 'Be kind.\n', 'Be brief.\n'],
+			credentials: false,
+			worktrees: true,
+			folders: [result.record.delegationId],
+			forged: DelegationErrorCode.InvalidRequest,
+		});
+	});
+
 	test('the second delegation of the same repository sends only new commits', async () => {
 		const target = { serverId: 's1', name: 'Test Server', serverUrl, deviceKey };
 		const request = { server: target, folder: laptop, title: 'T', resultsMode: DelegationResultsMode.BringBack, includeSecretFiles: false, maxUploadBytes: 1e9, agent: DelegationAgentKind.Transcript, sourceName: 'Laptop' };

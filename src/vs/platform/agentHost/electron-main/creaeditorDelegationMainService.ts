@@ -67,8 +67,8 @@ export class CreaEditorDelegationMainService extends Disposable implements ICrea
 	delegate(operationId: string, request: IDelegateRequest): Promise<IDelegateResult> {
 		return withTransferableErrors(async () => {
 			this._logService.info(`[Delegation] Delegating ${request.folder} to ${request.server.name}`);
-			const result = await delegateChat({ ...request, sourceName: request.sourceName || hostname() }, { onProgress: progress => this._onDidProgress.fire({ operationId, ...progress }) });
-			this._logService.info(`[Delegation] Delegated to ${request.server.name}: ${result.bytesSent} bytes${result.incremental ? ' (incremental)' : ''}, session files ${result.sessionFilesSent ? 'sent' : 'not sent'}, branch ${result.record.branch}`);
+			const result = await delegateChat({ ...request, sourceName: request.sourceName || hostname() }, { onProgress: progress => this._onDidProgress.fire({ operationId, ...progress }), sendUserCustomizations: true });
+			this._logService.info(`[Delegation] Delegated to ${request.server.name}: ${result.bytesSent} bytes${result.incremental ? ' (incremental)' : ''}, session files ${result.sessionFilesSent ? 'sent' : 'not sent'}, ${result.userCustomizationFiles ?? 0} personal customization files, branch ${result.record.branch}`);
 			return result;
 		});
 	}

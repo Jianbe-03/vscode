@@ -21,6 +21,7 @@ import { AgentHostCodexAgentEnabledEnvVar } from '../../../platform/agentHost/co
 import { AGENT_HOST_SERVER_NAME_ENV_VAR, AGENT_HOST_WEB_URL_ENV_VAR } from '../../../platform/agentHost/common/creaeditorNotifications.js';
 import { AGENT_HOST_COSTS_DIR_ENV_VAR } from '../../../platform/agentHost/node/shared/serverCostLedger.js';
 import { AGENT_HOST_CHATS_STATUS_FILE_ENV_VAR, AGENT_HOST_MAX_RUNNING_CHATS_ENV_VAR } from '../../../platform/agentHost/node/shared/serverChatsStatus.js';
+import { AGENT_HOST_USER_CUSTOMIZATIONS_DIR_ENV_VAR } from '../../../platform/agentHost/node/creaeditorDelegation/delegationUserCustomizations.js';
 import { ICreaEditorServerDataLayout } from './creaeditorServerDataDir.js';
 
 export type CreaEditorAgentHostState = 'starting' | 'running' | 'restarting' | 'stopped';
@@ -125,6 +126,8 @@ export class CreaEditorAgentHost extends Disposable {
 			[AGENT_HOST_CHATS_STATUS_FILE_ENV_VAR]: layout.chatsStatusFile,
 			[AGENT_HOST_MAX_RUNNING_CHATS_ENV_VAR]: String(maxRunningChats),
 			[AGENT_HOST_SERVER_NAME_ENV_VAR]: serverName,
+			// CreaEditor: the personal customizations delegated chats brought along (see delegationUserCustomizations.ts).
+			[AGENT_HOST_USER_CUSTOMIZATIONS_DIR_ENV_VAR]: layout.userCustomizations,
 			...(webUrl ? { [AGENT_HOST_WEB_URL_ENV_VAR]: webUrl } : {}),
 		};
 		delete env.ELECTRON_RUN_AS_NODE;

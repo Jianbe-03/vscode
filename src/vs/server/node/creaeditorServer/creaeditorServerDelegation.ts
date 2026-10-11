@@ -15,9 +15,10 @@ import { homedir } from 'os';
 import { generateUuid } from '../../../base/common/uuid.js';
 import { join } from '../../../base/common/path.js';
 import { ILogService } from '../../../platform/log/common/log.js';
-import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationSessionFile, IDelegationSessionRequest, IDelegationUploadResponse, IDelegationWorktreeInfo, IDelegationWorktreesResponse } from '../../../platform/agentHost/common/creaeditorDelegation.js';
+import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationCreateRequest, IDelegationEnvelope, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationSessionFile, IDelegationSessionRequest, IDelegationUploadResponse, IDelegationWorktreeInfo, IDelegationWorktreesResponse } from '../../../platform/agentHost/common/creaeditorDelegation.js';
 import { getDelegationSecretsDir } from '../../../platform/agentHost/node/creaeditorDelegation/delegationAccounts.js';
-import { generateDelegationKeyPair, IDelegationKeyPair } from '../../../platform/agentHost/node/creaeditorDelegation/delegationCrypto.js';
+import { generateDelegationKeyPair, IDelegationKeyPair, openDelegationPayload } from '../../../platform/agentHost/node/creaeditorDelegation/delegationCrypto.js';
+import { getUserCustomizationsSealContext, installUserCustomizations, IUserCustomizationsPayload, removeUserCustomizations } from '../../../platform/agentHost/node/creaeditorDelegation/delegationUserCustomizations.js';
 import { DelegationError } from '../../../platform/agentHost/node/creaeditorDelegation/delegationPack.js';
 import { IDelegationProcessRunner, nodeDelegationProcessRunner } from '../../../platform/agentHost/node/creaeditorDelegation/delegationProcess.js';
 import { getClaudeConfigDir, getCopilotCliHome, hasInstalledSession, installSessionFiles, renameSessionFiles } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
@@ -45,6 +46,8 @@ export interface ICreaEditorDelegationLayout extends IDelegationStoreLayout {
 	readonly delegations: string;
 	/** The receiver's own secret store (key pair, GitHub token); the agent host reads the key pair. */
 	readonly secrets: string;
+	/** The personal agents, skills and instructions of delegated chats, per delegation (the agent host reads them). */
+	readonly userCustomizations: string;
 }
 
 /** The receiver's folders under the server's data folder; `secretsDir` is the server's secret store folder. */
@@ -54,6 +57,7 @@ export function getCreaEditorDelegationLayout(dataRoot: string, secretsDir: stri
 		worktrees: join(dataRoot, 'worktrees'),
 		delegations: join(dataRoot, 'delegations'),
 		secrets: getDelegationSecretsDir(secretsDir),
+		userCustomizations: join(dataRoot, 'user-customizations'),
 	};
 }
 
@@ -112,7 +116,7 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler, IDelega
 	constructor(private readonly _options: ICreaEditorDelegationApiOptions) {
 		this._runner = _options.runner ?? nodeDelegationProcessRunner;
 		const { layout } = _options;
-		for (const dir of [layout.repos, layout.worktrees, layout.delegations]) {
+		for (const dir of [layout.repos, layout.worktrees, layout.delegations, layout.userCustomizations]) {
 			fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 		}
 		this._uploads = join(layout.delegations, 'uploads');
@@ -201,6 +205,10 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler, IDelega
 				}
 				if (method === 'POST' && parts[2] === 'session' && parts.length === 3) {
 					return sendJson(response, 200, await this._installSession(record, await readJson<IDelegationSessionRequest>(request)));
+				}
+				if (method === 'POST' && parts[2] === 'customizations' && parts.length === 3) {
+					const body = await readJson<{ envelope?: IDelegationEnvelope }>(request);
+					return sendJson(response, 200, { files: await this._installUserCustomizations(record, body.envelope) });
 				}
 				if (method === 'POST' && parts[2] === 'results' && parts.length === 3) {
 					const body = await readJson<{ knownCommits?: unknown }>(request);
@@ -413,6 +421,25 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler, IDelega
 	}
 
 	/**
+	 * Keeps the user's personal agents, skills and instructions for this delegated chat (replacing what
+	 * it brought before). Sealed by the laptop for this server's key, bound to the delegation.
+	 */
+	private async _installUserCustomizations(record: IDelegationRecord, envelope: IDelegationEnvelope | undefined): Promise<number> {
+		if (!envelope || typeof envelope !== 'object') {
+			throw new HttpError(400, DelegationErrorCode.InvalidRequest, 'Missing envelope.');
+		}
+		let payload: IUserCustomizationsPayload;
+		try {
+			payload = JSON.parse(openDelegationPayload(envelope, await this.getKeyPair(), getUserCustomizationsSealContext(record.delegationId))) as IUserCustomizationsPayload;
+		} catch {
+			throw new HttpError(400, DelegationErrorCode.InvalidRequest, 'The customizations are not sealed for this server.');
+		}
+		const files = installUserCustomizations(this._options.layout.userCustomizations, record.delegationId, this.getWorktreePaths(record), record.sourceName, Array.isArray(payload?.files) ? payload.files : [], this._now());
+		this._options.logService.info(`[Delegation] "${record.title}" brought ${files} personal customization files (agents, skills, instructions) from ${record.sourceName}`);
+		return files;
+	}
+
+	/**
 	 * Removes a delegation whose later steps failed on the laptop (sending the session files): its
 	 * worktree, branch and record. Only the device that delegated it, only shortly after and before its
 	 * session files arrived: no chat has started in it (the laptop starts it after a delegation succeeded).
@@ -424,6 +451,7 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler, IDelega
 		}
 		await this._inRepo(record.repoId, () => removeDelegationWorktree(this._options.layout, record.repoId, record.delegationId, record.shortId, record.worktree, this._runner));
 		fs.rmSync(this._recordFile(record.delegationId), { force: true });
+		removeUserCustomizations(this._options.layout.userCustomizations, record.delegationId);
 		this._options.logService.info(`[Delegation] Device "${device.name}" abandoned the delegation into ${record.worktree} after a failed step`);
 	}
 
@@ -566,6 +594,7 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler, IDelega
 	async removeDelegation(record: IDelegationRecord, reason: string): Promise<void> {
 		await this._inRepo(record.repoId, () => removeDelegationWorktree(this._options.layout, record.repoId, record.delegationId, record.shortId, record.worktree, this._runner));
 		fs.rmSync(this._recordFile(record.delegationId), { force: true });
+		removeUserCustomizations(this._options.layout.userCustomizations, record.delegationId);
 		this._options.logService.info(`[Delegation] Removed the worktree ${record.worktree} (${record.branch}) of "${record.title}" from ${record.sourceName}: ${reason}`);
 	}
 

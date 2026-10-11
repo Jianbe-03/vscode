@@ -42,7 +42,8 @@ import { EPHEMERAL_DISABLED_COPILOT_TOOLS } from './copilotToolDisplay.js';
 import './prompts/allPrompts.js';
 import { agentHostPromptRegistry, type IAgentHostPromptContext } from './prompts/promptRegistry.js';
 import { applyConfiguredPromptOverrides } from './prompts/promptOverride.js';
-import { describeSystemMessageConfig, fullSystemPrompt } from './prompts/systemMessage.js';
+import { appendSystemMessageContent, describeSystemMessageConfig, fullSystemPrompt } from './prompts/systemMessage.js';
+import { findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
 import { buildSandboxConfigForSdk, type SandboxConfig } from './sandboxConfigForSdk.js';
 import { CLIENT_TOOL_SEARCH_REFERENCE_NAME, agentHostModelSupportsToolSearch } from './toolSearchDeferral.js';
 
@@ -1027,9 +1028,13 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		// Resolved once per (re)launch — the SDK has no mid-session system-message
 		// update, so this reflects the model/tools/settings at launch time. Log a
 		// summary at info for prompt observability; the full config at trace.
-		const systemMessage = promptOverrides.systemPrompt !== undefined
+		const baseSystemMessage = promptOverrides.systemPrompt !== undefined
 			? fullSystemPrompt(promptOverrides.systemPrompt)
 			: agentHostPromptRegistry.resolveSystemMessageConfig(effectiveModel, promptContext);
+		// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's personal agents and
+		// skills (a plugin folder of this session only) and copilot-instructions.md.
+		const delegated = findDelegatedUserCustomizations(plan.workingDirectory?.fsPath);
+		const systemMessage = delegated?.copilotInstructions ? appendSystemMessageContent(baseSystemMessage, formatDelegatedUserInstructions(delegated.copilotInstructions)) : baseSystemMessage;
 		this._logService.info(`[Copilot:${plan.sessionId}] Resolved system message: ${describeSystemMessageConfig(systemMessage)}`);
 		const additionalDisabledMcpServers = plan.isEphemeral ? [
 			...plugins.flatMap(plugin => plugin.mcpServers.map(server => server.name)),
@@ -1112,8 +1117,10 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 			},
 			availableTools: sdkAvailableTools,
 			excludedTools: sdkExcludedTools,
-			pluginDirectories: coalesce(plugins.map(p => p.pluginDir))
-				.filter(d => d.scheme === Schemas.file).map(d => d.fsPath),
+			pluginDirectories: [
+				...coalesce(plugins.map(p => p.pluginDir)).filter(d => d.scheme === Schemas.file).map(d => d.fsPath),
+				...(delegated?.copilotPluginDir ? [delegated.copilotPluginDir] : []),
+			],
 			tools: promptOverrides.tools,
 			...plan.githubCredentials.sdkSessionOptions,
 			// Enable infinite sessions so the SDK provisions a workspace

@@ -20,6 +20,7 @@ import { exportClaudeSession, exportCodexSession, exportCopilotSession, getClaud
 import { resolveDefaultCodexHome } from '../codex/codexAccountHomes.js';
 import { repoFromRemoteUrl } from '../shared/gatewayDirectConnection.js';
 import { importResultBundle } from './delegationWorktrees.js';
+import { collectUserCustomizations, getUserCustomizationsSealContext, IUserCustomizationsPayload } from './delegationUserCustomizations.js';
 
 /** How often a request that failed on the network is tried again. */
 const MAX_ATTEMPTS = 4;
@@ -184,6 +185,11 @@ export class DelegationHttpClient {
 		return this._json('POST', `delegations/${delegationId}/session`, request);
 	}
 
+	/** Sends the user's personal agents, skills and instructions, sealed for the server; answers how many files it kept. */
+	async sendUserCustomizations(delegationId: string, envelope: IDelegationEnvelope): Promise<number> {
+		return (await this._json<{ files: number }>('POST', `delegations/${delegationId}/customizations`, { envelope })).files;
+	}
+
 	/** Removes a delegation whose later steps failed (its worktree, branch and record on the server). */
 	async abandon(delegationId: string): Promise<void> {
 		await this._json('DELETE', `delegations/${delegationId}`, undefined, false);
@@ -238,6 +244,8 @@ export interface IDelegateChatOptions {
 	readonly copilotHome?: string;
 	readonly onProgress?: (progress: IDelegationProgressReport) => void;
 	readonly retryDelayMs?: number;
+	/** Also send the user's personal agents, skills and instructions from the agents' home folders (off unless asked). */
+	readonly sendUserCustomizations?: boolean;
 }
 
 /**
@@ -343,9 +351,30 @@ export async function delegateChat(request: IDelegateRequest, options: IDelegate
 			throw error;
 		}
 
+		// The user's personal agents, skills and instructions, so the chat behaves there as here. Sealed
+		// like the accounts, so only the server can read them, whatever the connection. Optional: an
+		// older server, or a failure here, leaves the chat delegated without them.
+		let userCustomizationFiles: number | undefined;
+		if (options.sendUserCustomizations) {
+			try {
+				const collected = collectUserCustomizations({
+					claudeConfigDir: options.claudeConfigDir ?? getClaudeConfigDir(),
+					copilotHome: options.copilotHome ?? getCopilotCliHome(),
+					codexHome: options.codexHome ?? resolveDefaultCodexHome(process.env.CODEX_HOME, homedir()),
+				});
+				if (collected.files.length) {
+					const payload: IUserCustomizationsPayload = { files: collected.files };
+					userCustomizationFiles = await client.sendUserCustomizations(delegationId, sealDelegationPayload(JSON.stringify(payload), serverKey.publicKey, getUserCustomizationsSealContext(delegationId)));
+				}
+			} catch {
+				userCustomizationFiles = undefined;
+			}
+		}
+
 		report({ stage: DelegationProgressStage.Done });
 		return {
 			record,
+			...(userCustomizationFiles !== undefined ? { userCustomizationFiles } : {}),
 			bytesSent: packed.bytes,
 			incremental: packed.incremental,
 			hasLocalChanges: packed.hasLocalChanges,

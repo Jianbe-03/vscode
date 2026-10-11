@@ -14,6 +14,7 @@ What goes to the server:
 - **Files that look like secrets** (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.npmrc`, ...) stay on the laptop if they are untracked, unless you choose to send them. Tracked files always go: they are in the repository anyway.
 - **The conversation**, so the chat resumes with all its history: for Claude its session file (with its subagents), for Codex its thread, for Copilot CLI its session folder. When a session cannot move (missing, larger than 64 MB, or the server cannot import it), the chat continues with a transcript of the conversation as an attachment instead, and the notification says so.
 - **The accounts**, encrypted so that only the server's agent host can read them: the Claude setup-token accounts, and for a Copilot CLI chat on an OpenRouter or LiteLLM model, that key. A browser-login Claude account or a Codex login cannot move; sign in once on the server instead (see [Accounts on the server](creaeditor-server.md#accounts-on-the-server)).
+- **Your personal agents, skills and instructions**, so the chat behaves on the server as it does here. See [What your server uses from your laptop](#what-your-server-uses-from-your-laptop).
 
 On the server, the chat works in its **own worktree** on the branch `creaeditor/delegated/<id>`, with your uncommitted changes still uncommitted. It shows under the server in the Agents window, and on your phone when the phone is paired with the server.
 
@@ -137,6 +138,38 @@ Select the ones to remove and confirm. If the work of one of them was not brough
 ### When the laptop is off
 
 That is the point: the chat runs on the server without your laptop. It uses the server's own accounts (or the ones you sent along), its budgets with a hard stop still apply, and its OpenRouter or LiteLLM costs are recorded on the server. Your laptop picks up the costs and any **Bring Back Changes** the next time it is online and the Agents window is open.
+
+## What your server uses from your laptop
+
+| What | Goes along? | How and for how long |
+| --- | --- | --- |
+| **The code** | Yes | The current branch (only the history the server lacks), uncommitted changes and untracked files that are not ignored. It stays in the chat's worktree until [the server removes it](#when-the-server-removes-a-worktree). |
+| **Secret-looking untracked files** (`.env*`, keys, `.npmrc`, ...) | Only if you choose **Send Them Too** | They end up in the worktree, and go with it. |
+| **The conversation** | Yes | The agent's own session (Claude, Codex, Copilot CLI), or a transcript when it cannot move. It stays in the server's chat list until you delete the chat there. |
+| **Claude setup-token accounts** | Yes | Encrypted for the server, so only its agent host can read them. They become accounts of the server: its other Claude chats can use them too. They stay there, encrypted, until the server's data is reset. |
+| **The OpenRouter or LiteLLM key** of a Copilot CLI chat on such a model | Yes | Encrypted the same way. The chat and its subagents only use that key. It stays on the server, encrypted, until a later delegation brings a key with the same name, which replaces it. |
+| **Your personal agents, skills and instructions** | Yes | See below. Kept for that chat only, and removed with its worktree. |
+| **A browser-login Claude account, a Codex login** | No | They cannot move: sign in once on the server (see [Accounts on the server](creaeditor-server.md#accounts-on-the-server)). |
+| **MCP servers** | No | The server uses its own MCP configuration, if any. |
+| **Secrets** (agent settings, `.credentials*`, `auth.json`, `config.toml`, MCP configurations, `.env*`, keys) | No | Never part of the personal customizations either. |
+
+### Your personal agents, skills and instructions
+
+Repository customizations (a `.claude/` or `.github/` folder, `AGENTS.md` in the repository) travel with the code anyway. Your **personal** ones, in your home folder, go along too:
+
+- **Claude**: `~/.claude/agents/`, `~/.claude/skills/`, `~/.claude/commands/` and your `~/.claude/CLAUDE.md`.
+- **Copilot CLI**: `~/.copilot/agents/`, `~/.copilot/skills/` and `~/.copilot/copilot-instructions.md`.
+- **Codex**: `~/.codex/AGENTS.md`. Codex prompts and skills stay here: Codex reads those only from its home folder, which the server shares between all its chats.
+
+Left out: settings and credential files, MCP configurations, `.env*` files and keys, caches, `node_modules`, `projects/`, `sessions/` and `todos/`, files larger than 1 MB, and everything past 10 MB in all.
+
+They are encrypted for the server like the accounts and kept with the delegated chat, in the server's data folder (`user-customizations/<id>`). Only the server's agent for **that** chat uses them; the server's own home folder and its other chats are not touched:
+
+- **Claude** gets your agents, skills and commands as a plugin named `personal`, so they show as `personal:<name>`, and your `CLAUDE.md` at the end of its system prompt.
+- **Copilot CLI** gets your agents and skills as a plugin folder, and your `copilot-instructions.md` at the end of its system message.
+- **Codex** gets your `AGENTS.md` with its instructions.
+
+When you delegate a chat again, the current versions go along. They are removed together with the chat's worktree.
 
 ## Settings
 

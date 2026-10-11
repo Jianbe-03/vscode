@@ -15,6 +15,7 @@ Moves a chat from this machine to a CreaEditor Server: its code, its conversatio
 | `../shared/serverGatewayKeys.ts` | server agent host | Delegated OpenRouter/LiteLLM keys (by `<vendor>/<group>`) and work contexts (by worktree), encrypted |
 | `../shared/gatewayDirectConnection.ts` | server agent host | The BYOK bridge connection of a server: calls `/chat/completions` with the delegated key, checks hard-stop budgets, records costs |
 | `../shared/gatewayCostLedger.ts` | server agent host | Appends to `<costs>/creaeditor-gateway-costs.jsonl` |
+| `delegationUserCustomizations.ts` | all three | The user's personal agents, skills and instructions: collected on the laptop (no credentials, 1 MB per file, 10 MB in all), installed per delegation on the server, found by a chat's working directory in the Claude, Copilot CLI and Codex agents |
 | `delegationClient.ts` | laptop | HTTP client (retries, chunked resumable upload), `delegateChat`, `bringBackChanges` |
 | `delegationProcess.ts` | both | The `git`/`gh` runner (replaced in tests) |
 | `../../electron-main/creaeditorDelegationMainService.ts` | laptop | The main-process service windows call over IPC |
@@ -37,6 +38,7 @@ The server's Remote Access HTTP API with this device's key (`Authorization: Bear
 | `DELETE delegations/<id>` | Abandons a delegation whose later step failed on the laptop: removes its worktree, branch and record. Only the device that created it, within 30 minutes, before session files arrived |
 | `DELETE delegations/<id>?force=1` | Clean Up Server...: removes the worktree, branch, base ref and record whatever their state; any paired device (they are all the server owner's) |
 | `GET worktrees` | `{ worktrees }`: every delegated chat's worktree with its size, chat state (running, archived, deleted, unknown), whether its work is safe and when the server removes it |
+| `POST delegations/<id>/customizations` `{ envelope }` | `{ files }`: the user's personal agents, skills and instructions, sealed for the server (context `user-customizations:<id>`); kept in `<data>/user-customizations/<id>/` for that chat's agent (see `delegationUserCustomizations.ts`) |
 | `POST delegations/<id>/results` `{ knownCommits }` | `{ commit, downloadId?, bytes, includesUncommitted }` |
 | `GET downloads/<id>` | The result bundle (removed after download) |
 | `POST delegations/<id>/pull-request` | `{ url }` |
