@@ -16,6 +16,7 @@ import { Codicon } from '../../../../../base/common/codicons.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { derived, IObservable, observableValue } from '../../../../../base/common/observable.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
+import { localize } from '../../../../../nls.js';
 import { AgentHostProtocolClient } from '../../../../../platform/agentHost/browser/agentHostProtocolClient.js';
 import { WebSocketClientTransport } from '../../../../../platform/agentHost/browser/webSocketClientTransport.js';
 import { agentsWindowAgentHostClientInfo } from '../../../../../platform/agentHost/common/agentHostClientInfo.js';
@@ -34,6 +35,7 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IHostService } from '../../../../../workbench/services/host/browser/host.js';
 import { ISessionsProvidersService } from '../../../../services/sessions/browser/sessionsProvidersService.js';
 import { CREAEDITOR_SERVERS_STORAGE_KEY, getCreaEditorServerDeviceKeyName, ICreaEditorServer, ICreaEditorServerCheck, ICreaEditorServerHealthState, ICreaEditorServersService, parseStoredCreaEditorServers } from './creaeditorServers.js';
+import { pairAgainWithCreaEditorServer } from './creaeditorServerPairFlow.js';
 import { EntryDrivenProviderContribution, IEntryDrivenProviderOptions } from './entryDrivenProviderContribution.js';
 
 /** How often the servers' `/health` is checked while the window has focus. */
@@ -416,7 +418,20 @@ export class CreaEditorServersAgentHostContribution extends EntryDrivenProviderC
 		const serverId = entry.connection.type === RemoteAgentHostEntryType.CreaEditorServer ? entry.connection.serverId : undefined;
 		return {
 			workspaceTypeIcon: Codicon.server,
-			...(serverId ? { removeOnDemand: () => this._serversService.removeServer(serverId) } : {}),
+			...(serverId ? {
+				removeOnDemand: () => this._serversService.removeServer(serverId),
+				// Reconnecting cannot help a server that forgot this computer: say so, with Pair Again.
+				connectionNotice: derived(reader => {
+					const server = this._serversService.servers.read(reader).find(candidate => candidate.id === serverId);
+					if (!server || !this._serversService.needsPairing.read(reader).has(serverId)) {
+						return undefined;
+					}
+					return {
+						message: localize('creaeditorServers.needsPairingBanner', "{0} no longer knows this computer.", server.name),
+						action: { label: localize('creaeditorServers.pairAgainButton', "Pair Again"), run: () => void this._instantiationService.invokeFunction(pairAgainWithCreaEditorServer, server) },
+					};
+				}),
+			} : {}),
 		};
 	}
 }

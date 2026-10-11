@@ -40,7 +40,7 @@ import { IChatWidgetService } from '../../../../../workbench/contrib/chat/browse
 import { IChatService } from '../../../../../workbench/contrib/chat/common/chatService/chatService.js';
 import { IChatSessionsService } from '../../../../../workbench/contrib/chat/common/chatSessionsService.js';
 import { ILanguageModelsService } from '../../../../../workbench/contrib/chat/common/languageModels.js';
-import { IAgentHostAutoConnect, IAgentHostConnectProgress, IAgentHostConnectionLabels, IAgentHostGroup } from '../../../../common/agentHostSessionsProvider.js';
+import { IAgentHostAutoConnect, IAgentHostConnectProgress, IAgentHostConnectionLabels, IAgentHostConnectionNotice, IAgentHostGroup } from '../../../../common/agentHostSessionsProvider.js';
 import { buildAgentHostSessionWorkspace, readBranchProtectionPatterns } from '../../../../common/agentHostSessionWorkspace.js';
 import { DevContainerIdleTimeoutSettingId } from '../../../../common/devContainerAgentHostService.js';
 import { IGitHubInfo, IChat, isActiveSessionStatus, ISession, SessionStatus, ISessionType, ISessionWorkspace, ISessionWorkspaceBrowseAction, SESSION_WORKSPACE_GROUP_REMOTE } from '../../../../services/sessions/common/session.js';
@@ -90,6 +90,8 @@ export interface IRemoteAgentHostSessionsProviderConfig {
 	/** Optional kind-scoped policy for automatically starting the host. */
 	readonly autoConnect?: IAgentHostAutoConnect;
 	readonly connectionLabels?: IAgentHostConnectionLabels;
+	/** CreaEditor: see `IAgentHostSessionsProvider.connectionNotice`. */
+	readonly connectionNotice?: IObservable<IAgentHostConnectionNotice | undefined>;
 	/**
 	 * Set when the host addresses sessions under a scheme that differs from its agent provider, as
 	 * the cloud sandbox host does (sessions are `ahp-session:/<id>` while the agent is `copilot`).
@@ -169,6 +171,7 @@ export class RemoteAgentHostSessionsProvider extends DevContainerAgentHostSessio
 	readonly showConnectionLog?: () => Promise<void>;
 	readonly autoConnect?: IAgentHostAutoConnect;
 	readonly connectionLabels?: IAgentHostConnectionLabels;
+	readonly connectionNotice?: IObservable<IAgentHostConnectionNotice | undefined>;
 	readonly automations: ISessionsProviderAutomations;
 	readonly supportsQuickChats = true;
 	private readonly _automationStore: ReconnectableAgentHostAutomationStore;
@@ -304,6 +307,7 @@ export class RemoteAgentHostSessionsProvider extends DevContainerAgentHostSessio
 		this.showConnectionLog = config.showConnectionLog;
 		this.autoConnect = config.autoConnect;
 		this.connectionLabels = config.connectionLabels;
+		this.connectionNotice = config.connectionNotice;
 		this.canConnectOnDemand = !!config.connectOnDemand;
 		this._readOnly = config.readOnlyWhenDisconnected
 			? derived(this, reader => {

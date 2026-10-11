@@ -411,6 +411,16 @@ export class SessionRemoteConnection extends Disposable {
 			return undefined;
 		}
 
+		// CreaEditor: a reason reconnecting cannot fix replaces the reconnect countdown.
+		const notice = provider && isAgentHostProvider(provider) ? provider.connectionNotice?.read(reader) : undefined;
+		if (notice) {
+			return {
+				icon: Codicon.warning,
+				message: notice.message,
+				action: notice.action ? { label: notice.action.label, run: () => notice.action!.run() } : undefined,
+			};
+		}
+
 		if (status.kind === 'incompatible') {
 			// The centered recovery state is skipped once a transcript is rendered,
 			// so this banner is the only place the incompatibility can be explained.

@@ -5,12 +5,13 @@
 
 import { type Event } from '../../../../../base/common/event.js';
 import { type ThemeIcon } from '../../../../../base/common/themables.js';
+import { type IObservable } from '../../../../../base/common/observable.js';
 import { Disposable, DisposableMap, DisposableStore, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { type IRemoteAgentHostEntry, IRemoteAgentHostService, RemoteAgentHostConnectionStatus, RemoteAgentHostEntryType, RemoteAgentHostsEnabledSettingId, getEntryAddress } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { type IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { type IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
 import { type INotificationService } from '../../../../../platform/notification/common/notification.js';
-import { type IAgentHostAutoConnect, type IAgentHostConnectProgress } from '../../../../common/agentHostSessionsProvider.js';
+import { type IAgentHostAutoConnect, type IAgentHostConnectionNotice, type IAgentHostConnectProgress } from '../../../../common/agentHostSessionsProvider.js';
 import { type ISessionsProvidersService } from '../../../../services/sessions/browser/sessionsProvidersService.js';
 import { RemoteAgentHostSessionsProvider } from './remoteAgentHostSessionsProvider.js';
 import { watchForIncompatibleNotifications } from './remoteHostOptions.js';
@@ -27,6 +28,8 @@ export interface IEntryDrivenProviderOptions {
 	readonly removeOnDemand?: () => Promise<void>;
 	/** CreaEditor: type icon of the host's workspaces. */
 	readonly workspaceTypeIcon?: ThemeIcon;
+	/** CreaEditor: see `IAgentHostSessionsProvider.connectionNotice`. */
+	readonly connectionNotice?: IObservable<IAgentHostConnectionNotice | undefined>;
 }
 
 /**
@@ -109,6 +112,7 @@ export abstract class EntryDrivenProviderContribution extends Disposable {
 			preferenceKey: options.preferenceKey,
 			removeOnDemand: options.removeOnDemand,
 			workspaceTypeIcon: options.workspaceTypeIcon,
+			connectionNotice: options.connectionNotice,
 		});
 		if (options.initialStatus !== undefined) {
 			provider.setConnectionStatus(options.initialStatus);

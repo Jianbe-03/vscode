@@ -48,6 +48,15 @@ export interface IAgentHostAutoConnect {
 	setEnabled(enabled: boolean): void;
 }
 
+/**
+ * CreaEditor: why a host cannot be used that reconnecting cannot fix (e.g. the server no longer
+ * knows this computer), shown on the connection banner instead of the reconnect countdown.
+ */
+export interface IAgentHostConnectionNotice {
+	readonly message: string;
+	readonly action?: { readonly label: string; run(): void };
+}
+
 /** Localized labels shared by connection banners and recovery screens. */
 export interface IAgentHostConnectionLabels {
 	readonly unavailableTitle: string;
@@ -180,6 +189,9 @@ export interface IAgentHostSessionsProvider extends ISessionsProvider {
 
 	/** Optional labels for providers whose display name does not name the host. */
 	readonly connectionLabels?: IAgentHostConnectionLabels;
+
+	/** CreaEditor: see {@link IAgentHostConnectionNotice}; shown while the host is not connected. */
+	readonly connectionNotice?: IObservable<IAgentHostConnectionNotice | undefined>;
 
 	/**
 	 * When `true`, the workspace picker keeps this provider's browse
