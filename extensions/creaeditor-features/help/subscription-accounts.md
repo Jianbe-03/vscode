@@ -83,7 +83,7 @@ This saves money on big Claude chats that you leave alone for a while. It is on 
 
 ### Why
 
-Anthropic keeps the context of a Claude chat (everything said so far) in a **prompt cache**: a short-term memory on Anthropic's side, so the next request does not have to send it all again at full price. Reading the context from the cache costs a tenth of the normal price. But the cache only lives **5 minutes** after each request (1 hour with 1-hour caching).
+Anthropic keeps the context of a Claude chat (everything said so far) in a **prompt cache**: a short-term memory on Anthropic's side, so the next request does not have to send it all again at full price. Reading the context from the cache costs a tenth of the normal price. But the cache only lives a short time after each request, chosen per request: **5 minutes** by default, **1 hour** when the request uses Anthropic's 1-hour caching.
 
 When you send a message after the cache expired, the whole context is written to the cache again, at more than the normal price. For a big chat that you come back to after lunch, that adds up.
 
@@ -91,13 +91,13 @@ When you send a message after the cache expired, the whole context is written to
 
 Shortly before the cache expires, CreaEditor compacts the idle chat: it runs the Claude CLI's own `/compact`, which replaces the conversation with a short summary.
 
-- **When:** 4 minutes 15 seconds after the chat's last turn ended (57 minutes with 1-hour caching; CreaEditor sees which one from the turn's usage).
+- **When:** 4 minutes 15 seconds after the chat's last turn ended, before the 5-minute cache expires; 57 minutes when the chat uses Anthropic's 1-hour cache, before it expires at 60 minutes. CreaEditor sees which cache the last request used from the turn's usage.
 - **Cheap:** the summary is made from the cached context, which is read at the low cache price.
 - **The result:** your next message starts from the small summary instead of the whole conversation.
 
-The chat shows it as a turn labeled "Compacted automatically: the prompt cache was about to expire", followed by "Conversation compacted". It does not send a phone notification and does not mark the chat as unread.
+The chat shows it as **Compacted to save cost: the prompt cache was about to expire, so the conversation was summarized while reading it was still cheap.**, followed by "Conversation compacted: older messages were summarized." After a reload the chat still shows why it was compacted: CreaEditor remembers its automatic compactions in the chat's data. A `/compact` you send yourself only shows "Conversation compacted: older messages were summarized." It does not send a phone notification and does not mark the chat as unread.
 
-<img src="images/auto-compact.png" alt="A chat that was compacted automatically" width="554">
+<img src="images/auto-compact.png" alt="A chat that was compacted automatically (the screenshot shows the earlier wording)" width="554">
 
 ### When it happens
 

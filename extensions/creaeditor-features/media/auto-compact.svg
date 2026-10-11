@@ -2,40 +2,54 @@
 	<rect width="960" height="600" rx="16" fill="#16152D"/>
 
 	<!-- The user's request -->
-	<rect x="560" y="40" width="360" height="48" rx="10" fill="#2A2850"/>
-	<text x="584" y="70" fill="#F8F7FA" font-size="16">Refactor the checkout flow</text>
+	<rect x="560" y="32" width="360" height="44" rx="10" fill="#2A2850"/>
+	<text x="584" y="60" fill="#F8F7FA" font-size="16">Refactor the checkout flow</text>
 
 	<!-- The agent's answer -->
-	<rect x="40" y="108" width="880" height="84" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="64" y="142" fill="#BCBBCA" font-size="15">I split the checkout into three steps, moved the price calculation into its own</text>
-	<text x="64" y="166" fill="#BCBBCA" font-size="15">service and updated the tests. All 214 tests pass.</text>
+	<rect x="40" y="92" width="880" height="68" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="120" fill="#BCBBCA" font-size="15">I split the checkout into three steps, moved the price calculation into its own</text>
+	<text x="64" y="143" fill="#BCBBCA" font-size="15">service and updated the tests. All 214 tests pass.</text>
 
-	<!-- Idle timeline -->
-	<text x="40" y="236" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">YOU STEP AWAY · THE CHAT IS IDLE</text>
-	<path d="M60 272 H880" stroke="#3B3866" stroke-width="4" stroke-linecap="round"/>
-	<path d="M60 272 H780" stroke="#00BD8B" stroke-width="4" stroke-linecap="round"/>
-	<circle cx="60" cy="272" r="8" fill="#00EC95"/>
-	<text x="60" y="302" fill="#BCBBCA" font-size="13" text-anchor="middle">0:00</text>
-	<circle cx="672" cy="272" r="10" fill="#16152D" stroke="#00EC95" stroke-width="3"/>
-	<circle cx="672" cy="272" r="3.5" fill="#00EC95"/>
-	<text x="672" y="302" fill="#F8F7FA" font-size="13" font-weight="600" text-anchor="middle">4:15 compact</text>
-	<path d="M780 256 V286" stroke="#F28B8B" stroke-width="2"/>
-	<text x="780" y="248" fill="#F28B8B" font-size="13" text-anchor="middle">5:00 cache expires</text>
+	<!-- Idle timelines: the cache lasts 5 minutes, or 1 hour when the request used 1-hour caching -->
+	<text x="40" y="198" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">YOU STEP AWAY · THE CHAT IS IDLE</text>
 
-	<!-- The compaction turn -->
-	<rect x="420" y="332" width="500" height="36" rx="8" fill="#2A2850"/>
-	<text x="440" y="356" fill="#BCBBCA" font-size="14">Compacted automatically: the prompt cache was about to expire</text>
-	<rect x="40" y="384" width="880" height="56" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="64" y="418" fill="#8E8CA8" font-size="15">Conversation compacted</text>
+	<text x="40" y="249" fill="#BCBBCA" font-size="13">5-minute cache</text>
+	<path d="M170 244 H880" stroke="#3B3866" stroke-width="4" stroke-linecap="round"/>
+	<path d="M170 244 H800" stroke="#00BD8B" stroke-width="4" stroke-linecap="round"/>
+	<circle cx="170" cy="244" r="7" fill="#00EC95"/>
+	<text x="170" y="272" fill="#BCBBCA" font-size="13" text-anchor="middle">0:00</text>
+	<circle cx="706" cy="244" r="10" fill="#16152D" stroke="#00EC95" stroke-width="3"/>
+	<circle cx="706" cy="244" r="3.5" fill="#00EC95"/>
+	<text x="706" y="272" fill="#F8F7FA" font-size="13" font-weight="600" text-anchor="middle">4:15 compact</text>
+	<path d="M800 230 V258" stroke="#F28B8B" stroke-width="2"/>
+	<text x="800" y="222" fill="#F28B8B" font-size="13" text-anchor="middle">5:00 cache expires</text>
+
+	<text x="40" y="329" fill="#BCBBCA" font-size="13">1-hour cache</text>
+	<path d="M170 324 H880" stroke="#3B3866" stroke-width="4" stroke-linecap="round"/>
+	<path d="M170 324 H800" stroke="#00BD8B" stroke-width="4" stroke-linecap="round"/>
+	<circle cx="170" cy="324" r="7" fill="#00EC95"/>
+	<text x="170" y="352" fill="#BCBBCA" font-size="13" text-anchor="middle">0:00</text>
+	<circle cx="769" cy="324" r="10" fill="#16152D" stroke="#00EC95" stroke-width="3"/>
+	<circle cx="769" cy="324" r="3.5" fill="#00EC95"/>
+	<text x="769" y="352" fill="#F8F7FA" font-size="13" font-weight="600" text-anchor="middle">57:00 compact</text>
+	<path d="M800 310 V338" stroke="#F28B8B" stroke-width="2"/>
+	<text x="800" y="302" fill="#F28B8B" font-size="13" text-anchor="middle">60:00 cache expires</text>
+
+	<!-- The compaction turn, as the chat shows it -->
+	<rect x="300" y="372" width="620" height="50" rx="8" fill="#2A2850"/>
+	<text x="320" y="393" fill="#BCBBCA" font-size="14">Compacted to save cost: the prompt cache was about to expire, so the</text>
+	<text x="320" y="412" fill="#BCBBCA" font-size="14">conversation was summarized while reading it was still cheap.</text>
+	<rect x="40" y="432" width="880" height="40" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="64" y="457" fill="#8E8CA8" font-size="15">Conversation compacted: older messages were summarized.</text>
 
 	<!-- Outcome -->
-	<rect x="40" y="468" width="428" height="96" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
-	<text x="64" y="500" fill="#00EC95" font-size="13" font-weight="600" letter-spacing="1">YOUR NEXT MESSAGE</text>
-	<text x="64" y="528" fill="#F8F7FA" font-size="14">starts from a short summary, instead of</text>
-	<text x="64" y="548" fill="#F8F7FA" font-size="14">writing the whole chat to the cache again.</text>
+	<rect x="40" y="484" width="428" height="88" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
+	<text x="64" y="512" fill="#00EC95" font-size="13" font-weight="600" letter-spacing="1">YOUR NEXT MESSAGE</text>
+	<text x="64" y="537" fill="#F8F7FA" font-size="14">starts from a short summary, instead of</text>
+	<text x="64" y="557" fill="#F8F7FA" font-size="14">writing the whole chat to the cache again.</text>
 
-	<rect x="492" y="468" width="428" height="96" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="516" y="500" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">ONLY WHEN</text>
-	<text x="516" y="528" fill="#BCBBCA" font-size="14">a Claude chat has 60,000+ tokens of context</text>
-	<text x="516" y="548" fill="#BCBBCA" font-size="14">and nothing runs or waits for you.</text>
+	<rect x="492" y="484" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="516" y="512" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">ONLY WHEN</text>
+	<text x="516" y="537" fill="#BCBBCA" font-size="14">a Claude chat has 60,000+ tokens of context</text>
+	<text x="516" y="557" fill="#BCBBCA" font-size="14">and nothing runs or waits for you.</text>
 </svg>
