@@ -15,6 +15,7 @@ import { IConfigurationService } from '../../../../platform/configuration/common
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../platform/notification/common/notification.js';
+import { CHAT_CATEGORY } from '../../chat/browser/actions/chatActions.js';
 import { RemoteAccessDialog } from './remoteAccessDialog.js';
 
 /** Opens the Remote Access dialog. */
@@ -28,7 +29,8 @@ registerAction2(class ShowRemoteAccessAction extends Action2 {
 	constructor() {
 		super({
 			id: SHOW_REMOTE_ACCESS_COMMAND_ID,
-			title: localize2('remoteAccess.show', "Remote Access"),
+			title: localize2('remoteAccess.show', "Show Remote Access"),
+			category: CHAT_CATEGORY,
 			icon: Codicon.deviceMobile,
 			toggled: RemoteAccessEnabledContext,
 			f1: true,
@@ -45,6 +47,7 @@ registerAction2(class ToggleRemoteAccessAction extends Action2 {
 		super({
 			id: TOGGLE_REMOTE_ACCESS_COMMAND_ID,
 			title: localize2('remoteAccess.toggle', "Allow Remote Access"),
+			category: CHAT_CATEGORY,
 			toggled: RemoteAccessEnabledContext,
 			f1: true,
 		});
