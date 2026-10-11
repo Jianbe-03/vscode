@@ -82,15 +82,23 @@ export function expandCompactedHistory(messages: readonly SessionMessage[], reco
 			byUuid.set(record.uuid, record);
 		}
 	}
-	const result = messages.map(message => withSystemSubtype(message, byUuid.get(message.uuid)));
-	const seen = new Set<string>(messages.map(message => message.uuid));
+	let result = messages.map(message => withSystemSubtype(message, byUuid.get(message.uuid)));
+	// The records restored so far, so a malformed transcript (a cycle) cannot loop. Not the SDK's
+	// messages: the SDK also returns the last message before a boundary (the record its
+	// `logicalParentUuid` points at) after the summary, and that must not stop the walk.
+	const walked = new Set<string>();
 	let first = messages[0] ? byUuid.get(messages[0].uuid) : undefined;
 	for (let i = 0; i < MAX_COMPACTIONS && first && isCompactBoundary(first) && typeof first.logicalParentUuid === 'string'; i++) {
-		const chain = walkChain(first.logicalParentUuid, byUuid, seen);
+		const chain = walkChain(first.logicalParentUuid, byUuid, walked);
 		if (chain.length === 0) {
 			break;
 		}
-		result.unshift(...chain.map(toSessionMessage).filter((message): message is ReplaySessionMessage => message !== undefined));
+		// Restored in their place before the boundary, so drop the SDK's copies after it.
+		const restored = new Set(chain.map(record => record.uuid));
+		result = [
+			...chain.map(toSessionMessage).filter((message): message is ReplaySessionMessage => message !== undefined),
+			...result.filter(message => !restored.has(message.uuid)),
+		];
 		first = chain[0];
 	}
 	return result;

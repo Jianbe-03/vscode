@@ -8,7 +8,8 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { URI } from '../../../../base/common/uri.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { ResponsePartKind } from '../../common/state/protocol/state.js';
+import { applyAutoCompactNotices } from '../../common/creaeditorCacheCompaction.js';
+import { ResponsePartKind, type Turn } from '../../common/state/protocol/state.js';
 import { expandCompactedHistory, parseClaudeTranscript, startsAtCompaction } from '../../node/claude/claudeCompactedHistory.js';
 import { mapSessionMessagesToTurns } from '../../node/claude/claudeReplayMapper.js';
 
@@ -62,6 +63,48 @@ suite('claudeCompactedHistory', () => {
 		})), [
 			{ id: 'request_1', text: 'Say hello', parts: [`${ResponsePartKind.Markdown}: Hello from the mock Anthropic API.`, `${ResponsePartKind.SystemNotification}: Conversation compacted: older messages were summarized.`] },
 			{ id: 'request_2', text: 'Say goodbye', parts: [`${ResponsePartKind.Markdown}: Goodbye.`] },
+		]);
+	});
+
+	test('an automatic compaction whose last message the SDK returns after the summary replays both turns and one notice', () => {
+		// The shape the Claude CLI writes for the automatic `/compact`: the boundary's
+		// `logicalParentUuid` is the last assistant message, and the SDK returns that message again
+		// after the summary.
+		const autoSessionId = '6ff8a8bc';
+		const record = (fields: object) => JSON.stringify({ isSidechain: false, sessionId: autoSessionId, ...fields });
+		const autoTranscript = [
+			record({ parentUuid: null, type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'Say hi' }] }, uuid: 'request_1', timestamp: '2026-10-11T20:00:00.000Z' }),
+			record({ parentUuid: 'request_1', type: 'attachment', attachment: { type: 'environment' }, uuid: 'att-1' }),
+			record({ parentUuid: 'att-1', type: 'assistant', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'text', text: 'Hello from the mock Anthropic API.' }] }, uuid: 'assistant-1', timestamp: '2026-10-11T20:00:01.000Z' }),
+			record({ parentUuid: 'assistant-1', type: 'attachment', attachment: { type: 'prompt_snapshot' }, uuid: 'att-2' }),
+			record({ parentUuid: 'att-2', type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'And now?' }] }, uuid: 'request_2', timestamp: '2026-10-11T20:01:00.000Z' }),
+			record({ parentUuid: 'request_2', type: 'attachment', attachment: { type: 'total_tokens_reminder' }, uuid: 'att-3' }),
+			record({ parentUuid: 'att-3', type: 'assistant', message: { id: 'msg_2', role: 'assistant', content: [{ type: 'text', text: 'Still here.' }] }, uuid: 'assistant-2', timestamp: '2026-10-11T20:01:01.000Z' }),
+			record({ parentUuid: null, logicalParentUuid: 'assistant-2', type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted', isMeta: false, uuid: 'boundary', timestamp: '2026-10-11T20:05:16.000Z', compactMetadata: { trigger: 'manual' } }),
+			record({ parentUuid: 'boundary', type: 'user', message: { role: 'user', content: summary }, isVisibleInTranscriptOnly: true, isCompactSummary: true, uuid: 'summary' }),
+			record({ parentUuid: 'summary', type: 'user', message: { role: 'user', content: '<local-command-caveat>Caveat</local-command-caveat>' }, isMeta: true, uuid: 'caveat' }),
+			record({ parentUuid: 'caveat', type: 'user', message: { role: 'user', content: '<command-name>/compact</command-name>' }, uuid: 'command' }),
+			record({ parentUuid: 'command', type: 'user', message: { role: 'user', content: '<local-command-stdout>Compacted </local-command-stdout>' }, uuid: 'stdout' }),
+			record({ parentUuid: 'stdout', type: 'attachment', attachment: { type: 'model' }, uuid: 'att-4' }),
+		].join('\n');
+		const autoSdkMessages: SessionMessage[] = [
+			sdkMessage('system', 'boundary', undefined),
+			sdkMessage('user', 'summary', { role: 'user', content: summary }, { isCompactSummary: true, is_meta: true }),
+			sdkMessage('assistant', 'assistant-2', { id: 'msg_2', role: 'assistant', content: [{ type: 'text', text: 'Still here.' }] }),
+			sdkMessage('user', 'command', { role: 'user', content: '<command-name>/compact</command-name>' }, { isCompletedLocalCommand: true }),
+			sdkMessage('user', 'stdout', { role: 'user', content: '<local-command-stdout>Compacted </local-command-stdout>' }, { isCompletedLocalCommand: true }),
+		];
+
+		const messages = expandCompactedHistory(autoSdkMessages, parseClaudeTranscript(autoTranscript));
+		const turns: readonly Turn[] = applyAutoCompactNotices(mapSessionMessagesToTurns(messages, URI.parse('claude:/6ff8a8bc'), new NullLogService()), new Set(['boundary']));
+
+		assert.deepStrictEqual(turns.map(turn => ({
+			id: turn.id,
+			text: turn.message.text,
+			parts: turn.responseParts.map(part => part.kind === ResponsePartKind.Markdown || part.kind === ResponsePartKind.SystemNotification ? `${part.kind}: ${part.content}` : part.kind),
+		})), [
+			{ id: 'request_1', text: 'Say hi', parts: [`${ResponsePartKind.Markdown}: Hello from the mock Anthropic API.`] },
+			{ id: 'request_2', text: 'And now?', parts: [`${ResponsePartKind.Markdown}: Still here.`, `${ResponsePartKind.SystemNotification}: Compacted to save cost: the prompt cache was about to expire, so the conversation was summarized while reading it was still cheap.`] },
 		]);
 	});
 });
