@@ -132,7 +132,7 @@ export function describeServerWorktree(info: IDelegationWorktreeInfo, now: numbe
 		? localize('serverWorktree.kept', "kept until removed by hand")
 		: info.removeAfter <= now
 			? localize('serverWorktree.removedSoon', "the server removes it at its next cleanup")
-			: localize('serverWorktree.removedOn', "the server removes it on {0}", new Date(info.removeAfter).toLocaleDateString());
+			: localize('serverWorktree.removedOn', "the server removes it on {0}", new Date(info.removeAfter).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }));
 	const folder = info.worktree.split(/[\\/]/).pop() ?? info.worktree;
 	return {
 		label: info.title,

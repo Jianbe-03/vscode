@@ -877,8 +877,8 @@ async function cleanUpServerAction(accessor: ServicesAccessor, serverId?: string
 			: localize('delegation.cleanUpConfirmMany', "Remove {0} worktrees on {1}?", picked.length, currentServer.name),
 		detail: unsafe.length
 			? (unsafe.length === 1
-				? localize('delegation.cleanUpUnsafeOne', "The work of \"{0}\" was NOT brought back or pushed since it last changed: it is lost. Use Bring Back Changes first to keep it.", unsafe[0].info.title)
-				: localize('delegation.cleanUpUnsafeMany', "{0} of them have work that was NOT brought back or pushed since it last changed: it is lost. Use Bring Back Changes first to keep it.", unsafe.length))
+				? localize('delegation.cleanUpUnsafeOne', "The work of \"{0}\" was NOT brought back or pushed since it last changed: removing it loses that work. Use Bring Back Changes first to keep it.", unsafe[0].info.title)
+				: localize('delegation.cleanUpUnsafeMany', "{0} of them have work that was NOT brought back or pushed since it last changed: removing them loses that work. Use Bring Back Changes first to keep it.", unsafe.length))
 			: localize('delegation.cleanUpSafe', "Their work was brought back, pushed in a pull request, or never changed. The chats stay on the server, without their files."),
 		primaryButton: localize({ key: 'delegation.cleanUpButton', comment: ['&& denotes a mnemonic'] }, "&&Remove"),
 	});

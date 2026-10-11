@@ -25,7 +25,7 @@ suite('Delegated chats', () => {
 			describeServerWorktree({ ...base, chatState: DelegationChatState.Unknown, workSafe: true, bytes: undefined }, now).description,
 		], [
 			{ label: 'Fix the login bug', description: '25 MB · chat in use', detail: 'app-3f9a2c1d · from MacBook · work NOT brought back · kept until removed by hand' },
-			{ label: 'Fix the login bug', description: '0.5 MB · chat archived', detail: `app-3f9a2c1d · from MacBook · work brought back 3 days ago · the server removes it on ${new Date(removeAfter).toLocaleDateString()}` },
+			{ label: 'Fix the login bug', description: '0.5 MB · chat archived', detail: `app-3f9a2c1d · from MacBook · work brought back 3 days ago · the server removes it on ${new Date(removeAfter).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}` },
 			{ label: 'Fix the login bug', description: '25 MB · no chat on the server', detail: 'app-3f9a2c1d · from MacBook · work is in its pull request · the server removes it at its next cleanup' },
 			'chat state unknown',
 		]);
