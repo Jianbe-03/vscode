@@ -4,18 +4,18 @@
  *--------------------------------------------------------------------------------------------*/
 
 // CreaEditor: pairs this computer with a CreaEditor Server and adds it (Add CreaEditor Server, and the
-// end of installing one over SSH).
+// end of installing one over SSH), or pairs again with a server that no longer knows this computer.
 
 import { isMacintosh, isWindows } from '../../../../../base/common/platform.js';
 import { localize } from '../../../../../nls.js';
 import { CreaEditorServerPairError, ICreaEditorServerInput } from '../../../../../platform/agentHost/common/creaeditorServer.js';
 import { IRemoteAgentHostService } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
-import { ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
+import { IInstantiationService, ServicesAccessor } from '../../../../../platform/instantiation/common/instantiation.js';
 import { INotificationService } from '../../../../../platform/notification/common/notification.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { IProgressService, ProgressLocation } from '../../../../../platform/progress/common/progress.js';
 import { IQuickInputService } from '../../../../../platform/quickinput/common/quickInput.js';
-import { ICreaEditorServer, ICreaEditorServersService } from './creaeditorServers.js';
+import { ICreaEditorServer, ICreaEditorServersService, parsePairAgainInput } from './creaeditorServers.js';
 
 function pairErrorMessage(error: CreaEditorServerPairError, retryAfterSeconds: number | undefined): string {
 	switch (error) {
@@ -38,14 +38,17 @@ function osName(): string {
  * Pairs with the server at `input` and adds it: asks for the pairing code (unless the link had one) and,
  * for a public server, the password. Returns the added server, or undefined when the user stopped.
  */
-export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, input: ICreaEditorServerInput, publicMode: boolean, options?: { readonly sshHost?: string; readonly name?: string }): Promise<ICreaEditorServer | undefined> {
+export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, input: ICreaEditorServerInput, publicMode: boolean, options?: { readonly sshHost?: string; readonly name?: string; readonly pairAgain?: ICreaEditorServer }): Promise<ICreaEditorServer | undefined> {
 	const quickInputService = accessor.get(IQuickInputService);
 	const serversService = accessor.get(ICreaEditorServersService);
 	const notificationService = accessor.get(INotificationService);
 	const progressService = accessor.get(IProgressService);
 	const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
 	const productService = accessor.get(IProductService);
-	const title = localize('creaeditorServers.addTitle', "Add CreaEditor Server");
+	const pairAgain = options?.pairAgain;
+	const title = pairAgain
+		? localize('creaeditorServers.pairAgainTitle', "Pair Again with {0}", pairAgain.name)
+		: localize('creaeditorServers.addTitle', "Add CreaEditor Server");
 
 	let code = input.pairingCode;
 	let password: string | undefined;
@@ -53,14 +56,22 @@ export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, inp
 	let lastError: string | undefined;
 	for (let attempt = 0; attempt < 5; attempt++) {
 		if (!code || lastError) {
-			code = (await quickInputService.input({
+			const typed = (await quickInputService.input({
 				title,
-				prompt: lastError ?? localize('creaeditorServers.codePrompt', "Enter the pairing code. Run `creaeditor-server pair` on the server to get one."),
+				prompt: lastError ?? (pairAgain
+					? localize('creaeditorServers.pairAgainPrompt', "{0} no longer knows this computer. Paste a new pairing link or code from it: run `creaeditor-server pair` on the server, or use Pair Phone on another paired device.", pairAgain.name)
+					: localize('creaeditorServers.codePrompt', "Enter the pairing code. Run `creaeditor-server pair` on the server to get one.")),
 				placeHolder: 'ABCDE-12345',
 				value: lastError ? undefined : code,
 				ignoreFocusLost: true,
-				validateInput: async value => value.trim() ? undefined : localize('creaeditorServers.codeEmpty', "Enter the pairing code."),
+				validateInput: async value => {
+					if (!value.trim()) {
+						return localize('creaeditorServers.codeEmpty', "Enter the pairing code.");
+					}
+					return pairAgain && !parsePairAgainInput(value, input.baseUrl) ? localize('creaeditorServers.pairAgainInvalid', "Paste a pairing link of {0} or its pairing code.", pairAgain.name) : undefined;
+				},
 			}))?.trim();
+			code = typed && pairAgain ? parsePairAgainInput(typed, input.baseUrl) : typed;
 			if (!code) {
 				return undefined;
 			}
@@ -81,6 +92,13 @@ export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, inp
 			{ location: ProgressLocation.Notification, title: localize('creaeditorServers.pairing', "Pairing with {0}...", input.suggestedName) },
 			() => serversService.pair(input.baseUrl, code!, password, deviceName),
 		);
+		if (result.ok && pairAgain) {
+			const server = await serversService.replaceDeviceKey(pairAgain.id, result);
+			if (server) {
+				notificationService.info(localize('creaeditorServers.pairedAgain', "{0} is paired again.", server.name));
+			}
+			return server;
+		}
 		if (result.ok) {
 			const name = options?.name ?? (await quickInputService.input({
 				title,
@@ -117,4 +135,21 @@ export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, inp
 		return undefined;
 	}
 	return undefined;
+}
+
+/** Pair Again: asks for a new pairing link or code of a server that no longer knows this computer, and replaces its device key. */
+export async function pairAgainWithCreaEditorServer(accessor: ServicesAccessor, server: ICreaEditorServer): Promise<ICreaEditorServer | undefined> {
+	const serversService = accessor.get(ICreaEditorServersService);
+	const progressService = accessor.get(IProgressService);
+	const notificationService = accessor.get(INotificationService);
+	const instantiationService = accessor.get(IInstantiationService);
+	const check = await progressService.withProgress(
+		{ location: ProgressLocation.Notification, title: localize('creaeditorServers.checkingServer', "Checking {0}...", server.name), delay: 500 },
+		() => serversService.checkAddress(server.serverUrl),
+	);
+	if (!check?.health) {
+		notificationService.error(localize('creaeditorServers.pairAgainUnreachable', "{0} does not answer. Pair again once it is online.", server.name));
+		return undefined;
+	}
+	return instantiationService.invokeFunction(pairAndAddCreaEditorServer, { baseUrl: server.serverUrl, suggestedName: server.name }, check.health.publicMode, { pairAgain: server });
 }

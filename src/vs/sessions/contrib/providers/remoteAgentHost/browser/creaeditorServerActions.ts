@@ -46,7 +46,7 @@ import { SessionWorkspacePickerGroupContext } from '../../../../common/contextke
 import { SESSION_WORKSPACE_GROUP_REMOTE } from '../../../../services/sessions/common/session.js';
 import { describeCreaEditorServer, ICreaEditorServer, ICreaEditorServersService } from './creaeditorServers.js';
 import { installCreaEditorServerOverSSH } from './creaeditorServerSshInstall.js';
-import { pairAndAddCreaEditorServer } from './creaeditorServerPairFlow.js';
+import { pairAgainWithCreaEditorServer, pairAndAddCreaEditorServer } from './creaeditorServerPairFlow.js';
 
 export const CreaEditorServerCommandIds = {
 	add: 'creaeditor.servers.add',
@@ -288,7 +288,7 @@ function followAccount(connection: IAgentConnection, accountId: string, predicat
 	});
 }
 
-type ServerAction = 'open' | 'phone' | 'signIn' | 'check' | 'remove';
+type ServerAction = 'pairAgain' | 'open' | 'phone' | 'signIn' | 'check' | 'remove';
 
 async function showServerActions(accessor: ServicesAccessor, server: ICreaEditorServer): Promise<void> {
 	const quickInputService = accessor.get(IQuickInputService);
@@ -297,9 +297,11 @@ async function showServerActions(accessor: ServicesAccessor, server: ICreaEditor
 	const openerService = accessor.get(IOpenerService);
 	const instantiationService = accessor.get(IInstantiationService);
 	const connection = getServerConnection(remoteAgentHostService, serversService, server);
+	const needsPairing = serversService.needsPairing.get().has(server.id);
 
 	type ActionPick = IQuickPickItem & { readonly action: ServerAction };
 	const items: ActionPick[] = [
+		...(needsPairing ? [{ action: 'pairAgain' as const, label: `$(key) ${localize('creaeditorServers.pairAgain', "Pair Again...")}`, description: localize('creaeditorServers.pairAgainDetail', "The server no longer knows this computer") }] : []),
 		{ action: 'open', label: `$(link-external) ${localize('creaeditorServers.openInBrowser', "Open in Browser")}`, description: server.serverUrl },
 		{ action: 'phone', label: `$(device-mobile) ${localize('creaeditorServers.pairPhone', "Pair Phone")}` },
 		...(connection ? [{ action: 'signIn' as const, label: `$(account) ${localize('creaeditorServers.signInAccount', "Sign In to an Account on This Server...")}`, description: localize('creaeditorServers.signInAccountDetail', "Claude or Codex") }] : []),
@@ -308,6 +310,9 @@ async function showServerActions(accessor: ServicesAccessor, server: ICreaEditor
 	];
 	const picked = await quickInputService.pick(items, { title: server.name });
 	switch (picked?.action) {
+		case 'pairAgain':
+			await instantiationService.invokeFunction(pairAgainWithCreaEditorServer, server);
+			break;
 		case 'open':
 			await openerService.open(URI.parse(getCreaEditorServerWebUrl(server.serverUrl)), { openExternal: true });
 			break;
@@ -346,6 +351,7 @@ async function showServersList(accessor: ServicesAccessor): Promise<void> {
 	const openButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.linkExternal), tooltip: localize('creaeditorServers.openInBrowser', "Open in Browser") };
 	const phoneButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.deviceMobile), tooltip: localize('creaeditorServers.pairPhone', "Pair Phone") };
 	const removeButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.trash), tooltip: localize('creaeditorServers.remove', "Remove") };
+	const pairAgainButton: IQuickInputButton = { iconClass: ThemeIcon.asClassName(Codicon.key), tooltip: localize('creaeditorServers.pairAgainButton', "Pair Again") };
 
 	const store = new DisposableStore();
 	const picker = store.add(quickInputService.createQuickPick<IServerPick>({ useSeparators: true }));
@@ -355,6 +361,7 @@ async function showServersList(accessor: ServicesAccessor): Promise<void> {
 
 	const render = () => {
 		const healthStates = serversService.healthStates.get();
+		const needsPairing = serversService.needsPairing.get();
 		const items: (IServerPick | IQuickPickSeparator)[] = serversService.servers.get().map(server => {
 			const address = serversService.getAgentHostAddress(server);
 			const connection = remoteAgentHostService.getConnection(address);
@@ -366,13 +373,14 @@ async function showServersList(accessor: ServicesAccessor): Promise<void> {
 				machine: readCreaEditorServerMachine(root?.config?.values),
 				runningChats: root?.activeSessions,
 				chats: readCreaEditorServerChats(root?.config?.values),
+				needsPairing: needsPairing.has(server.id),
 			}, Date.now());
 			return {
 				server,
 				label: `$(${view.icon.id}) ${server.name}`,
 				description: view.status,
 				detail: [...view.details, server.serverUrl].join(' · '),
-				buttons: [openButton, phoneButton, removeButton],
+				buttons: needsPairing.has(server.id) ? [pairAgainButton, openButton, removeButton] : [openButton, phoneButton, removeButton],
 			};
 		});
 		if (items.length) {
@@ -385,6 +393,7 @@ async function showServersList(accessor: ServicesAccessor): Promise<void> {
 	store.add(autorun(reader => {
 		serversService.servers.read(reader);
 		serversService.healthStates.read(reader);
+		serversService.needsPairing.read(reader);
 		render();
 	}));
 	store.add(remoteAgentHostService.onDidChangeConnections(() => render()));
@@ -400,6 +409,9 @@ async function showServersList(accessor: ServicesAccessor): Promise<void> {
 		} else if (event.button === phoneButton) {
 			picker.hide();
 			await instantiationService.invokeFunction(showPairPhoneDialog, server);
+		} else if (event.button === pairAgainButton) {
+			picker.hide();
+			await instantiationService.invokeFunction(pairAgainWithCreaEditorServer, server);
 		} else if (event.button === removeButton) {
 			picker.hide();
 			await instantiationService.invokeFunction(confirmAndRemoveServer, server);
@@ -453,6 +465,39 @@ registerAction2(class extends Action2 {
 		return accessor.get(IInstantiationService).invokeFunction(showServersList);
 	}
 });
+
+/** Tells once per server and window when a server no longer knows this computer, with Pair Again. */
+class CreaEditorServersNeedsPairingContribution extends Disposable implements IWorkbenchContribution {
+	static readonly ID = 'sessions.contrib.creaeditorServersNeedsPairing';
+
+	private readonly _notified = new Set<string>();
+
+	constructor(
+		@ICreaEditorServersService serversService: ICreaEditorServersService,
+		@INotificationService notificationService: INotificationService,
+		@IInstantiationService instantiationService: IInstantiationService,
+	) {
+		super();
+		this._register(autorun(reader => {
+			const needsPairing = serversService.needsPairing.read(reader);
+			for (const server of serversService.servers.read(reader)) {
+				if (!needsPairing.has(server.id)) {
+					this._notified.delete(server.id);
+					continue;
+				}
+				if (this._notified.has(server.id)) {
+					continue;
+				}
+				this._notified.add(server.id);
+				notificationService.prompt(Severity.Warning, localize('creaeditorServers.needsPairingNotice', "{0} no longer knows this computer (it was signed out, or its data was reset). Pair again to use its chats.", server.name), [
+					{ label: localize('creaeditorServers.pairAgainButton', "Pair Again"), run: () => instantiationService.invokeFunction(pairAgainWithCreaEditorServer, server) },
+				]);
+			}
+		}));
+	}
+}
+
+registerWorkbenchContribution2(CreaEditorServersNeedsPairingContribution.ID, CreaEditorServersNeedsPairingContribution, WorkbenchPhase.AfterRestored);
 
 /** How long a request from the editor window to add a server stays valid. */
 const ADD_REQUEST_LIFETIME_MS = 2 * 60 * 1000;

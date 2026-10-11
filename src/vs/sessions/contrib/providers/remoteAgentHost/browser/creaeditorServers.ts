@@ -11,7 +11,7 @@ import { fromNow } from '../../../../../base/common/date.js';
 import { IObservable } from '../../../../../base/common/observable.js';
 import { ThemeIcon } from '../../../../../base/common/themables.js';
 import { localize } from '../../../../../nls.js';
-import { CreaEditorServerPairResult, ICreaEditorServerChats, ICreaEditorServerHealth, ICreaEditorServerInput, ICreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
+import { CreaEditorServerPairResult, ICreaEditorServerChats, ICreaEditorServerHealth, ICreaEditorServerInput, ICreaEditorServerMachine, normalizePairingCode, parseCreaEditorServerInput } from '../../../../../platform/agentHost/common/creaeditorServer.js';
 import { ICreaEditorServerCostsResponse, ICreaEditorServerPairingResponse, IServerCostBudgets } from '../../../../../platform/agentHost/common/creaeditorCosts.js';
 import { RemoteAgentHostConnectionStatus } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { createDecorator } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -76,6 +76,8 @@ export interface ICreaEditorServerStatusInput {
 	readonly runningChats: number | undefined;
 	/** Running and queued chats when the server limits how many run at once. */
 	readonly chats?: ICreaEditorServerChats;
+	/** The server no longer accepts this computer's device key (signed out, or its data was wiped). */
+	readonly needsPairing?: boolean;
 }
 
 /** How a server shows in the Servers list. */
@@ -114,6 +116,9 @@ export function describeCreaEditorServer(input: ICreaEditorServerStatusInput, no
 		details.push(localize('creaeditorServer.public', "Public"));
 	}
 
+	if (input.needsPairing) {
+		return { icon: Codicon.key, status: localize('creaeditorServer.needsPairing', "Needs pairing again"), details };
+	}
 	if (health?.reachable === false) {
 		return {
 			icon: Codicon.debugDisconnect,
@@ -139,6 +144,23 @@ export function describeCreaEditorServer(input: ICreaEditorServerStatusInput, no
 	return { icon: Codicon.warning, status: localize('creaeditorServer.notConnected', "Online, not connected"), details };
 }
 
+/**
+ * Reads what was pasted for Pair Again: a pairing link of the same server (its code), or just the
+ * code. Undefined for a link without a code, or a link of another server.
+ */
+export function parsePairAgainInput(value: string, serverUrl: string): string | undefined {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return undefined;
+	}
+	// A bare code such as `ABCDE-12345` would also read as a host name: only `://` or `#` makes a link.
+	if (!/:\/\/|#/.test(trimmed)) {
+		return /^[A-Za-z0-9 -]+$/.test(trimmed) ? normalizePairingCode(trimmed) : undefined;
+	}
+	const link = parseCreaEditorServerInput(trimmed);
+	return link?.pairingCode && link.baseUrl === serverUrl ? link.pairingCode : undefined;
+}
+
 /** What checking a typed server address found. */
 export interface ICreaEditorServerCheck {
 	readonly input: ICreaEditorServerInput;
@@ -154,6 +176,11 @@ export interface ICreaEditorServersService {
 	readonly servers: IObservable<readonly ICreaEditorServer[]>;
 	/** The last health check of each server, by server id. */
 	readonly healthStates: IObservable<ReadonlyMap<string, ICreaEditorServerHealthState>>;
+	/**
+	 * Ids of the servers that answered 401/403 to this computer's device key: they need pairing again
+	 * ({@link replaceDeviceKey}), and get no agent host connection until then.
+	 */
+	readonly needsPairing: IObservable<ReadonlySet<string>>;
 	/** Reads an address or pairing link and asks the server for `/health`; undefined for no address. */
 	checkAddress(input: string): Promise<ICreaEditorServerCheck | undefined>;
 	/**
@@ -163,6 +190,8 @@ export interface ICreaEditorServersService {
 	pair(serverUrl: string, code: string, password: string | undefined, deviceName: string): Promise<CreaEditorServerPairResult>;
 	/** Keeps a paired server (its device key in secret storage) and connects to it. */
 	addServer(server: { readonly name: string; readonly serverUrl: string; readonly sshHost?: string }, pairing: { readonly deviceId: string; readonly deviceKey: string }): Promise<ICreaEditorServer>;
+	/** Pair Again: keeps the server (its id, name and chats) with a new device key. */
+	replaceDeviceKey(serverId: string, pairing: { readonly deviceId: string; readonly deviceKey: string }): Promise<ICreaEditorServer | undefined>;
 	/** Signs this machine out of the server (when it answers), forgets its device key and removes it. */
 	removeServer(serverId: string): Promise<void>;
 	/** Checks `/health` of every server now. */

@@ -7,7 +7,9 @@
 // storage), checks their `/health`, and makes each one a remote agent host of the kind
 // `RemoteAgentHostEntryType.CreaEditorServer` whose connection token is the device key. HTTP goes
 // through ICreaEditorServerHttpService (the main process on desktop: renderer fetch is blocked by CORS
-// and the window CSP).
+// and the window CSP). A server that no longer knows this computer's device key (it signed this
+// computer out, or its data was wiped) answers 401/403: the server then needs pairing again, and its
+// agent host connection stops (no reconnect attempts with a dead key).
 
 import { IntervalTimer } from '../../../../../base/common/async.js';
 import { Codicon } from '../../../../../base/common/codicons.js';
@@ -20,7 +22,7 @@ import { agentsWindowAgentHostClientInfo } from '../../../../../platform/agentHo
 import { CREAEDITOR_SERVER_API_BUDGETS, CREAEDITOR_SERVER_API_COSTS, CREAEDITOR_SERVER_API_PAIRING, CREAEDITOR_SERVER_API_PREFIX, ICreaEditorServerCostsResponse, ICreaEditorServerPairingResponse, IServerCostBudgets } from '../../../../../platform/agentHost/common/creaeditorCosts.js';
 import { ICreaEditorServerHttpService } from '../../../../../platform/agentHost/common/creaeditorServerHttp.js';
 import { CREAEDITOR_SERVER_HEALTH_PATH, CREAEDITOR_SERVER_PAIR_PATH, CreaEditorServerPairResult, getCreaEditorServerAgentHostAddress, parseCreaEditorServerHealth, parseCreaEditorServerInput, parseCreaEditorServerPairResponse } from '../../../../../platform/agentHost/common/creaeditorServer.js';
-import { getEntryAddress, IRemoteAgentHostConnectionFactory, IRemoteAgentHostConnectOptions, IRemoteAgentHostCreatedConnection, IRemoteAgentHostEntry, IRemoteAgentHostService, RemoteAgentHostEntryType } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
+import { getEntryAddress, IRemoteAgentHostConnectionFactory, IRemoteAgentHostConnectOptions, IRemoteAgentHostCreatedConnection, IRemoteAgentHostEntry, IRemoteAgentHostService, RemoteAgentHostConnectionStatus, RemoteAgentHostEntryType } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
 import { InstantiationType, registerSingleton } from '../../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService } from '../../../../../platform/instantiation/common/instantiation.js';
@@ -37,6 +39,15 @@ import { EntryDrivenProviderContribution, IEntryDrivenProviderOptions } from './
 /** How often the servers' `/health` is checked while the window has focus. */
 const HEALTH_INTERVAL_MS = 60_000;
 const REQUEST_TIMEOUT_MS = 8_000;
+/** How often the device key of a server whose connection fails is checked at most. */
+const DEVICE_KEY_CHECK_INTERVAL_MS = 30_000;
+/** Where a server answers who a device key belongs to (401 for an unknown key). */
+const DEVICE_PATH = '/api/device';
+
+/** Whether an HTTP status means the server does not accept this computer's device key. */
+function isDeviceKeyRejected(status: number): boolean {
+	return status === 401 || status === 403;
+}
 
 /** Reads a JSON answer; undefined when it is empty or not JSON. */
 function parseJson(text: string): unknown {
@@ -79,9 +90,14 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 	private readonly _healthStates = observableValue<ReadonlyMap<string, ICreaEditorServerHealthState>>(this, new Map());
 	readonly healthStates: IObservable<ReadonlyMap<string, ICreaEditorServerHealthState>> = this._healthStates;
 
+	private readonly _needsPairing = observableValue<ReadonlySet<string>>(this, new Set());
+	readonly needsPairing: IObservable<ReadonlySet<string>> = this._needsPairing;
+
 	/** Device keys read from secret storage, by server id. */
 	private readonly _deviceKeys = observableValue<ReadonlyMap<string, string>>(this, new Map());
 	private readonly _healthTimer = this._register(new IntervalTimer());
+	/** When the device key of a server was last checked, by server id. */
+	private readonly _deviceKeyCheckedAt = new Map<string, number>();
 
 	constructor(
 		@IStorageService private readonly _storageService: IStorageService,
@@ -97,8 +113,10 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 
 		const entries = derived(this, reader => {
 			const keys = this._deviceKeys.read(reader);
+			const needsPairing = this._needsPairing.read(reader);
 			return this._servers.read(reader).flatMap((server): IRemoteAgentHostEntry[] => {
-				const deviceKey = keys.get(server.id);
+				// A server that rejects the key gets no connection: reconnecting with it is pointless.
+				const deviceKey = needsPairing.has(server.id) ? undefined : keys.get(server.id);
 				return deviceKey ? [{
 					name: server.name,
 					connectionToken: deviceKey,
@@ -108,8 +126,17 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 		});
 		this._register(this._remoteAgentHostService.registerConnectionFactory(new CreaEditorServerConnectionFactory(entries, instantiationService)));
 
-		void this._loadDeviceKeys();
-		void this.refreshHealth();
+		// A connection that fails may mean the server forgot this computer: check its key.
+		this._register(this._remoteAgentHostService.onDidChangeConnections(() => {
+			for (const server of this._servers.get()) {
+				const status = this._remoteAgentHostService.connections.find(candidate => candidate.address === this.getAgentHostAddress(server))?.status;
+				if (status && !RemoteAgentHostConnectionStatus.isConnected(status) && !RemoteAgentHostConnectionStatus.isConnecting(status)) {
+					void this._checkDeviceKey(server, false);
+				}
+			}
+		}));
+
+		void this._loadDeviceKeys().then(() => this.refreshHealth());
 		this._healthTimer.cancelAndSet(() => {
 			if (this._hostService.hasFocus) {
 				void this.refreshHealth();
@@ -170,6 +197,23 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 		return added;
 	}
 
+	async replaceDeviceKey(serverId: string, pairing: { readonly deviceId: string; readonly deviceKey: string }): Promise<ICreaEditorServer | undefined> {
+		const server = this._servers.get().find(candidate => candidate.id === serverId);
+		if (!server) {
+			return undefined;
+		}
+		await this._secretStorageService.set(getCreaEditorServerDeviceKeyName(serverId), pairing.deviceKey);
+		const updated: ICreaEditorServer = { ...server, deviceId: pairing.deviceId };
+		const keys = new Map(this._deviceKeys.get());
+		keys.set(serverId, pairing.deviceKey);
+		this._deviceKeys.set(keys, undefined);
+		this._setNeedsPairing(serverId, false);
+		this._deviceKeyCheckedAt.delete(serverId);
+		this._storeServers(this._servers.get().map(candidate => candidate.id === serverId ? updated : candidate));
+		void this.refreshHealth();
+		return updated;
+	}
+
 	async removeServer(serverId: string): Promise<void> {
 		const server = this._servers.get().find(candidate => candidate.id === serverId);
 		if (!server) {
@@ -189,6 +233,7 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 		const keys = new Map(this._deviceKeys.get());
 		keys.delete(serverId);
 		this._deviceKeys.set(keys, undefined);
+		this._setNeedsPairing(serverId, false);
 		this._storeServers(this._servers.get().filter(candidate => candidate.id !== serverId));
 		await this._remoteAgentHostService.removeRemoteAgentHost(this.getAgentHostAddress(server)).catch(() => undefined);
 		const states = new Map(this._healthStates.get());
@@ -218,7 +263,7 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 	private async _apiRequest<T>(serverId: string, type: 'GET' | 'POST' | 'PUT', path: string, body?: object): Promise<T | undefined> {
 		const server = this._servers.get().find(candidate => candidate.id === serverId);
 		const deviceKey = this._deviceKeys.get().get(serverId);
-		if (!server || !deviceKey) {
+		if (!server || !deviceKey || this._needsPairing.get().has(serverId)) {
 			return undefined;
 		}
 		try {
@@ -232,6 +277,9 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 			const status = response.status;
 			if (status < 200 || status >= 300) {
 				this._logService.info(`[CreaEditor Servers] ${server.name} answered ${status} to ${type} ${path.split('?')[0]}`);
+				if (isDeviceKeyRejected(status)) {
+					this._markNeedsPairing(server);
+				}
 				return undefined;
 			}
 			return (parseJson(response.body) as T | undefined) ?? undefined;
@@ -253,6 +301,56 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 				: { reachable: false, lastSeen: previous.get(id)?.lastSeen, health: previous.get(id)?.health });
 		}
 		this._healthStates.set(states, undefined);
+		// A reachable server may still have forgotten this computer (signed out, data wiped).
+		await Promise.all(servers.filter(server => states.get(server.id)?.reachable).map(server => this._checkDeviceKey(server, true)));
+	}
+
+	/**
+	 * Asks the server whether it still knows this computer's device key (at most every
+	 * {@link DEVICE_KEY_CHECK_INTERVAL_MS} unless `force`); a 401/403 marks it as needing pairing.
+	 */
+	private async _checkDeviceKey(server: ICreaEditorServer, force: boolean): Promise<void> {
+		const deviceKey = this._deviceKeys.get().get(server.id);
+		const now = Date.now();
+		if (!deviceKey || this._needsPairing.get().has(server.id) || (!force && now - (this._deviceKeyCheckedAt.get(server.id) ?? 0) < DEVICE_KEY_CHECK_INTERVAL_MS)) {
+			return;
+		}
+		this._deviceKeyCheckedAt.set(server.id, now);
+		try {
+			const response = await this._httpService.request({
+				method: 'GET',
+				url: `${server.serverUrl}${DEVICE_PATH}`,
+				headers: { 'Authorization': `Bearer ${deviceKey}` },
+				timeoutMs: REQUEST_TIMEOUT_MS,
+			});
+			// Only when the key is still the one checked: Pair Again may have replaced it meanwhile.
+			if (isDeviceKeyRejected(response.status) && this._deviceKeys.get().get(server.id) === deviceKey) {
+				this._markNeedsPairing(server);
+			}
+		} catch {
+			// Unreachable: the health check reports that.
+		}
+	}
+
+	private _markNeedsPairing(server: ICreaEditorServer): void {
+		if (!this._needsPairing.get().has(server.id)) {
+			this._logService.warn(`[CreaEditor Servers] ${server.name} no longer accepts this computer's device key; it needs pairing again`);
+			this._setNeedsPairing(server.id, true);
+		}
+	}
+
+	private _setNeedsPairing(serverId: string, needsPairing: boolean): void {
+		const current = this._needsPairing.get();
+		if (current.has(serverId) === needsPairing) {
+			return;
+		}
+		const next = new Set(current);
+		if (needsPairing) {
+			next.add(serverId);
+		} else {
+			next.delete(serverId);
+		}
+		this._needsPairing.set(next, undefined);
 	}
 
 	private async _fetchHealth(serverUrl: string) {

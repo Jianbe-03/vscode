@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { RemoteAgentHostConnectionStatus } from '../../../../../../platform/agentHost/common/remoteAgentHostService.js';
-import { describeCreaEditorServer, parseStoredCreaEditorServers } from '../../browser/creaeditorServers.js';
+import { describeCreaEditorServer, parsePairAgainInput, parseStoredCreaEditorServers } from '../../browser/creaeditorServers.js';
 import { buildCreaEditorServerSshScript, parseCreaEditorServerInstallOutput } from '../../browser/creaeditorServerSshInstall.js';
 
 suite('CreaEditor Servers', () => {
@@ -40,6 +40,7 @@ suite('CreaEditor Servers', () => {
 			describeCreaEditorServer({ health: undefined, connection: undefined, machine: undefined, runningChats: undefined }, now),
 			describeCreaEditorServer({ health: { reachable: true, health, lastSeen: now }, connection: RemoteAgentHostConnectionStatus.disconnected, machine: undefined, runningChats: undefined }, now),
 			describeCreaEditorServer({ health: { reachable: true, health, lastSeen: now }, connection: RemoteAgentHostConnectionStatus.connected, machine: undefined, runningChats: 4, chats: { running: 4, queued: 2, max: 4 } }, now),
+			describeCreaEditorServer({ health: { reachable: true, health, lastSeen: now }, connection: undefined, machine: undefined, runningChats: undefined, needsPairing: true }, now),
 		];
 		assert.deepStrictEqual(views.map(view => ({ icon: view.icon.id, status: view.status, details: view.details })), [
 			{ icon: 'server', status: 'Online', details: ['Version 1.140.0', 'CPU 12% of 8 cores', 'Memory 4.0 of 16.0 GB', '2 chats running'] },
@@ -48,7 +49,19 @@ suite('CreaEditor Servers', () => {
 			{ icon: 'loading', status: 'Checking...', details: [] },
 			{ icon: 'warning', status: 'Online, not connected', details: ['Version 1.140.0'] },
 			{ icon: 'server', status: 'Online', details: ['Version 1.140.0', '4 of 4 chats running', '2 queued'] },
+			{ icon: 'key', status: 'Needs pairing again', details: ['Version 1.140.0'] },
 		]);
+	});
+
+	test('reads a pairing link or code for Pair Again', () => {
+		const serverUrl = 'http://100.64.0.2:31600';
+		assert.deepStrictEqual([
+			parsePairAgainInput(' abcde-12345 ', serverUrl),
+			parsePairAgainInput('http://100.64.0.2:31600/#pair=K7QDM-2XP9H', serverUrl),
+			parsePairAgainInput('http://100.64.0.9:31600/#pair=K7QDM-2XP9H', serverUrl),
+			parsePairAgainInput('http://100.64.0.2:31600/', serverUrl),
+			parsePairAgainInput('', serverUrl),
+		], ['ABCDE-12345', 'K7QDM-2XP9H', undefined, undefined, undefined]);
 	});
 
 	test('builds the SSH install scripts and reads the pairing link they print', () => {
