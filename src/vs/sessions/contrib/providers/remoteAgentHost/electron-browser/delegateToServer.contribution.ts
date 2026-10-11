@@ -25,7 +25,7 @@ import { Action2, registerAction2 } from '../../../../../platform/actions/common
 import { IAgentHostConnectionsService } from '../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import { remoteAgentHostSessionTypeId } from '../../../../../platform/agentHost/common/agentHostSessionType.js';
 import { agentHostAuthority, toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
-import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID, CREAEDITOR_DELEGATE_REQUEST_KEY, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getBroughtBackBranchPrefix, getDelegationAgentKind, getDelegationAgentProvider, ICreaEditorDelegationService, IDelegateResult, IDelegateToServerRequest, IDelegationAccountsPayload, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationServerTarget, IDelegationWorktreeInfo, parseDelegationGatewayModel } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
+import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID, CREAEDITOR_DELEGATE_REQUEST_KEY, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getBroughtBackBranchPrefix, getDelegationAgentKind, getDelegationAgentProvider, getDelegationRemoteModelId, ICreaEditorDelegationService, IDelegateResult, IDelegateToServerRequest, IDelegationAccountsPayload, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationServerTarget, IDelegationWorktreeInfo, parseDelegationGatewayModel } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { IRemoteAgentHostService } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -53,6 +53,7 @@ import { Menus } from '../../../../browser/menus.js';
 import { LOCAL_AGENT_HOST_PROVIDER_ID, REMOTE_AGENT_HOST_PROVIDER_PREFIX } from '../../../../common/agentHostSessionsProvider.js';
 import { IsNewChatSessionContext, SessionProviderIdContext } from '../../../../common/contextkeys.js';
 import { INewSessionComposerService } from '../../../chat/browser/newSessionComposerService.js';
+import { ISessionsProvidersService } from '../../../../services/sessions/browser/sessionsProvidersService.js';
 import { ISessionsService } from '../../../../services/sessions/browser/sessionsService.js';
 import { ISession, SessionStatus } from '../../../../services/sessions/common/session.js';
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
@@ -81,6 +82,8 @@ const IMPORT_ATTEMPTS = 5;
 const IMPORT_RETRY_MS = 1500;
 /** How long a resumed session may take to show up in the server's sessions list. */
 const SESSION_APPEAR_TIMEOUT_MS = 15_000;
+/** How long a chat started on a server waits for its model to show up there (a delegated key's models arrive a moment after its accounts). */
+const REMOTE_MODEL_TIMEOUT_MS = 15_000;
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'creaeditorDelegation',
@@ -273,9 +276,40 @@ async function waitForSession(sessionsManagementService: ISessionsManagementServ
 /** The id of a chat's model on a server: `<server's session type>:<model>` for the same agent. */
 function getRemoteModelId(session: ISession, authority: string): string | undefined {
 	const provider = getDelegationAgentProvider(getDelegationAgentKind(session.sessionType, session.resource.scheme));
-	const modelId = session.modelId.get();
-	const colon = modelId?.indexOf(':') ?? -1;
-	return provider && modelId && colon > 0 ? `${remoteAgentHostSessionTypeId(authority, provider)}:${modelId.slice(colon + 1)}` : undefined;
+	return provider ? getDelegationRemoteModelId(session.modelId.get(), remoteAgentHostSessionTypeId(authority, provider)) : undefined;
+}
+
+/**
+ * Waits until a server lists a model for a new chat (a delegated key's models show up a moment after
+ * its accounts arrive). Returns the server's identifier of the model, or undefined when it does not
+ * show up in time.
+ */
+async function waitForRemoteModel(sessionsProvidersService: ISessionsProvidersService, providerId: string, folder: URI, sessionTypeId: string, modelId: string): Promise<string | undefined> {
+	const provider = sessionsProvidersService.getProvider(providerId);
+	if (!provider?.getModelsSnapshotForCreation) {
+		return undefined;
+	}
+	const resolve = () => {
+		const resolution = provider.getModelsSnapshotForCreation?.(folder, sessionTypeId, modelId).desiredModelResolution;
+		return resolution?.kind === 'available' ? resolution.model.identifier : undefined;
+	};
+	const available = resolve();
+	if (available) {
+		return available;
+	}
+	const store = new DisposableStore();
+	try {
+		return await raceTimeout(new Promise<string>(done => {
+			store.add(provider.onDidChangeModels(() => {
+				const identifier = resolve();
+				if (identifier) {
+					done(identifier);
+				}
+			}));
+		}), REMOTE_MODEL_TIMEOUT_MS);
+	} finally {
+		store.dispose();
+	}
 }
 
 /** The folder of a server's bare repositories, next to its worktrees folder (`<data>/repos`, `<data>/worktrees`). */
@@ -320,19 +354,24 @@ async function continueWithTranscript(accessor: ServicesAccessor, session: ISess
  */
 async function startChatOnServer(accessor: ServicesAccessor, session: ISession, authority: string, result: IDelegateResult, request: Parameters<ISessionsManagementService['sendNewChatRequest']>[1]): Promise<URI | undefined> {
 	const sessionsManagementService = accessor.get(ISessionsManagementService);
+	const sessionsProvidersService = accessor.get(ISessionsProvidersService);
+	const logService = accessor.get(ILogService);
 	const folder = toAgentHostUri(URI.file(result.record.workingDirectory), authority);
 	const options = { providerId: `${REMOTE_AGENT_HOST_PROVIDER_PREFIX}${authority}`, sessionTypeId: session.sessionType };
 	// The same model on the server (the server lists a delegated key's models under the same id), so the
-	// chat runs on that key there and needs no GitHub sign-in for a default model.
-	const modelId = getRemoteModelId(session, authority);
-	let remote: ISession;
-	try {
-		remote = sessionsManagementService.createNewSession(folder, modelId ? { ...options, modelId } : options);
-	} catch {
-		remote = sessionsManagementService.createNewSession(folder, options);
+	// chat runs on that key there and needs no GitHub sign-in for a default model. The server lists a
+	// delegated key's models a moment after its accounts arrive: wait for it, or the chat would start on
+	// the server's default model.
+	const wantedModelId = getRemoteModelId(session, authority);
+	const modelId = wantedModelId ? await waitForRemoteModel(sessionsProvidersService, options.providerId, folder, options.sessionTypeId, wantedModelId) : undefined;
+	if (wantedModelId && !modelId) {
+		logService.warn(`[Delegation] The server does not list the model ${wantedModelId}; the chat starts on its default model.`);
 	}
-	await sessionsManagementService.sendNewChatRequest(remote, request);
-	return remote.resource;
+	// Not through the new chat input: its draft is seeded with the input's remembered model (the server's
+	// first one), and `createNewSession` does not apply `modelId`. This sets the model on the draft before
+	// the first message goes out.
+	const remote = await sessionsManagementService.createAndSendNewChatRequest(folder, request, modelId ? { ...options, modelId } : options);
+	return remote?.resource;
 }
 
 async function delegateToServer(accessor: ServicesAccessor, context: ISession | ISession[] | undefined): Promise<void> {

@@ -5,7 +5,7 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { DelegationAgentKind, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getBroughtBackBranchPrefix, getDelegationAgentKind, getDelegationAgentProvider, parseDelegationGatewayModel, slugifyDelegationName } from '../../common/creaeditorDelegation.js';
+import { DelegationAgentKind, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getBroughtBackBranchPrefix, getDelegationAgentKind, getDelegationAgentProvider, getDelegationRemoteModelId, parseDelegationGatewayModel, slugifyDelegationName } from '../../common/creaeditorDelegation.js';
 
 suite('CreaEditor Delegation - agents and keys', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -42,6 +42,25 @@ suite('CreaEditor Delegation - agents and keys', () => {
 			{ vendor: 'openrouter', group: 'Work/Team', model: 'x/y' },
 			{ vendor: 'litellm', group: 'Home', model: 'gpt-5' },
 			undefined,
+			undefined,
+			undefined,
+		]);
+	});
+
+	test('maps a chat\'s model to the same model on a server', () => {
+		const remote = 'remote-server__1-copilotcli';
+		assert.deepStrictEqual([
+			getDelegationRemoteModelId('agent-host-copilotcli:litellm/Home key/mock-mini', remote),
+			getDelegationRemoteModelId('litellm/Home key/mock-mini', remote),
+			getDelegationRemoteModelId('agent-host-claude:claude-sonnet-4', remote),
+			getDelegationRemoteModelId('openrouter/Work/vendor/model:free', remote),
+			getDelegationRemoteModelId('agent-host-copilotcli:', remote),
+			getDelegationRemoteModelId(undefined, remote),
+		], [
+			'remote-server__1-copilotcli:litellm/Home key/mock-mini',
+			'remote-server__1-copilotcli:litellm/Home key/mock-mini',
+			'remote-server__1-copilotcli:claude-sonnet-4',
+			'remote-server__1-copilotcli:openrouter/Work/vendor/model:free',
 			undefined,
 			undefined,
 		]);

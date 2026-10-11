@@ -552,6 +552,21 @@ export function getDelegationAgentProvider(agent: DelegationAgentKind): string |
 }
 
 /**
+ * The id of a chat's model on a server's session type (`<remote session type>:<model>`), from the id the
+ * chat holds (`[<scheme>:]<model>`, e.g. `agent-host-copilotcli:litellm/Home key/mock-mini`). Only a colon
+ * before the first `/` is the scheme, so a model name with a colon keeps it. Undefined without a model.
+ */
+export function getDelegationRemoteModelId(modelId: string | undefined, remoteSessionType: string): string | undefined {
+	if (!modelId) {
+		return undefined;
+	}
+	const colon = modelId.indexOf(':');
+	const slash = modelId.indexOf('/');
+	const model = colon > 0 && (slash < 0 || colon < slash) ? modelId.slice(colon + 1) : modelId;
+	return model ? `${remoteSessionType}:${model}` : undefined;
+}
+
+/**
  * The provider group (gateway key) of a BYOK model id as a chat holds it: `[<scheme>:]<vendor>/<group>/<model>`
  * for OpenRouter and LiteLLM; undefined for other models.
  */
