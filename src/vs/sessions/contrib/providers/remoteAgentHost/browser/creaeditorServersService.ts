@@ -113,10 +113,11 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 
 		const entries = derived(this, reader => {
 			const keys = this._deviceKeys.read(reader);
-			const needsPairing = this._needsPairing.read(reader);
 			return this._servers.read(reader).flatMap((server): IRemoteAgentHostEntry[] => {
-				// A server that rejects the key gets no connection: reconnecting with it is pointless.
-				const deviceKey = needsPairing.has(server.id) ? undefined : keys.get(server.id);
+				// A server that rejects the key keeps its entry (and so its chats stay open on this
+				// connection): Pair Again swaps the key and reconnects. The server limits failed keys
+				// apart from pairing, so the retries cannot lock pairing out.
+				const deviceKey = keys.get(server.id);
 				return deviceKey ? [{
 					name: server.name,
 					connectionToken: deviceKey,
@@ -210,6 +211,8 @@ export class CreaEditorServersService extends Disposable implements ICreaEditorS
 		this._setNeedsPairing(serverId, false);
 		this._deviceKeyCheckedAt.delete(serverId);
 		this._storeServers(this._servers.get().map(candidate => candidate.id === serverId ? updated : candidate));
+		// The connection still dials with the old key: start over with the new one.
+		this._remoteAgentHostService.reconnect(this.getAgentHostAddress(updated));
 		void this.refreshHealth();
 		return updated;
 	}
