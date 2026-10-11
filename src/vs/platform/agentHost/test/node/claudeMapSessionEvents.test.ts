@@ -918,7 +918,7 @@ suite('claudeMapSessionEvents — direct mapper tests', () => {
 		]);
 	});
 
-	test('CreaEditor: compact_boundary shows a Conversation compacted notification', () => {
+	test('CreaEditor: compact_boundary shows a Conversation compacted notification with its boundary id', () => {
 		const signals = mapSDKMessageToAgentSignals({
 			type: 'system',
 			subtype: 'compact_boundary',
@@ -930,7 +930,7 @@ suite('claudeMapSessionEvents — direct mapper tests', () => {
 		assert.deepStrictEqual(signals, [{
 			kind: 'action',
 			resource: SESSION,
-			action: { type: ActionType.ChatResponsePart, turnId: TURN_ID, part: { kind: ResponsePartKind.SystemNotification, content: 'Conversation compacted' } },
+			action: { type: ActionType.ChatResponsePart, turnId: TURN_ID, part: { kind: ResponsePartKind.SystemNotification, content: 'Conversation compacted: older messages were summarized.', _meta: { 'creaeditor.compactBoundary': TEST_UUID } } },
 		}]);
 	});
 

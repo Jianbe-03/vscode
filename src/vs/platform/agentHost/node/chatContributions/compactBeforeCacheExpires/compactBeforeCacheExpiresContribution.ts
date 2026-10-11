@@ -6,16 +6,19 @@
 // CreaEditor: compacts an idle Claude chat shortly before its prompt cache expires, so the summary is
 // made from cached (cheap) context and the next message starts small. See
 // `common/creaeditorCacheCompaction.ts`. The compaction is a `/compact` turn started like any
-// host-authored turn, so it runs through the Claude CLI's own `/compact`.
+// host-authored turn, so it runs through the Claude CLI's own `/compact`. The ids of the automatic
+// compactions are kept in the chat's database, so a reloaded chat still says why it was compacted.
 
+import { SequencerByKey } from '../../../../../base/common/async.js';
 import { Disposable, toDisposable, type IDisposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
-import { localize } from '../../../../../nls.js';
 import { ILogService } from '../../../../log/common/log.js';
-import { type IAgentHostChatContribution, type IAgentHostChatContributionContext, type IIncomingRequest, type IncomingRequestDisposition, type ITurnEnd } from '../../../common/agentHostChatContributionsService.js';
-import { AUTO_COMPACT_MESSAGE_META_KEY, COMPACT_COMMAND_TEXT, getCompactDelayMs, ICompactBeforeCacheExpiresConfig, isAutoCompactMessage, isCompactMessage, readCompactBeforeCacheExpiresConfig, readPromptCacheUsage } from '../../../common/creaeditorCacheCompaction.js';
+import { type IAgentHostChatContribution, type IAgentHostChatContributionContext, type IDispatchedAction, type IHydrationContext, type IIncomingRequest, type IncomingRequestDisposition, type ITurnEnd } from '../../../common/agentHostChatContributionsService.js';
+import { applyAutoCompactNotices, AUTO_COMPACT_BOUNDARIES_METADATA_KEY, AUTO_COMPACT_MESSAGE_META_KEY, COMPACT_COMMAND_TEXT, getAutoCompactNotice, getCompactDelayMs, ICompactBeforeCacheExpiresConfig, isAutoCompactMessage, isAutoCompactTurn, isCompactMessage, parseAutoCompactBoundaries, readCompactBeforeCacheExpiresConfig, readCompactBoundaryId, readPromptCacheUsage } from '../../../common/creaeditorCacheCompaction.js';
 import { readCreaEditorServerChats } from '../../../common/creaeditorServer.js';
-import { buildDefaultChatUri, isChatReadOnly, isDefaultChatUri, isSubagentChatUri, MessageKind, parseRequiredSessionUriFromChatUri, SessionStatus, TurnState, withMessageSystemInitiatedLabel, type Message, type UsageInfo } from '../../../common/state/sessionState.js';
+import { ISessionDataService } from '../../../common/sessionDataService.js';
+import { ActionType, isChatAction } from '../../../common/state/sessionActions.js';
+import { buildDefaultChatUri, chatStorageUri, isAhpChatChannel, isChatReadOnly, isDefaultChatUri, isSubagentChatUri, MessageKind, parseRequiredSessionUriFromChatUri, SessionStatus, TurnState, withMessageSystemInitiatedLabel, type Message, type Turn, type UsageInfo } from '../../../common/state/sessionState.js';
 import { IAgentConfigurationService } from '../../agentConfigurationService.js';
 import { AgentHostStateManager, IAgentHostStateManager } from '../../agentHostStateManager.js';
 import { IAgentHostTurnService } from '../../agentHostTurnService.js';
@@ -150,6 +153,8 @@ export class CompactBeforeCacheExpiresContribution extends Disposable implements
 	readonly order = 800;
 
 	private readonly _scheduler: IdleCompactionScheduler;
+	/** Serializes the read-modify-write of a chat's {@link AUTO_COMPACT_BOUNDARIES_METADATA_KEY}. */
+	private readonly _boundaryWrites = new SequencerByKey<string>();
 
 	constructor(
 		protected readonly _context: IAgentHostChatContributionContext,
@@ -157,6 +162,7 @@ export class CompactBeforeCacheExpiresContribution extends Disposable implements
 		@IAgentConfigurationService private readonly _configurationService: IAgentConfigurationService,
 		@IAgentHostTurnService private readonly _turnService: IAgentHostTurnService,
 		@ISessionWorkspaceConversionService private readonly _conversionService: ISessionWorkspaceConversionService,
+		@ISessionDataService private readonly _sessionDataService: ISessionDataService,
 		@ILogService private readonly _logService: ILogService,
 	) {
 		super();
@@ -185,6 +191,53 @@ export class CompactBeforeCacheExpiresContribution extends Disposable implements
 			return;
 		}
 		this._scheduler.onTurnSucceeded(turn.session, turn.channel, turn.turnId, ended.message, ended.usage);
+	}
+
+	onDidDispatchAction(dispatched: IDispatchedAction): void {
+		const { channel, action } = dispatched;
+		if (dispatched.rejectionReason !== undefined || !isAhpChatChannel(channel) || !isChatAction(action) || action.type !== ActionType.ChatResponsePart || isSubagentChatUri(channel)) {
+			return;
+		}
+		const boundaryId = readCompactBoundaryId(action.part);
+		if (boundaryId && isAutoCompactTurn(this._stateManager.getChatState(channel), action.turnId)) {
+			this._recordAutoCompaction(channel, boundaryId);
+		}
+	}
+
+	/** A reloaded chat: the notifications of its automatic compactions get their own text again. */
+	async onHydrateTurns(context: IHydrationContext, turns: readonly Turn[]): Promise<readonly Turn[]> {
+		const storage = chatStorageUri(context.chat);
+		if (!storage || !turns.some(turn => turn.responseParts.some(part => readCompactBoundaryId(part) !== undefined))) {
+			return turns;
+		}
+		const ref = await this._sessionDataService.tryOpenDatabase(storage);
+		if (!ref) {
+			return turns;
+		}
+		try {
+			const boundaryIds = parseAutoCompactBoundaries(await ref.object.getMetadata(AUTO_COMPACT_BOUNDARIES_METADATA_KEY));
+			return applyAutoCompactNotices(turns, new Set(boundaryIds));
+		} finally {
+			ref.dispose();
+		}
+	}
+
+	private _recordAutoCompaction(channel: string, boundaryId: string): void {
+		const storage = chatStorageUri(channel);
+		if (!storage) {
+			return;
+		}
+		this._boundaryWrites.queue(storage.toString(), async () => {
+			const ref = this._sessionDataService.openDatabase(storage);
+			try {
+				const boundaryIds = parseAutoCompactBoundaries(await ref.object.getMetadata(AUTO_COMPACT_BOUNDARIES_METADATA_KEY));
+				if (!boundaryIds.includes(boundaryId)) {
+					await ref.object.setMetadata(AUTO_COMPACT_BOUNDARIES_METADATA_KEY, JSON.stringify([...boundaryIds, boundaryId]));
+				}
+			} finally {
+				ref.dispose();
+			}
+		}).catch(error => this._logService.warn(`[CompactBeforeCacheExpires] Could not record the automatic compaction of ${channel}: ${error instanceof Error ? error.message : String(error)}`));
 	}
 
 	private _getConfig(): ICompactBeforeCacheExpiresConfig {
@@ -229,7 +282,7 @@ export class CompactBeforeCacheExpiresContribution extends Disposable implements
 			...(previous?.model ? { model: previous.model } : {}),
 			...(previous?.agent ? { agent: previous.agent } : {}),
 			_meta: { [AUTO_COMPACT_MESSAGE_META_KEY]: true },
-		}, localize('compactBeforeCacheExpires.label', "Compacted automatically: the prompt cache was about to expire"));
+		}, getAutoCompactNotice());
 		try {
 			this._turnService.startTurnMessage(URI.parse(channel), message);
 		} catch (error) {

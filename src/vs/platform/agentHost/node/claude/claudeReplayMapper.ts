@@ -27,6 +27,7 @@ import { readToolCallMeta } from '../../common/meta/agentToolCallMeta.js';
 import { formatGenericToolInput } from '../../common/streamingToolCallDisplay.js';
 import { buildClaudeToolMeta, getClaudeInvocationMessage, getClaudePastTenseMessage, getClaudeToolDisplayName, getClaudeToolInputString } from './claudeToolDisplay.js';
 import { hasClientToolNamePrefix, stripClientToolNamePrefix } from './clientTools/claudeClientToolMcpServer.js';
+import { createCompactNoticePart, getCompactNotice } from '../../common/creaeditorCacheCompaction.js';
 
 /**
  * Phase 13 — replay mapper. Reduces a flat `SessionMessage[]` (the SDK's
@@ -195,7 +196,7 @@ function parseSystemMessage(msg: SessionMessage, timestamp: string | undefined):
 	}
 	// CreaEditor: the same notice as the live compaction (`claudeMapSessionEvents.ts`).
 	const text = subtype === 'compact_boundary'
-		? localize('claude.replay.conversationCompacted', "Conversation compacted")
+		? getCompactNotice()
 		: readSystemText(msg.message) ?? `[${subtype}]`;
 	return { kind: 'system-notification', uuid: msg.uuid, subtype, text, timestamp };
 }
@@ -316,10 +317,11 @@ class ReplayBuilder {
 					// System notification before any user message — drop. Without an active turn there's nowhere to attach.
 					return;
 				}
-				this._active.responseParts.push({
-					kind: ResponsePartKind.SystemNotification,
-					content: msg.text,
-				});
+				// CreaEditor: a compaction carries its boundary id, like the live notice, so the
+				// automatic ones get their own text (`creaeditorCacheCompaction.ts`).
+				this._active.responseParts.push(msg.subtype === 'compact_boundary'
+					? createCompactNoticePart(msg.uuid)
+					: { kind: ResponsePartKind.SystemNotification, content: msg.text });
 				if (msg.timestamp) {
 					this._active.lastResponseAt = msg.timestamp;
 				}

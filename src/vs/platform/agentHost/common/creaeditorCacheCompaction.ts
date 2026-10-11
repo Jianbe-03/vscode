@@ -15,8 +15,13 @@
 //   notifications and unread state skip.
 // - The settings below are mirrored into every connected agent host's root config (same key as the
 //   setting id), so a CreaEditor Server follows the laptop's settings.
+// - The Claude mappers (live and replay) mark the "conversation compacted" notification with the id
+//   of its `compact_boundary` record ({@link COMPACT_BOUNDARY_PART_META_KEY}). The contribution keeps
+//   the ids of the automatic compactions in the chat's database
+//   ({@link AUTO_COMPACT_BOUNDARIES_METADATA_KEY}), so a reloaded chat still says why it was compacted.
 
-import type { ChatState, Message, UsageInfo } from './state/sessionState.js';
+import { localize } from '../../../nls.js';
+import { ResponsePartKind, type ChatState, type Message, type ResponsePart, type Turn, type UsageInfo } from './state/sessionState.js';
 
 /** Root config keys (and setting ids). */
 export const enum CompactBeforeCacheExpiresRootKey {
@@ -104,4 +109,72 @@ export function isAutoCompactTurn(chat: ChatState | undefined, turnId: string | 
 		}
 	}
 	return false;
+}
+
+/** Key in a compaction notification's `_meta`: the id (`uuid`) of the transcript's `compact_boundary` record. */
+export const COMPACT_BOUNDARY_PART_META_KEY = 'creaeditor.compactBoundary';
+
+/** Chat database metadata key: a JSON array of the `compact_boundary` ids of the automatic compactions. */
+export const AUTO_COMPACT_BOUNDARIES_METADATA_KEY = 'creaeditor.autoCompactBoundaries';
+
+/** The notification of a compaction: a `/compact` the user sent, or the Claude CLI's own when the context is full. */
+export function getCompactNotice(): string {
+	return localize('creaeditor.compactNotice', "Conversation compacted: older messages were summarized.");
+}
+
+/** The notification of an automatic compaction before the prompt cache expires, live and after a reload. */
+export function getAutoCompactNotice(): string {
+	return localize('creaeditor.autoCompactNotice', "Compacted to save cost: the prompt cache was about to expire, so the conversation was summarized while reading it was still cheap.");
+}
+
+/** The compaction notification part for the `compact_boundary` record `boundaryId`. */
+export function createCompactNoticePart(boundaryId: string | undefined): ResponsePart {
+	return {
+		kind: ResponsePartKind.SystemNotification,
+		content: getCompactNotice(),
+		...(boundaryId ? { _meta: { [COMPACT_BOUNDARY_PART_META_KEY]: boundaryId } } : {}),
+	};
+}
+
+/** The `compact_boundary` id of a compaction notification part. */
+export function readCompactBoundaryId(part: ResponsePart): string | undefined {
+	if (part.kind !== ResponsePartKind.SystemNotification) {
+		return undefined;
+	}
+	const id = part._meta?.[COMPACT_BOUNDARY_PART_META_KEY];
+	return typeof id === 'string' && id ? id : undefined;
+}
+
+/** Parses {@link AUTO_COMPACT_BOUNDARIES_METADATA_KEY}; anything malformed reads as none. */
+export function parseAutoCompactBoundaries(raw: string | undefined): string[] {
+	if (!raw) {
+		return [];
+	}
+	try {
+		const value: unknown = JSON.parse(raw);
+		return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+	} catch {
+		return [];
+	}
+}
+
+/** Gives the notifications of the automatic compactions {@link boundaryIds} their own text. */
+export function applyAutoCompactNotices(turns: readonly Turn[], boundaryIds: ReadonlySet<string>): readonly Turn[] {
+	if (boundaryIds.size === 0) {
+		return turns;
+	}
+	return turns.map(turn => {
+		if (!turn.responseParts.some(part => isAutoCompactNoticePart(part, boundaryIds))) {
+			return turn;
+		}
+		return {
+			...turn,
+			responseParts: turn.responseParts.map(part => isAutoCompactNoticePart(part, boundaryIds) ? { ...part, content: getAutoCompactNotice() } : part),
+		};
+	});
+}
+
+function isAutoCompactNoticePart(part: ResponsePart, boundaryIds: ReadonlySet<string>): boolean {
+	const id = readCompactBoundaryId(part);
+	return id !== undefined && boundaryIds.has(id);
 }

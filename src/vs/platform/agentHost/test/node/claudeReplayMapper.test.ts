@@ -8,8 +8,9 @@ import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { URI } from '../../../../base/common/uri.js';
 import { NullLogService } from '../../../log/common/log.js';
-import { ResponsePartKind, ToolCallStatus, ToolResultContentType, TurnState } from '../../common/state/protocol/state.js';
+import { ResponsePartKind, ToolCallStatus, ToolResultContentType, TurnState, type Turn } from '../../common/state/protocol/state.js';
 import { mapSessionMessagesToTurns, missingPromptPlaceholder, resolveForkAnchorUuid } from '../../node/claude/claudeReplayMapper.js';
+import { applyAutoCompactNotices, COMPACT_BOUNDARY_PART_META_KEY, parseAutoCompactBoundaries } from '../../common/creaeditorCacheCompaction.js';
 
 suite('claudeReplayMapper', () => {
 
@@ -239,6 +240,32 @@ suite('claudeReplayMapper', () => {
 		assert.strictEqual(turns.length, 1, 'compact_boundary is NOT a turn boundary');
 		const sysParts = turns[0].responseParts.filter(p => p.kind === ResponsePartKind.SystemNotification);
 		assert.strictEqual(sysParts.length, 1);
+	});
+
+	suite('CreaEditor: compaction notice after a reload', () => {
+		const compactedChat = (): readonly Turn[] => mapSessionMessagesToTurns([
+			makeUser('u1', 'Refactor the checkout flow'),
+			makeAssistantText('a1', 'Done.'),
+			makeSystem('boundary-1', 'compact_boundary'),
+		], session, logService);
+		const notices = (turns: readonly Turn[]) => turns.flatMap(turn => turn.responseParts.filter(part => part.kind === ResponsePartKind.SystemNotification));
+
+		test('an automatic compaction (its boundary id in the chat metadata) says why it ran', () => {
+			const boundaryIds = parseAutoCompactBoundaries(JSON.stringify(['boundary-1']));
+			assert.deepStrictEqual(notices(applyAutoCompactNotices(compactedChat(), new Set(boundaryIds))), [{
+				kind: ResponsePartKind.SystemNotification,
+				content: 'Compacted to save cost: the prompt cache was about to expire, so the conversation was summarized while reading it was still cheap.',
+				_meta: { [COMPACT_BOUNDARY_PART_META_KEY]: 'boundary-1' },
+			}]);
+		});
+
+		test('a compaction without metadata (a /compact the user sent) says older messages were summarized', () => {
+			assert.deepStrictEqual(notices(applyAutoCompactNotices(compactedChat(), new Set(parseAutoCompactBoundaries(undefined)))), [{
+				kind: ResponsePartKind.SystemNotification,
+				content: 'Conversation compacted: older messages were summarized.',
+				_meta: { [COMPACT_BOUNDARY_PART_META_KEY]: 'boundary-1' },
+			}]);
+		});
 	});
 
 	test('Fixture 5: Task / Agent tool_use produces subagent marker', () => {

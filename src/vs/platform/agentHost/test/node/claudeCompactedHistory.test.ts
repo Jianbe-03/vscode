@@ -60,7 +60,7 @@ suite('claudeCompactedHistory', () => {
 			text: turn.message.text,
 			parts: turn.responseParts.map(part => part.kind === ResponsePartKind.Markdown || part.kind === ResponsePartKind.SystemNotification ? `${part.kind}: ${part.content}` : part.kind),
 		})), [
-			{ id: 'request_1', text: 'Say hello', parts: [`${ResponsePartKind.Markdown}: Hello from the mock Anthropic API.`, `${ResponsePartKind.SystemNotification}: Conversation compacted`] },
+			{ id: 'request_1', text: 'Say hello', parts: [`${ResponsePartKind.Markdown}: Hello from the mock Anthropic API.`, `${ResponsePartKind.SystemNotification}: Conversation compacted: older messages were summarized.`] },
 			{ id: 'request_2', text: 'Say goodbye', parts: [`${ResponsePartKind.Markdown}: Goodbye.`] },
 		]);
 	});

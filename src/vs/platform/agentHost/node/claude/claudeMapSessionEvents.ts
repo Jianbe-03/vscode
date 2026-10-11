@@ -17,8 +17,7 @@ import { buildClaudeToolMeta, getClaudePastTenseMessage, getClaudeToolDisplayNam
 import { claudeToolDenialCode } from './claudeToolDenial.js';
 import { ClaudeToolCallRegistry } from './claudeToolCallRegistry.js';
 import { ToolCallConfirmationReason, ToolCallContributorKind, type StringOrMarkdown } from '../../common/state/protocol/state.js';
-import { localize } from '../../../../nls.js';
-import { PROMPT_CACHE_USAGE_META_KEY, type IPromptCacheUsage } from '../../common/creaeditorCacheCompaction.js';
+import { createCompactNoticePart, PROMPT_CACHE_USAGE_META_KEY, type IPromptCacheUsage } from '../../common/creaeditorCacheCompaction.js';
 
 /** The token counts of an Anthropic request's usage that tell its context size and caching. */
 interface IClaudeRequestUsage {
@@ -318,12 +317,13 @@ export function mapSDKMessageToAgentSignals(
 			// Phase 12 step 7 — system subtypes for subagent task discrimination.
 			if (message.type === 'system') {
 				// CreaEditor: show a compaction (`/compact`, automatic or the CLI's own) as it happens,
-				// like the replayed transcript does.
+				// like the replayed transcript does. The boundary id lets the compact before the prompt
+				// cache expires contribution remember which compactions were automatic.
 				if (message.subtype === 'compact_boundary') {
 					return [{
 						kind: 'action',
 						resource: chat,
-						action: { type: ActionType.ChatResponsePart, turnId, part: { kind: ResponsePartKind.SystemNotification, content: localize('claude.conversationCompacted', "Conversation compacted") } },
+						action: { type: ActionType.ChatResponsePart, turnId, part: createCompactNoticePart(message.uuid) },
 					}];
 				}
 				return mapSubagentSystemMessage(message, chat, registry);

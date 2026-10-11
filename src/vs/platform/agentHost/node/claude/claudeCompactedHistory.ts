@@ -13,7 +13,7 @@
 // returned, and the boundary itself comes back without its `subtype` (the SDK only copies
 // `message`, which a system record does not have). {@link expandCompactedHistory} puts the earlier
 // turns back in front, from the raw transcript, and gives every system record its `subtype`, so the
-// replay mapper shows the old turns, then "Conversation compacted".
+// replay mapper shows the old turns, then the compaction notice.
 
 import type { SessionMessage } from '@anthropic-ai/claude-agent-sdk';
 
