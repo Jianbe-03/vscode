@@ -5,9 +5,14 @@
 
 import type { CopilotClient, CopilotSession, ResumeSessionConfig, SessionConfig, Verbosity } from '@github/copilot-sdk';
 import assert from 'assert';
+import * as fs from 'fs';
+import { tmpdir } from 'os';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { DisposableStore } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
+import { VSBuffer } from '../../../../base/common/buffer.js';
+import { join } from '../../../../base/common/path.js';
+import { getRandomTestPath } from '../../../../base/test/node/testUtils.js';
 import { mock } from '../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { PluginFormat, type IMcpServerDefinition } from '../../../agentPlugins/common/pluginParsers.js';
@@ -30,6 +35,7 @@ import { SEMANTIC_SEARCH_TOOL_NAME } from '../../common/semanticSearchConstants.
 import { CustomizationType, McpServerStatus, type ClientPluginCustomization, type ModelSelection } from '../../common/state/protocol/state.js';
 import { CLIENT_TOOL_SEARCH_REFERENCE_NAME, RUNTIME_TOOL_SEARCH_TOOL_NAME } from '../../common/toolSearchConstants.js';
 import { ActiveClientToolSet } from '../../node/activeClientState.js';
+import { AGENT_HOST_USER_CUSTOMIZATIONS_DIR_ENV_VAR, installUserCustomizations } from '../../node/creaeditorDelegation/delegationUserCustomizations.js';
 import { AgentConfigurationService, IAgentConfigurationService } from '../../node/agentConfigurationService.js';
 import { AgentHostStateManager } from '../../node/agentHostStateManager.js';
 import { AgentHostManagedSettingsService, IAgentHostManagedSettingsService } from '../../node/agentHostManagedSettingsService.js';
@@ -1025,6 +1031,106 @@ suite('CopilotSessionLauncher shared session config', () => {
 		} finally {
 			sessions.dispose();
 			await launcher.disposeByokProxyHandle();
+		}
+	});
+
+	test('a chat delegated to a CreaEditor Server gets the personal agents, also as custom agents when the session lists some, and the personal instructions', async () => {
+		const dir = getRandomTestPath(tmpdir(), 'vsctests', 'copilotLauncherPersonal');
+		const worktree = join(dir, 'worktrees', 'app-1');
+		const root = join(dir, 'user-customizations');
+		fs.mkdirSync(join(dir, 'synced'), { recursive: true });
+		const syncedAgent = join(dir, 'synced', 'director.agent.md');
+		fs.writeFileSync(syncedAgent, '---\nname: director\ndescription: Directs.\n---\nDirect.\n');
+		installUserCustomizations(root, 'd1', [worktree], 'MacBook', [
+			{ agent: 'copilot', relativePath: 'agents/copilot-helper.agent.md', content: Buffer.from('---\nname: copilot-helper\ndescription: Helps.\n---\nYou help.\n').toString('base64') },
+			{ agent: 'copilot', relativePath: 'copilot-instructions.md', content: Buffer.from('Use tabs.\n').toString('base64') },
+		]);
+		const previous = process.env[AGENT_HOST_USER_CUSTOMIZATIONS_DIR_ENV_VAR];
+		process.env[AGENT_HOST_USER_CUSTOMIZATIONS_DIR_ENV_VAR] = root;
+		const configs: Parameters<CopilotClient['createSession']>[0][] = [];
+		const session = {
+			sessionId: 'session-1',
+			on: () => () => { },
+			disconnect: async () => { },
+			rpc: { options: { update: async () => ({ success: true }) } },
+		} as unknown as CopilotSession;
+		const client = {
+			createSession: async (config: Parameters<CopilotClient['createSession']>[0]) => {
+				reportManagedSettings(config);
+				configs.push(config);
+				return session;
+			},
+			resumeSession: async () => session,
+			rpc: { account: new class extends mock<CopilotClient['rpc']['account']>() { }, sandbox: { getHostSupport: async () => ({ supported: true, capabilities: [] }) } },
+		};
+		const logService = new CapturingLogService();
+		const fileService = { readFile: async (resource: URI) => ({ value: VSBuffer.wrap(fs.readFileSync(resource.fsPath)) }) } as Partial<IFileService> as IFileService;
+		const launcher = new CopilotSessionLauncher(
+			{ getRootValue: () => undefined, getSessionConfigValues: () => undefined, getSessionSandboxPolicy: () => undefined, getSessionSandboxEnabled: () => undefined, setSessionSandboxPolicy: () => { }, setSessionSandboxEnabled: () => { }, rejectSessionSandboxChange: () => { } } as Partial<IAgentConfigurationService> as IAgentConfigurationService,
+			{ permissions: {} } as IAgentHostManagedSettingsService,
+			{} as IAgentHostTerminalManager,
+			logService,
+			fileService,
+			{ _serviceBrand: undefined, start: async () => { throw new Error('Unexpected proxy start'); }, dispose: () => { } },
+			new ByokLmBridgeRegistry(),
+			{ _serviceBrand: undefined, getSessionTraceContext: () => undefined, releaseSessionTraceContext: () => { }, withTraceContext: <T>(_context: undefined, fn: () => T): T => fn() } as unknown as IAgentHostOTelService,
+			noopSessionOpenTelemetry,
+		);
+		// A synced plugin without a folder on disk: its agent goes in `customAgents`, which makes the SDK drop folder agents.
+		const syncedPlugin: ICopilotPluginInfo = {
+			format: PluginFormat.Copilot,
+			hooks: [],
+			mcpServers: [],
+			agents: [{ uri: URI.file(syncedAgent), name: 'director', customization: { type: CustomizationType.Agent, id: 'director', uri: URI.file(syncedAgent).toString(), name: 'director' } }],
+			skills: [],
+			instructions: [],
+		};
+		const plan = (workingDirectory: URI, plugins: ICopilotPluginInfo[]): CopilotSessionLaunchPlan => ({
+			kind: 'create',
+			model: undefined,
+			client,
+			sessionId: 'session-1',
+			workingDirectory,
+			resolvedAgentName: undefined,
+			snapshot: { tools: [], plugins, mcpServers: {} },
+			disabledRootMcpServers: [],
+			activeClientToolSet: new ActiveClientToolSet(),
+			shellManager: undefined,
+			githubCredentials: CopilotGitHubSessionCredentials.fromToken(undefined),
+		});
+		const sessions = new DisposableStore();
+		try {
+			sessions.add(await launcher.launch(plan(URI.file(join(worktree, 'src')), [syncedPlugin]), testRuntime));
+			sessions.add(await launcher.launch(plan(URI.file(worktree), []), testRuntime));
+			sessions.add(await launcher.launch(plan(URI.file(join(dir, 'elsewhere')), []), testRuntime));
+			const personalDir = join(root, 'd1', 'copilot');
+			assert.deepStrictEqual({
+				configs: configs.map(config => ({
+					customAgents: config.customAgents?.map(agent => agent.name),
+					personalPlugin: config.pluginDirectories?.includes(personalDir),
+					instructions: config.systemMessage?.content?.includes('Use tabs.') ?? false,
+				})),
+				logs: logService.infos.filter(message => message.includes('personal customizations')).map(message => message.split(dir).join('<dir>')),
+			}, {
+				configs: [
+					{ customAgents: ['director', 'copilot-helper'], personalPlugin: true, instructions: true },
+					{ customAgents: [], personalPlugin: true, instructions: true },
+					{ customAgents: [], personalPlugin: false, instructions: false },
+				],
+				logs: [
+					`[Copilot:session-1] Using the personal customizations of the delegated chat in <dir>/worktrees/app-1/src: plugin folder <dir>/user-customizations/d1/copilot (1 agents, also as custom agents); copilot-instructions.md in the system message`,
+					`[Copilot:session-1] Using the personal customizations of the delegated chat in <dir>/worktrees/app-1: plugin folder <dir>/user-customizations/d1/copilot (1 agents); copilot-instructions.md in the system message`,
+				],
+			});
+		} finally {
+			sessions.dispose();
+			await launcher.disposeByokProxyHandle();
+			if (previous === undefined) {
+				delete process.env[AGENT_HOST_USER_CUSTOMIZATIONS_DIR_ENV_VAR];
+			} else {
+				process.env[AGENT_HOST_USER_CUSTOMIZATIONS_DIR_ENV_VAR] = previous;
+			}
+			fs.rmSync(dir, { recursive: true, force: true });
 		}
 	});
 });

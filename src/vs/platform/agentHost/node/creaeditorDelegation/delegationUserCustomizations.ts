@@ -196,6 +196,12 @@ export interface IDelegatedUserCustomizations {
 	readonly claudeMemory?: string;
 	/** An Open Plugins folder with the Copilot CLI agents and skills. */
 	readonly copilotPluginDir?: string;
+	/**
+	 * The Copilot CLI agent files in {@link copilotPluginDir}, with their names (the file name without
+	 * `.agent.md`/`.md`). The SDK ignores a plugin folder's agents once a session lists explicit
+	 * `customAgents`; then these are listed there too.
+	 */
+	readonly copilotAgents?: readonly { readonly name: string; readonly path: string }[];
 	/** The user's `copilot-instructions.md`. */
 	readonly copilotInstructions?: string;
 	/** The user's Codex `AGENTS.md`. */
@@ -323,7 +329,9 @@ export function findDelegatedUserCustomizations(workingDirectory: string | undef
 		const claudeMemory = readText(join(claudePluginDir, 'CLAUDE.md'));
 		const copilotInstructions = readText(join(copilotPluginDir, 'copilot-instructions.md'));
 		const codexInstructions = readText(join(dir, 'codex', 'AGENTS.md'));
+		const copilotAgents = listAgentFiles(join(copilotPluginDir, 'agents'));
 		return {
+			...(copilotAgents.length ? { copilotAgents } : {}),
 			...(hasPlugin(claudePluginDir, join('.claude-plugin', 'plugin.json')) && ['agents', 'skills', 'commands'].some(folder => fs.existsSync(join(claudePluginDir, folder))) ? { claudePluginDir } : {}),
 			...(claudeMemory ? { claudeMemory } : {}),
 			...(hasPlugin(copilotPluginDir, join('.plugin', 'plugin.json')) && ['agents', 'skills'].some(folder => fs.existsSync(join(copilotPluginDir, folder))) ? { copilotPluginDir } : {}),
@@ -332,6 +340,21 @@ export function findDelegatedUserCustomizations(workingDirectory: string | undef
 		};
 	}
 	return undefined;
+}
+
+function listAgentFiles(dir: string): { name: string; path: string }[] {
+	let names: string[];
+	try {
+		names = fs.readdirSync(dir).sort();
+	} catch {
+		return [];
+	}
+	return names.filter(name => name.endsWith('.md') && statOrUndefined(join(dir, name))?.isFile()).map(name => ({ name: name.replace(/(\.agent)?\.md$/, ''), path: join(dir, name) }));
+}
+
+/** The log line of an agent that applies a delegated chat's personal customizations (`parts` names what it uses). */
+export function describeDelegatedUserCustomizations(workingDirectory: string, parts: readonly string[]): string {
+	return `Using the personal customizations of the delegated chat in ${workingDirectory}: ${parts.join('; ')}`;
 }
 
 /** How the user's memory or instructions read at the end of a system prompt. */

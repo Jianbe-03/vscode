@@ -34,7 +34,7 @@ import { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { IByokLmProxyService, type IByokLmProxyHandle } from './byokLmProxyService.js';
 import type { ICopilotMcpServerInfo, ICopilotPluginInfo } from './copilotAgent.js';
 import { CopilotGitHubSessionCredentials } from './copilotGitHubCredentials.js';
-import { toSdkHooks, toSdkInstructionDirectories, toSdkMcpServers, toSdkMcpServersFromConfigMap, toSdkSessionCustomAgents, toSdkSkillDirectories } from './copilotPluginConverters.js';
+import { toSdkCustomAgents, toSdkHooks, toSdkInstructionDirectories, toSdkMcpServers, toSdkMcpServersFromConfigMap, toSdkSessionCustomAgents, toSdkSkillDirectories } from './copilotPluginConverters.js';
 import { CopilotSessionWrapper, type ICopilotSessionKeyLock } from './copilotSessionWrapper.js';
 import { ShellManager, createShellTools, type IUnsandboxedCommandConfirmationRequest } from './copilotShellTools.js';
 import { isAutoModel, isGpt56Model } from './modelIdentifiers.js';
@@ -43,7 +43,7 @@ import './prompts/allPrompts.js';
 import { agentHostPromptRegistry, type IAgentHostPromptContext } from './prompts/promptRegistry.js';
 import { applyConfiguredPromptOverrides } from './prompts/promptOverride.js';
 import { appendSystemMessageContent, describeSystemMessageConfig, fullSystemPrompt } from './prompts/systemMessage.js';
-import { findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
+import { describeDelegatedUserCustomizations, findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
 import { buildSandboxConfigForSdk, type SandboxConfig } from './sandboxConfigForSdk.js';
 import { CLIENT_TOOL_SEARCH_REFERENCE_NAME, agentHostModelSupportsToolSearch } from './toolSearchDeferral.js';
 
@@ -964,7 +964,23 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		// An ephemeral session skips the explicit enumeration (and its file I/O). The SDK can
 		// still discover agents from `pluginDirectories`; suppressing that too would also drop
 		// skills and instructions, so it is left alone.
-		const customAgents = plan.isEphemeral ? [] : await toSdkSessionCustomAgents(plugins, plan.resolvedAgentName, this._fileService);
+		const sessionCustomAgents = plan.isEphemeral ? [] : await toSdkSessionCustomAgents(plugins, plan.resolvedAgentName, this._fileService);
+		// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's personal agents and
+		// skills (a plugin folder of this session only) and copilot-instructions.md. The SDK drops the
+		// agents of plugin folders (and of ~/.copilot) as soon as `customAgents` lists any, so then the
+		// personal agents are listed there as well.
+		const delegated = findDelegatedUserCustomizations(plan.workingDirectory?.fsPath);
+		const personalAgents = delegated?.copilotAgents && sessionCustomAgents.length && !plan.isEphemeral
+			? (await toSdkCustomAgents(delegated.copilotAgents.map(agent => ({ name: agent.name, uri: URI.file(agent.path) })), this._fileService)).filter(agent => !sessionCustomAgents.some(existing => existing.name === agent.name))
+			: [];
+		const customAgents = [...sessionCustomAgents, ...personalAgents];
+		const personalParts = [
+			...(delegated?.copilotPluginDir ? [`plugin folder ${delegated.copilotPluginDir}${delegated.copilotAgents?.length ? ` (${delegated.copilotAgents.length} agents${personalAgents.length ? ', also as custom agents' : ''})` : ''}`] : []),
+			...(delegated?.copilotInstructions ? ['copilot-instructions.md in the system message'] : []),
+		];
+		if (personalParts.length && plan.workingDirectory) {
+			this._logService.info(`[Copilot:${plan.sessionId}] ${describeDelegatedUserCustomizations(plan.workingDirectory.fsPath, personalParts)}`);
+		}
 		const skillDirectories = toSdkSkillDirectories(pluginsWithoutDirs.flatMap(p => p.skills));
 		const instructionDirectories = toSdkInstructionDirectories(plugins.flatMap(p => p.instructions));
 		const model = plan.kind === 'create' ? plan.model : plan.fallback.model;
@@ -1031,9 +1047,6 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		const baseSystemMessage = promptOverrides.systemPrompt !== undefined
 			? fullSystemPrompt(promptOverrides.systemPrompt)
 			: agentHostPromptRegistry.resolveSystemMessageConfig(effectiveModel, promptContext);
-		// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's personal agents and
-		// skills (a plugin folder of this session only) and copilot-instructions.md.
-		const delegated = findDelegatedUserCustomizations(plan.workingDirectory?.fsPath);
 		const systemMessage = delegated?.copilotInstructions ? appendSystemMessageContent(baseSystemMessage, formatDelegatedUserInstructions(delegated.copilotInstructions)) : baseSystemMessage;
 		this._logService.info(`[Copilot:${plan.sessionId}] Resolved system message: ${describeSystemMessageConfig(systemMessage)}`);
 		const additionalDisabledMcpServers = plan.isEphemeral ? [

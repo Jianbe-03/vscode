@@ -700,6 +700,8 @@ export class ClaudeAgentSession extends Disposable {
 			{
 				sessionId: this.sessionId,
 				workingDirectory: this.workingDirectory,
+				// CreaEditor: logs the personal customizations a delegated chat uses.
+				logInfo: message => this._logService.info(message),
 				additionalDirectories: this._appliedAdditionalDirectories,
 				model: this._provisionalModel,
 				abortController: this.abortController,
@@ -833,6 +835,8 @@ export class ClaudeAgentSession extends Disposable {
 					{
 						sessionId: this.sessionId,
 						workingDirectory: this.workingDirectory!,
+						// CreaEditor: logs the personal customizations a delegated chat uses.
+						logInfo: message => this._logService.info(message),
 						additionalDirectories: this._desiredAdditionalDirectories,
 						model: this._provisionalModel,
 						abortController: rebuildAbort,

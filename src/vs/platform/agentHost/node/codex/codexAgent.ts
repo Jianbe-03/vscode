@@ -49,7 +49,7 @@ import type { IAgentServerToolHost } from '../../common/agentServerTools.js';
 import { ActiveClientToolSet } from '../activeClientState.js';
 import { CodexChatDiscovery } from './codexChatDiscovery.js';
 import { parseDelegationAccountsResource, tryOpenServerDelegationAccounts } from '../creaeditorDelegation/delegationAccounts.js';
-import { findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
+import { describeDelegatedUserCustomizations, findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
 import { CodexChatHistory } from './codexChatHistory.js';
 import type { InitializeResponse } from './protocol/generated/InitializeResponse.js';
 import { applyMcpServerRuntimeStates, McpCustomizationController } from '../shared/mcpCustomizationController.js';
@@ -172,6 +172,9 @@ import { ensurePortableCodexProxyProvider } from './codexProviderConfiguration.j
 import { reportCodexProviderSwitch } from './codexProviderSwitchTelemetry.js';
 import { formatGuardianDenialNotification, formatGuardianReviewStatusNotification, summarizeGuardianReviewAction, toGuardianAssessmentEventJson } from './codexGuardianReview.js';
 import { CODEX_COMPACT_SLASH_COMMAND } from '../codexCompactCommand.js';
+
+/** CreaEditor: the Codex sessions whose personal customizations (Delegate to Server) were logged once. */
+const loggedDelegatedCustomizations = new WeakSet<object>();
 
 const CLIENT_INFO = {
 	name: 'vscode_agent_host',
@@ -2792,7 +2795,12 @@ export class CodexAgent extends Disposable implements IAgent {
 		]);
 		const customization = await codexCustomizationConfig(workspaceAgents.agents, plugins, session.agent, this._fileService);
 		// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's ~/.codex/AGENTS.md.
-		const delegatedInstructions = findDelegatedUserCustomizations(this._customizationWorkingDirectories(session)[0]?.fsPath)?.codexInstructions;
+		const delegatedDirectory = this._customizationWorkingDirectories(session)[0]?.fsPath;
+		const delegatedInstructions = findDelegatedUserCustomizations(delegatedDirectory)?.codexInstructions;
+		if (delegatedInstructions && delegatedDirectory && !loggedDelegatedCustomizations.has(session)) {
+			loggedDelegatedCustomizations.add(session);
+			this._logService.info(`[Codex] ${describeDelegatedUserCustomizations(delegatedDirectory, ['AGENTS.md in the developer instructions'])}`);
+		}
 		const developerInstructions = [
 			customization.developerInstructions,
 			session.managedWorkingDirectory ? AGENT_HOST_WORKSPACELESS_INSTRUCTIONS : '',

@@ -119,6 +119,7 @@ suite('CreaEditor Delegation - personal agents, skills and instructions', () => 
 				claudePluginDir: join(root, 'd1', 'claude'),
 				claudeMemory: 'Always answer in Dutch.',
 				copilotPluginDir: join(root, 'd1', 'copilot'),
+				copilotAgents: [{ name: 'planner', path: join(root, 'd1', 'copilot', 'agents', 'planner.agent.md') }],
 				copilotInstructions: 'Use tabs.',
 				codexInstructions: 'Be brief.',
 			},

@@ -24,7 +24,7 @@ import { McpServerType } from '../../../mcp/common/mcpPlatformTypes.js';
 import type { IMcpServerDefinition } from '../../../agentPlugins/common/pluginParsers.js';
 import { isEqual } from '../../../../base/common/resources.js';
 import { resolveMcpServerWorkingDirectory } from '../shared/mcpServerWorkingDirectory.js';
-import { findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
+import { describeDelegatedUserCustomizations, findDelegatedUserCustomizations, formatDelegatedUserInstructions } from '../creaeditorDelegation/delegationUserCustomizations.js';
 
 type ClaudeSdkDeniedMcpServerSpec = NonNullable<Settings['deniedMcpServers']>[number];
 
@@ -43,6 +43,8 @@ export type ClaudeDeniedMcpServerSpec =
 export interface IBuildOptionsInput {
 	readonly sessionId: string;
 	readonly workingDirectory: URI;
+	/** CreaEditor: an info log line (the personal customizations a delegated chat uses). */
+	readonly logInfo?: (message: string) => void;
 	/**
 	 * Additional directories (index 1..N of the session's ordered set) the agent
 	 * is granted tool access to beyond the primary {@link workingDirectory}
@@ -177,6 +179,13 @@ export async function buildOptions(
 	// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's personal agents,
 	// skills and commands (a plugin of this session only) and CLAUDE.md (appended to its system prompt).
 	const delegated = findDelegatedUserCustomizations(input.workingDirectory.fsPath);
+	const personalParts = [
+		...(delegated?.claudePluginDir ? [`plugin ${delegated.claudePluginDir}`] : []),
+		...(delegated?.claudeMemory ? ['CLAUDE.md appended to the system prompt'] : []),
+	];
+	if (personalParts.length) {
+		input.logInfo?.(`[Claude] session ${input.sessionId}: ${describeDelegatedUserCustomizations(input.workingDirectory.fsPath, personalParts)}`);
+	}
 	const plugins = [
 		...(input.plugins ?? []).map(plugin => ({ type: 'local' as const, path: plugin.uri.fsPath, skipMcpDiscovery: plugin.skipMcpDiscovery })),
 		...(delegated?.claudePluginDir ? [{ type: 'local' as const, path: delegated.claudePluginDir, skipMcpDiscovery: true }] : []),
