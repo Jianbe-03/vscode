@@ -257,6 +257,11 @@ function getRemoteModelId(session: ISession, authority: string): string | undefi
 	return provider && modelId && colon > 0 ? `${remoteAgentHostSessionTypeId(authority, provider)}:${modelId.slice(colon + 1)}` : undefined;
 }
 
+/** The folder of a server's bare repositories, next to its worktrees folder (`<data>/repos`, `<data>/worktrees`). */
+function getServerRepositoriesDir(worktreesDir: string): string {
+	return posix.join(posix.dirname(worktreesDir), 'repos');
+}
+
 /**
  * Trusts folders of a server for its chats: the code in a delegated chat's worktree is this computer's
  * own, so its chats open without the workspace trust question.
@@ -482,7 +487,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 	// The worktree holds this computer's own code: trust it like the folder it came from, and the
 	// server's folder of delegated worktrees (a chat there may work in a worktree next to it). Before
 	// connecting, so the chat's first message never asks.
-	await trustServerWorktrees(workspaceTrustManagementService, agentHostAuthority(serversService.getAgentHostAddress(server)), [serverInfo.worktreesDir, result.record.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
+	await trustServerWorktrees(workspaceTrustManagementService, agentHostAuthority(serversService.getAgentHostAddress(server)), [serverInfo.worktreesDir, serverInfo.repositoriesDir ?? getServerRepositoriesDir(serverInfo.worktreesDir), result.record.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
 	const connected = await instantiationService.invokeFunction(innerAccessor => getServerConnection(innerAccessor, server));
 	let remoteResource: URI | undefined;
 	let transcriptOnly = !result.sessionFilesSent;
@@ -715,7 +720,7 @@ async function openOnServerAction(accessor: ServicesAccessor, context: Delegatio
 	const server = serversService.servers.get().find(candidate => candidate.id === chat.serverId);
 	const authority = server ? agentHostAuthority(serversService.getAgentHostAddress(server)) : undefined;
 	if (authority && chat.worktree) {
-		await trustServerWorktrees(workspaceTrustManagementService, authority, [posix.dirname(chat.worktree), chat.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
+		await trustServerWorktrees(workspaceTrustManagementService, authority, [posix.dirname(chat.worktree), getServerRepositoriesDir(posix.dirname(chat.worktree)), chat.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
 	}
 	let resource = chat.remoteSessionResource ? URI.parse(chat.remoteSessionResource) : undefined;
 	if (!resource && authority) {

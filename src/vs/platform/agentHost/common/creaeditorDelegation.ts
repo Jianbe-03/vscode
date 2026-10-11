@@ -219,6 +219,8 @@ export interface IDelegationServerKeyResponse {
 	readonly hasGh: boolean;
 	/** The server's data folder layout: where worktrees go (to show the user). */
 	readonly worktreesDir: string;
+	/** Where the server keeps the bare repositories of delegated code (new chats there work in them). Older servers omit it. */
+	readonly repositoriesDir?: string;
 	/** The home folder of the agent host's user, where agents keep their sessions. */
 	readonly agentHome: string;
 }

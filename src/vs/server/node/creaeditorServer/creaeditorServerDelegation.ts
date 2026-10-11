@@ -219,6 +219,7 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 			hasGitHubToken: this._store.has(CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME),
 			hasGh: await this._hasGh,
 			worktreesDir: this._options.layout.worktrees,
+			repositoriesDir: this._options.layout.repos,
 			agentHome: homedir(),
 		};
 	}
