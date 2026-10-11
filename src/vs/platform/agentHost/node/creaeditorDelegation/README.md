@@ -35,12 +35,18 @@ The server's Remote Access HTTP API with this device's key (`Authorization: Bear
 | `GET delegations/<id>` | The record |
 | `POST delegations/<id>/session` | Installs session files (Claude `projects/...` in the Claude config folder, Codex `sessions/...` in `CODEX_HOME`, Copilot CLI `session-state/<id>/...` in the Copilot home); the record gets `resumeSessionId`. A chat delegated again after Take Back Here still has its first copy there (archived, maybe running): that copy stays untouched and the new one is installed under a fresh session id (paths and ids in its text rewritten), answered as `resumeSessionId` with the laptop's id as `sourceSessionId` |
 | `DELETE delegations/<id>` | Abandons a delegation whose later step failed on the laptop: removes its worktree, branch and record. Only the device that created it, within 30 minutes, before session files arrived |
+| `DELETE delegations/<id>?force=1` | Clean Up Server...: removes the worktree, branch, base ref and record whatever their state; any paired device (they are all the server owner's) |
+| `GET worktrees` | `{ worktrees }`: every delegated chat's worktree with its size, chat state (running, archived, deleted, unknown), whether its work is safe and when the server removes it |
 | `POST delegations/<id>/results` `{ knownCommits }` | `{ commit, downloadId?, bytes, includesUncommitted }` |
 | `GET downloads/<id>` | The result bundle (removed after download) |
 | `POST delegations/<id>/pull-request` | `{ url }` |
 | `PUT github-token` `{ token }` | Empty removes it |
 
 Errors are `{ error: <DelegationErrorCode>, message }`.
+
+## Cleanup
+
+`creaeditorServerWorktreeCleanup.ts` (server front) removes worktrees it no longer needs: at once when the chat is deleted on the server, 7 days after it was archived, 30 days after delegating when no chat works in it; except for deletion only while the work is safe (the worktree's tree, uncommitted changes included, equals `initialTree`, `broughtBackTree` or `pushedTree` of the record). The front learns the chats from the agent host over its unix socket as an ordinary AHP client (`creaeditorServerSessions.ts`: `initialize`, paged `listSessions`, `root/sessionAdded|Removed|SummaryChanged`). A sweep runs when the agent host starts and every 4 hours.
 
 ## Server data
 

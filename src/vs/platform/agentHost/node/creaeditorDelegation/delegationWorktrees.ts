@@ -10,9 +10,10 @@
 // (Bring Back Changes) or as a pull request (Open PR from the Server).
 
 import * as fs from 'fs';
+import { isEqual, isEqualOrParent } from '../../../../base/common/extpath.js';
 import { join } from '../../../../base/common/path.js';
 import { CREAEDITOR_DELEGATION_BRANCH_PREFIX, DelegationErrorCode, slugifyDelegationName } from '../../common/creaeditorDelegation.js';
-import { bundleFetchRefspecs, DelegationError, filterExistingCommits, snapshotWorkingTree } from './delegationPack.js';
+import { bundleFetchRefspecs, DelegationError, filterExistingCommits, snapshotWorkingTree, writeWorkingTreeTree } from './delegationPack.js';
 import { delegationCommitIdentity, git, gitSucceeds, IDelegationProcessRunner, nodeDelegationProcessRunner } from './delegationProcess.js';
 import { readDelegationRepositoryName, writeDelegationRepositoryName } from './delegationRepositoryName.js';
 
@@ -210,18 +211,30 @@ export function nameExistingDelegationRepositories(layout: IDelegationStoreLayou
 	}
 }
 
-/** Removes the worktree of a delegated chat and its branch (when the user deletes the chat on the server). */
+/**
+ * Removes the worktree of a delegated chat, its branch and its base ref (a delegation that failed
+ * half-way, the user deleted the chat on the server, or the server cleans up a worktree whose work is
+ * safe). Only the worktree in the server's worktrees folder is ever removed.
+ */
 export async function removeDelegationWorktree(layout: IDelegationStoreLayout, repoId: string, delegationId: string, shortId: string, worktree: string, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<void> {
 	const bare = getBareRepositoryPath(layout, repoId);
-	await runner.run('git', ['worktree', 'remove', '--force', worktree], { cwd: bare });
+	const inWorktreesFolder = isEqualOrParent(worktree, layout.worktrees) && !isEqual(worktree, layout.worktrees);
+	if (inWorktreesFolder) {
+		await runner.run('git', ['worktree', 'remove', '--force', worktree], { cwd: bare });
+	}
 	await runner.run('git', ['branch', '-D', getDelegationBranch(shortId)], { cwd: bare });
 	await runner.run('git', ['update-ref', '-d', `refs/creaeditor/base/${delegationId}`], { cwd: bare });
-	fs.rmSync(worktree, { recursive: true, force: true });
+	if (inWorktreesFolder) {
+		fs.rmSync(worktree, { recursive: true, force: true });
+	}
+	await runner.run('git', ['worktree', 'prune'], { cwd: bare });
 }
 
 export interface IResultBundle {
 	/** The commit the laptop's branch should point at (includes uncommitted work as a last commit). */
 	readonly commit: string;
+	/** The tree of {@link commit}: the worktree's state as it was brought back. */
+	readonly tree: string;
 	/** Undefined when the laptop already has {@link commit}. */
 	readonly bundleFile?: string;
 	readonly bytes: number;
@@ -242,7 +255,7 @@ export async function createResultBundle(worktree: string, options: { readonly k
 	const exclusions = known.map(commit => `^${commit}`);
 	const missing = Number((await git(runner, worktree, ['rev-list', '--count', snapshot.commit, ...exclusions])).trim());
 	if (missing === 0) {
-		return { commit: snapshot.commit, bytes: 0, includesUncommitted: snapshot.changed };
+		return { commit: snapshot.commit, tree: snapshot.tree, bytes: 0, includesUncommitted: snapshot.changed };
 	}
 	const ref = RESULT_BUNDLE_REF;
 	try {
@@ -251,7 +264,32 @@ export async function createResultBundle(worktree: string, options: { readonly k
 	} finally {
 		await runner.run('git', ['update-ref', '-d', ref], { cwd: worktree });
 	}
-	return { commit: snapshot.commit, bundleFile: options.outFile, bytes: fs.statSync(options.outFile).size, includesUncommitted: snapshot.changed };
+	return { commit: snapshot.commit, tree: snapshot.tree, bundleFile: options.outFile, bytes: fs.statSync(options.outFile).size, includesUncommitted: snapshot.changed };
+}
+
+/**
+ * The tree a delegated chat's worktree has now, uncommitted changes and untracked files included
+ * (secret-looking untracked files left out, like Bring Back Changes does); undefined when the
+ * worktree is gone or is no git worktree any more.
+ */
+export async function readDelegationWorktreeTree(worktree: string, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<string | undefined> {
+	if (!fs.existsSync(worktree)) {
+		return undefined;
+	}
+	try {
+		return (await writeWorkingTreeTree(worktree, false, runner)).tree;
+	} catch {
+		return undefined;
+	}
+}
+
+/** The tree of a commit in the repository at `cwd`; undefined when the commit is not there. */
+export async function readCommitTree(cwd: string, commit: string, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<string | undefined> {
+	if (!COMMIT_PATTERN.test(commit)) {
+		return undefined;
+	}
+	const result = await runner.run('git', ['rev-parse', '-q', '--verify', `${commit}^{tree}`], { cwd });
+	return result.code === 0 ? result.stdout.trim() : undefined;
 }
 
 /**

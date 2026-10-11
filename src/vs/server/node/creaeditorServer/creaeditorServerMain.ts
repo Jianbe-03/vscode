@@ -31,6 +31,8 @@ import { callCreaEditorServerAdmin, createCreaEditorServerStatus, ICreaEditorSer
 import { CreaEditorAgentHost } from './creaeditorServerAgentHost.js';
 import { createCreaEditorServerApi } from './creaeditorServerApi.js';
 import { CreaEditorDelegationApi, getCreaEditorDelegationLayout } from './creaeditorServerDelegation.js';
+import { AgentHostSessionsWatcher } from './creaeditorServerSessions.js';
+import { DelegationWorktreeCleanup } from './creaeditorServerWorktreeCleanup.js';
 import { ensureCreaEditorServerDataDir, getCreaEditorServerDataLayout, ICreaEditorServerDataLayout, ICreaEditorServerRuntimeInfo, readCreaEditorServerRuntimeInfo, writePrivateFile } from './creaeditorServerDataDir.js';
 import { CREAEDITOR_SERVER_USAGE, CreaEditorServerOptionsError, ICreaEditorServerOptions, parseCreaEditorServerOptions } from './creaeditorServerOptions.js';
 import { formatPairingText, getPairingLink, renderTerminalQrCode } from './creaeditorServerPairing.js';
@@ -95,7 +97,17 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 	new FileSecretStore(layout.secrets);
 	// CreaEditor: the code receiver of Delegate to Server; its key pair exists before the agent host
 	// starts, which reads it to open the accounts of delegated chats.
-	const delegationApi = new CreaEditorDelegationApi({ layout: getCreaEditorDelegationLayout(layout.root, layout.secrets), serverName: os.hostname(), logService });
+	// CreaEditor: the front follows the agent host's chats over its socket (the cleanup of delegated
+	// worktrees and Clean Up Server... need their archived state); the agent host starts below.
+	let agentHostForSessions: CreaEditorAgentHost | undefined;
+	const sessions = new AgentHostSessionsWatcher(async () => {
+		if (!agentHostForSessions) {
+			throw new Error('The agent host is not started yet.');
+		}
+		await agentHostForSessions.whenRunning();
+		return agentHostForSessions.socketPath;
+	}, logService);
+	const delegationApi = new CreaEditorDelegationApi({ layout: getCreaEditorDelegationLayout(layout.root, layout.secrets), serverName: os.hostname(), logService, sessions });
 	await delegationApi.getKeyPair();
 
 	log(`CreaEditor Server ${version()} starting; data in ${layout.root}`);
@@ -114,6 +126,17 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 		log,
 	});
 	await agentHost.start();
+	agentHostForSessions = agentHost;
+	const cleanup = new DelegationWorktreeCleanup(delegationApi, sessions, logService);
+	sessions.start();
+	cleanup.scheduleSweep();
+	// After a restart its chat list may have changed while nobody listened.
+	agentHost.onDidChangeState(state => {
+		if (state === 'running') {
+			sessions.start();
+			cleanup.scheduleSweep();
+		}
+	});
 
 	const auth = await RemoteAccessAuth.create(layout.remoteAccess, logService);
 	const webRoot = findWebRoot();
@@ -165,6 +188,8 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 			getHealthDetails,
 		});
 	} catch (error) {
+		cleanup.dispose();
+		sessions.dispose();
 		await agentHost.stop();
 		auth.dispose();
 		throw error;
@@ -223,6 +248,8 @@ async function serve(options: ICreaEditorServerOptions): Promise<void> {
 		stopping = true;
 		log(`Stopping (${signal})...`);
 		admin.dispose();
+		cleanup.dispose();
+		sessions.dispose();
 		await front.close();
 		await agentHost.stop();
 		agentHost.dispose();

@@ -12,7 +12,7 @@ import { homedir, tmpdir } from 'os';
 import { pipeline } from 'stream';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { join } from '../../../../base/common/path.js';
-import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, DelegationAgentKind, DelegationErrorCode, DelegationProgressStage, IBringBackRequest, IBringBackResult, IDelegateRequest, IDelegateResult, IDelegationAccountsPayload, IDelegationCreateRequest, IDelegationEnvelope, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationServerTarget, IDelegationSessionRequest, IDelegationUploadResponse } from '../../common/creaeditorDelegation.js';
+import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, DelegationAgentKind, DelegationErrorCode, DelegationProgressStage, IBringBackRequest, IBringBackResult, IDelegateRequest, IDelegateResult, IDelegationAccountsPayload, IDelegationCreateRequest, IDelegationEnvelope, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationServerTarget, IDelegationSessionRequest, IDelegationUploadResponse, IDelegationWorktreeInfo, IDelegationWorktreesResponse } from '../../common/creaeditorDelegation.js';
 import { sealDelegationPayload } from './delegationCrypto.js';
 import { DelegationError, packWorkspace, readDelegationRepository } from './delegationPack.js';
 import { IDelegationProcessRunner, nodeDelegationProcessRunner } from './delegationProcess.js';
@@ -187,6 +187,16 @@ export class DelegationHttpClient {
 	/** Removes a delegation whose later steps failed (its worktree, branch and record on the server). */
 	async abandon(delegationId: string): Promise<void> {
 		await this._json('DELETE', `delegations/${delegationId}`, undefined, false);
+	}
+
+	/** The server's worktrees of delegated chats, with their state (Clean Up Server...). */
+	async listWorktrees(): Promise<readonly IDelegationWorktreeInfo[]> {
+		return (await this._json<IDelegationWorktreesResponse>('GET', 'worktrees')).worktrees;
+	}
+
+	/** Removes a delegated chat's worktree, branch and record on the server, whatever its state (Clean Up Server...). */
+	async removeDelegation(delegationId: string): Promise<void> {
+		await this._json('DELETE', `delegations/${delegationId}?force=1`, undefined, false);
 	}
 
 	results(delegationId: string, knownCommits: readonly string[]): Promise<IDelegationResultsResponse> {

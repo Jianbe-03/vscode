@@ -15,7 +15,7 @@ import { homedir } from 'os';
 import { generateUuid } from '../../../base/common/uuid.js';
 import { join } from '../../../base/common/path.js';
 import { ILogService } from '../../../platform/log/common/log.js';
-import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationSessionFile, IDelegationSessionRequest, IDelegationUploadResponse } from '../../../platform/agentHost/common/creaeditorDelegation.js';
+import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationSessionFile, IDelegationSessionRequest, IDelegationUploadResponse, IDelegationWorktreeInfo, IDelegationWorktreesResponse } from '../../../platform/agentHost/common/creaeditorDelegation.js';
 import { getDelegationSecretsDir } from '../../../platform/agentHost/node/creaeditorDelegation/delegationAccounts.js';
 import { generateDelegationKeyPair, IDelegationKeyPair } from '../../../platform/agentHost/node/creaeditorDelegation/delegationCrypto.js';
 import { DelegationError } from '../../../platform/agentHost/node/creaeditorDelegation/delegationPack.js';
@@ -23,10 +23,12 @@ import { IDelegationProcessRunner, nodeDelegationProcessRunner } from '../../../
 import { getClaudeConfigDir, getCopilotCliHome, hasInstalledSession, installSessionFiles, renameSessionFiles } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
 import { resolveDefaultCodexHome } from '../../../platform/agentHost/node/codex/codexAccountHomes.js';
 import { AgentHostCodexAgentCodexHomeEnvVar } from '../../../platform/agentHost/common/agentService.js';
-import { assertDelegationId, createResultBundle, IDelegationStoreLayout, listKnownCommits, nameExistingDelegationRepositories, openPullRequestFromServer, prepareDelegationWorktree, removeDelegationWorktree } from '../../../platform/agentHost/node/creaeditorDelegation/delegationWorktrees.js';
+import { assertDelegationId, createResultBundle, getBareRepositoryPath, IDelegationStoreLayout, listKnownCommits, nameExistingDelegationRepositories, openPullRequestFromServer, prepareDelegationWorktree, readCommitTree, readDelegationWorktreeTree, removeDelegationWorktree } from '../../../platform/agentHost/node/creaeditorDelegation/delegationWorktrees.js';
 import { FileSecretStore } from '../../../platform/agentHost/node/shared/fileSecretStore.js';
 import type { IRemoteAccessApiHandler } from '../../../platform/agentHost/node/remoteAccess/remoteAccessServer.js';
 import type { IRemoteAccessDevice } from '../../../platform/agentHost/node/remoteAccess/remoteAccessAuth.js';
+import type { ICreaEditorServerSessionsSource } from './creaeditorServerSessions.js';
+import { findDelegationChats, getDelegationChatState, IDelegationCleanupHost, isDelegationWorkSafe, planDelegationCleanup } from './creaeditorServerWorktreeCleanup.js';
 
 /** The largest upload (one bundle). */
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024;
@@ -79,6 +81,10 @@ export interface ICreaEditorDelegationApiOptions {
 	readonly codexHome?: string;
 	/** The Copilot CLI home of the agent host (default: `COPILOT_HOME` or `~/.copilot`). */
 	readonly copilotHome?: string;
+	/** The chats of the agent host, for the state of delegated chats (Clean Up Server...). */
+	readonly sessions?: ICreaEditorServerSessionsSource;
+	/** Replaces the clock, for tests. */
+	readonly now?: () => number;
 }
 
 class HttpError extends Error {
@@ -88,7 +94,7 @@ class HttpError extends Error {
 }
 
 /** The `/api/delegation/` routes of a CreaEditor Server. */
-export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
+export class CreaEditorDelegationApi implements IRemoteAccessApiHandler, IDelegationCleanupHost {
 
 	readonly prefix = CREAEDITOR_DELEGATION_API_PREFIX;
 
@@ -100,6 +106,8 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 	private readonly _repoQueues = new Map<string, Promise<unknown>>();
 	private _keyPair: Promise<IDelegationKeyPair> | undefined;
 	private _hasGh: Promise<boolean> | undefined;
+	/** Result bundles not downloaded yet: what the laptop has once it downloaded one. */
+	private readonly _pendingDownloads = new Map<string, { readonly delegationId: string; readonly commit: string; readonly tree: string }>();
 
 	constructor(private readonly _options: ICreaEditorDelegationApiOptions) {
 		this._runner = _options.runner ?? nodeDelegationProcessRunner;
@@ -118,18 +126,7 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 
 	/** Bare repositories from before they kept their repository's name get it from their chats' worktree folders. */
 	private _nameExistingRepositories(): void {
-		const records: IDelegationRecord[] = [];
-		for (const name of fs.readdirSync(this._options.layout.delegations)) {
-			if (!name.endsWith('.json')) {
-				continue;
-			}
-			try {
-				records.push(JSON.parse(fs.readFileSync(join(this._options.layout.delegations, name), 'utf8')) as IDelegationRecord);
-			} catch {
-				// Not a record.
-			}
-		}
-		nameExistingDelegationRepositories(this._options.layout, records.filter(record => typeof record?.repoId === 'string' && typeof record.shortId === 'string' && typeof record.worktree === 'string'));
+		nameExistingDelegationRepositories(this._options.layout, this.listRecords());
 	}
 
 	/** The key pair (created on first use). Call once at startup so the agent host can read it. */
@@ -176,6 +173,9 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 				assertDelegationId(parts[1], 'download id');
 				return this._sendDownload(response, parts[1]);
 			}
+			if (method === 'GET' && path === 'worktrees') {
+				return sendJson(response, 200, { worktrees: await this._listWorktrees() } satisfies IDelegationWorktreesResponse);
+			}
 			if (method === 'POST' && path === 'delegations') {
 				const record = await this._create(await readJson<IDelegationCreateRequest>(request), device);
 				return sendJson(response, 200, record);
@@ -187,7 +187,16 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 					return sendJson(response, 200, record);
 				}
 				if (method === 'DELETE' && parts.length === 2) {
-					await this._abandon(record, device);
+					if (url.searchParams.get('force') === '1') {
+						// Clean Up Server...: any paired device may remove any delegated chat's worktree, not
+						// only the one that delegated it. A CreaEditor Server belongs to one person: every
+						// paired device is that person's (pairing takes the server's pairing code, and its
+						// password when public), so a chat delegated from the laptop can be cleaned up from
+						// the desktop or the phone. The laptop asks first and warns when work would be lost.
+						await this.removeDelegation(record, `removed by device "${device.name}" (Clean Up Server)`);
+					} else {
+						await this._abandon(record, device);
+					}
 					return sendJson(response, 200, {});
 				}
 				if (method === 'POST' && parts[2] === 'session' && parts.length === 3) {
@@ -324,6 +333,8 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 		if (bundleFile) {
 			fs.rmSync(bundleFile, { force: true });
 		}
+		// What the worktree held when the chat arrived: removing it while it still holds that loses nothing.
+		const initialTree = await this._inRepo(body.repoId, () => readDelegationWorktreeTree(prepared.worktree, this._runner));
 		const record: IDelegationRecord = {
 			delegationId: body.delegationId,
 			shortId: body.shortId,
@@ -336,8 +347,9 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 			agent: body.agent,
 			title: String(body.title).slice(0, 200),
 			sourceName: typeof body.sourceName === 'string' ? body.sourceName.slice(0, 100) : device.name,
-			createdAt: Date.now(),
+			createdAt: this._now(),
 			deviceId: device.id,
+			...(initialTree ? { initialTree } : {}),
 			...(typeof body.remoteUrl === 'string' && body.remoteUrl ? { remoteUrl: body.remoteUrl } : {}),
 			...(typeof body.defaultBranch === 'string' && body.defaultBranch ? { defaultBranch: body.defaultBranch } : {}),
 		};
@@ -407,7 +419,7 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 	 */
 	private async _abandon(record: IDelegationRecord, device: IRemoteAccessDevice): Promise<void> {
 		// Installed session files mean the chat may be imported here already: then it stays.
-		if (record.deviceId !== device.id || Date.now() - record.createdAt > ABANDON_WINDOW_MS || record.resumeSessionId || record.pullRequestUrl) {
+		if (record.deviceId !== device.id || this._now() - record.createdAt > ABANDON_WINDOW_MS || record.resumeSessionId || record.pullRequestUrl) {
 			throw new HttpError(409, DelegationErrorCode.InvalidRequest, 'This delegated chat can no longer be removed this way.');
 		}
 		await this._inRepo(record.repoId, () => removeDelegationWorktree(this._options.layout, record.repoId, record.delegationId, record.shortId, record.worktree, this._runner));
@@ -419,6 +431,12 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 		const downloadId = generateUuid().replace(/-/g, '');
 		const outFile = join(this._downloads, `${downloadId}.bundle`);
 		const result = await this._inRepo(record.repoId, () => createResultBundle(record.worktree, { knownCommits: [record.baseCommit, ...knownCommits], outFile, serverName: this._options.serverName }, this._runner));
+		if (result.bundleFile) {
+			this._pendingDownloads.set(downloadId, { delegationId: record.delegationId, commit: result.commit, tree: result.tree });
+		} else {
+			// The laptop has this commit already.
+			this._noteBroughtBack(record.delegationId, result.commit, result.tree);
+		}
 		return {
 			commit: result.commit,
 			bytes: result.bytes,
@@ -439,6 +457,39 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 		const stream = fs.createReadStream(file);
 		stream.pipe(response);
 		stream.on('close', () => fs.rmSync(file, { force: true }));
+		// The whole bundle went out: the laptop has the work as it was then.
+		response.on('finish', () => {
+			const pending = this._pendingDownloads.get(downloadId);
+			this._pendingDownloads.delete(downloadId);
+			if (pending) {
+				this._noteBroughtBack(pending.delegationId, pending.commit, pending.tree);
+			}
+		});
+	}
+
+	private _noteBroughtBack(delegationId: string, commit: string, tree: string): void {
+		this._updateRecord(delegationId, { broughtBackCommit: commit, broughtBackTree: tree, broughtBackAt: this._now() });
+	}
+
+	private _now(): number {
+		return (this._options.now ?? Date.now)();
+	}
+
+	/** Changes a record (read again first: another request may have changed it); nothing when it is gone. */
+	private _updateRecord(delegationId: string, changes: Partial<IDelegationRecord>): void {
+		let record: IDelegationRecord;
+		try {
+			record = this._readRecord(delegationId);
+		} catch {
+			return;
+		}
+		const updated: Record<string, unknown> = { ...record, ...changes };
+		for (const key of Object.keys(changes)) {
+			if (updated[key] === undefined) {
+				delete updated[key];
+			}
+		}
+		this._writeRecord(updated as unknown as IDelegationRecord);
 	}
 
 	private async _openPullRequest(record: IDelegationRecord, title: string | undefined, body: string | undefined): Promise<IDelegationPullRequestResponse> {
@@ -456,8 +507,105 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 			token,
 			serverName: this._options.serverName,
 		}, this._runner));
-		this._writeRecord({ ...this._readRecord(record.delegationId), pullRequestUrl: url });
+		// The pushed branch has the worktree's whole state now (open PR committed its uncommitted changes).
+		const pushed = await this._inRepo(record.repoId, async () => {
+			const tree = await readDelegationWorktreeTree(record.worktree, this._runner);
+			const head = await this._runner.run('git', ['rev-parse', 'HEAD'], { cwd: record.worktree });
+			return { tree, commit: head.code === 0 ? head.stdout.trim() : undefined };
+		});
+		this._updateRecord(record.delegationId, { pullRequestUrl: url, ...(pushed.tree && pushed.commit ? { pushedCommit: pushed.commit, pushedTree: pushed.tree, pushedAt: this._now() } : {}) });
 		return { url };
+	}
+
+	// --- Cleanup of worktrees (see creaeditorServerWorktreeCleanup.ts) ---
+
+	listRecords(): readonly IDelegationRecord[] {
+		const records: IDelegationRecord[] = [];
+		for (const name of fs.readdirSync(this._options.layout.delegations)) {
+			if (!name.endsWith('.json')) {
+				continue;
+			}
+			try {
+				const record = JSON.parse(fs.readFileSync(join(this._options.layout.delegations, name), 'utf8')) as IDelegationRecord;
+				if (typeof record?.delegationId === 'string' && typeof record.worktree === 'string' && typeof record.repoId === 'string' && typeof record.shortId === 'string') {
+					records.push(record);
+				}
+			} catch {
+				// Not a record.
+			}
+		}
+		return records;
+	}
+
+	getWorktreePaths(record: IDelegationRecord): readonly string[] {
+		const real = realPath(record.worktree);
+		return real !== record.worktree ? [record.worktree, real] : [record.worktree];
+	}
+
+	async isWorkSafe(record: IDelegationRecord): Promise<boolean> {
+		return this._inRepo(record.repoId, async () => {
+			const bare = getBareRepositoryPath(this._options.layout, record.repoId);
+			// Records from before the server noted the first state: the laptop's commit (only right when
+			// no uncommitted changes came along, so a chat that brought some counts as changed).
+			const initialTree = record.initialTree ?? await readCommitTree(bare, record.baseCommit, this._runner);
+			const withInitial = { ...record, ...(initialTree ? { initialTree } : {}) };
+			if (fs.existsSync(record.worktree)) {
+				const tree = await readDelegationWorktreeTree(record.worktree, this._runner);
+				return tree !== undefined && isDelegationWorkSafe(withInitial, tree);
+			}
+			// The worktree folder is gone; its branch may still have commits.
+			const branch = await this._runner.run('git', ['rev-parse', '-q', '--verify', `refs/heads/${record.branch}^{tree}`], { cwd: bare });
+			return isDelegationWorkSafe(withInitial, branch.code === 0 ? branch.stdout.trim() : undefined);
+		});
+	}
+
+	updateNotes(delegationId: string, notes: Pick<IDelegationRecord, 'chatSeenAt' | 'archivedSeenAt'>): void {
+		this._updateRecord(delegationId, notes);
+	}
+
+	async removeDelegation(record: IDelegationRecord, reason: string): Promise<void> {
+		await this._inRepo(record.repoId, () => removeDelegationWorktree(this._options.layout, record.repoId, record.delegationId, record.shortId, record.worktree, this._runner));
+		fs.rmSync(this._recordFile(record.delegationId), { force: true });
+		this._options.logService.info(`[Delegation] Removed the worktree ${record.worktree} (${record.branch}) of "${record.title}" from ${record.sourceName}: ${reason}`);
+	}
+
+	private async _listWorktrees(): Promise<IDelegationWorktreeInfo[]> {
+		const sessions = await this._options.sessions?.listSessions();
+		const now = this._now();
+		const worktrees: IDelegationWorktreeInfo[] = [];
+		for (const record of [...this.listRecords()].sort((a, b) => b.createdAt - a.createdAt)) {
+			const chatState = getDelegationChatState(sessions && findDelegationChats(record, this.getWorktreePaths(record), sessions));
+			const workSafe = await this.isWorkSafe(record).catch(() => false);
+			const plan = planDelegationCleanup(record, chatState, workSafe, now);
+			const bytes = await this._diskUse(record.worktree);
+			worktrees.push({
+				delegationId: record.delegationId,
+				shortId: record.shortId,
+				title: record.title,
+				sourceName: record.sourceName,
+				createdAt: record.createdAt,
+				worktree: record.worktree,
+				branch: record.branch,
+				chatState,
+				workSafe,
+				...(bytes !== undefined ? { bytes } : {}),
+				...(plan.notes?.archivedSeenAt ?? record.archivedSeenAt ? { archivedSince: plan.notes?.archivedSeenAt ?? record.archivedSeenAt } : {}),
+				...(record.broughtBackAt ? { broughtBackAt: record.broughtBackAt } : {}),
+				...(record.pullRequestUrl ? { pullRequestUrl: record.pullRequestUrl } : {}),
+				...(plan.removeAfter !== undefined ? { removeAfter: plan.removeAfter } : {}),
+			});
+		}
+		return worktrees;
+	}
+
+	/** The disk use of a folder (`du -sk`); undefined when unknown. */
+	private async _diskUse(folder: string): Promise<number | undefined> {
+		if (!fs.existsSync(folder)) {
+			return 0;
+		}
+		const result = await this._runner.run('du', ['-sk', folder], { cwd: this._options.layout.delegations });
+		const kilobytes = result.code === 0 ? Number(/^\d+/.exec(result.stdout.trim())?.[0]) : NaN;
+		return Number.isFinite(kilobytes) ? kilobytes * 1024 : undefined;
 	}
 
 	private _removeStaleTransfers(): void {

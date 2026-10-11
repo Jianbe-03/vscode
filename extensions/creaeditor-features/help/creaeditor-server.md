@@ -85,7 +85,7 @@ Run **CreaEditor Servers** (Command Palette, or **Manage** in the folder picker)
 - **Online** or **Offline** (with when it was last seen), its version, and the CPU and memory of the server machine.
 - Running and queued chats, such as "3 of 4 chats running · 2 queued", and whether it is public.
 
-Click a server for its actions: **Open in Browser**, **Pair Phone**, **Sign In to an Account on This Server...**, **Check Now** and **Remove** (signs this computer out of the server and forgets its key; the server keeps running).
+Click a server for its actions: **Open in Browser**, **Pair Phone**, **Sign In to an Account on This Server...**, **Clean Up Server...** (see [When the server removes a worktree](#when-the-server-removes-a-worktree)), **Check Now** and **Remove** (signs this computer out of the server and forgets its key; the server keeps running).
 
 ### Pair your phone with the server
 
@@ -140,6 +140,14 @@ The server's chats stay open while it needs pairing and reconnect with the new k
 ### Several chats at once
 
 The server runs several chats at the same time, each in its own worktree. To keep the machine responsive it runs at most 4 at once (`--max-running-chats`). A chat you send while that many run waits and shows "Queued on *Office Server* (2 ahead)", then starts by itself when another one finishes. Stopping a queued chat takes it out of the queue.
+
+### When the server removes a worktree
+
+Every delegated chat gets its own worktree in the server's data folder (`worktrees/<repository>-<id>`, on the branch `creaeditor/delegated/<id>`). The server removes it, with its branch and record, when you delete the chat on the server, 7 days after the chat was archived (Take Back Here archives it), or 30 days after it was delegated when no chat on the server works in it any more. Except when you delete the chat, it only does so while the worktree's latest work is safe: brought back to your laptop, pushed in a pull request, or never changed. The server checks when it starts and every 4 hours, and logs every removal.
+
+To remove worktrees yourself, click the server and choose **Clean Up Server...**: it lists each worktree with its size, the state of its chat and whether its work was brought back, and warns before removing work that was not. See [Delegate to Server](delegate-to-server.md#when-the-server-removes-a-worktree) for the details.
+
+Worktrees of chats you start on the server itself (under `<repository>.worktrees/`) are removed with their chat.
 
 ### Server costs and budgets
 

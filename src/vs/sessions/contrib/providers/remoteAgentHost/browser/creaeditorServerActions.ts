@@ -20,9 +20,10 @@ import { generateUuid } from '../../../../../base/common/uuid.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { IClipboardService } from '../../../../../platform/clipboard/common/clipboardService.js';
-import { ICommandService } from '../../../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { CREAEDITOR_SERVERS_ADD_REQUEST_KEY, getCreaEditorServerWebUrl, readCreaEditorServerChats, readCreaEditorServerMachine } from '../../../../../platform/agentHost/common/creaeditorServer.js';
 import { IAgentConnection } from '../../../../../platform/agentHost/common/agentService.js';
+import { CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { readSubscriptionAccountsState, subscriptionAccountTokenResource, type ISubscriptionAccount, type SubscriptionProvider } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
 import { IRemoteAgentHostService, RemoteAgentHostsEnabledSettingId } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { ContextKeyExpr } from '../../../../../platform/contextkey/common/contextkey.js';
@@ -293,7 +294,7 @@ function followAccount(connection: IAgentConnection, accountId: string, predicat
 	});
 }
 
-type ServerAction = 'pairAgain' | 'open' | 'phone' | 'signIn' | 'check' | 'remove';
+type ServerAction = 'pairAgain' | 'open' | 'phone' | 'signIn' | 'cleanUp' | 'check' | 'remove';
 
 async function showServerActions(accessor: ServicesAccessor, server: ICreaEditorServer): Promise<void> {
 	const quickInputService = accessor.get(IQuickInputService);
@@ -301,6 +302,7 @@ async function showServerActions(accessor: ServicesAccessor, server: ICreaEditor
 	const remoteAgentHostService = accessor.get(IRemoteAgentHostService);
 	const openerService = accessor.get(IOpenerService);
 	const instantiationService = accessor.get(IInstantiationService);
+	const commandService = accessor.get(ICommandService);
 	const connection = getServerConnection(remoteAgentHostService, serversService, server);
 	const needsPairing = serversService.needsPairing.get().has(server.id);
 
@@ -310,6 +312,8 @@ async function showServerActions(accessor: ServicesAccessor, server: ICreaEditor
 		{ action: 'open', label: `$(link-external) ${localize('creaeditorServers.openInBrowser', "Open in Browser")}`, description: server.serverUrl },
 		{ action: 'phone', label: `$(device-mobile) ${localize('creaeditorServers.pairPhone', "Pair Phone")}` },
 		...(connection ? [{ action: 'signIn' as const, label: `$(account) ${localize('creaeditorServers.signInAccount', "Sign In to an Account on This Server...")}`, description: localize('creaeditorServers.signInAccountDetail', "Claude or Codex") }] : []),
+		// Clean Up Server... runs in the desktop app (it needs Delegate to Server's main process service).
+		...(CommandsRegistry.getCommand(CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID) ? [{ action: 'cleanUp' as const, label: `$(clear-all) ${localize('creaeditorServers.cleanUp', "Clean Up Server...")}`, description: localize('creaeditorServers.cleanUpDetail', "Worktrees of delegated chats") }] : []),
 		{ action: 'check', label: `$(refresh) ${localize('creaeditorServers.checkNow', "Check Now")}` },
 		{ action: 'remove', label: `$(trash) ${localize('creaeditorServers.remove', "Remove")}` },
 	];
@@ -328,6 +332,9 @@ async function showServerActions(accessor: ServicesAccessor, server: ICreaEditor
 			if (connection) {
 				await instantiationService.invokeFunction(signInAccountOnServer, server, connection);
 			}
+			break;
+		case 'cleanUp':
+			await commandService.executeCommand(CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID, server.id);
 			break;
 		case 'check':
 			await serversService.refreshHealth();

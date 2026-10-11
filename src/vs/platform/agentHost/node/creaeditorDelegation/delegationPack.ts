@@ -106,10 +106,11 @@ export async function listUntrackedSecretFiles(root: string, runner: IDelegation
 }
 
 /**
- * Commits the working tree of `root` as it is now (tracked changes and untracked, not ignored files)
- * on top of `HEAD`, through a temporary index. Answers `HEAD` itself when nothing changed.
+ * The tree the working tree of `root` has now (tracked changes and untracked, not ignored files;
+ * secret-looking untracked ones only when asked), written through a temporary index, and the tree
+ * of `HEAD`.
  */
-export async function snapshotWorkingTree(root: string, options: { readonly includeSecretFiles: boolean; readonly message: string; readonly authorName: string }, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<{ readonly commit: string; readonly changed: boolean }> {
+export async function writeWorkingTreeTree(root: string, includeSecretFiles: boolean, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<{ readonly head: string; readonly tree: string; readonly headTree: string }> {
 	const head = (await git(runner, root, ['rev-parse', 'HEAD'])).trim();
 	const indexDir = fs.mkdtempSync(join(tmpdir(), 'creaeditor-index-'));
 	const env = { GIT_INDEX_FILE: join(indexDir, 'index') };
@@ -118,17 +119,26 @@ export async function snapshotWorkingTree(root: string, options: { readonly incl
 		// Changes and deletions of tracked files, secrets included: they are in the repository anyway.
 		await git(runner, root, ['add', '-u', '--', '.'], env);
 		// New files, without ignored ones (and without secret-looking ones unless asked).
-		await git(runner, root, ['add', '-A', '--', '.', ...(options.includeSecretFiles ? [] : secretExcludePathspecs())], env);
+		await git(runner, root, ['add', '-A', '--', '.', ...(includeSecretFiles ? [] : secretExcludePathspecs())], env);
 		const tree = (await git(runner, root, ['write-tree'], env)).trim();
 		const headTree = (await git(runner, root, ['rev-parse', 'HEAD^{tree}'])).trim();
-		if (tree === headTree) {
-			return { commit: head, changed: false };
-		}
-		const commit = (await git(runner, root, ['commit-tree', tree, '-p', head, '-m', options.message], delegationCommitIdentity(options.authorName))).trim();
-		return { commit, changed: true };
+		return { head, tree, headTree };
 	} finally {
 		fs.rmSync(indexDir, { recursive: true, force: true });
 	}
+}
+
+/**
+ * Commits the working tree of `root` as it is now (tracked changes and untracked, not ignored files)
+ * on top of `HEAD`, through a temporary index. Answers `HEAD` itself when nothing changed.
+ */
+export async function snapshotWorkingTree(root: string, options: { readonly includeSecretFiles: boolean; readonly message: string; readonly authorName: string }, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<{ readonly commit: string; readonly tree: string; readonly changed: boolean }> {
+	const { head, tree, headTree } = await writeWorkingTreeTree(root, options.includeSecretFiles, runner);
+	if (tree === headTree) {
+		return { commit: head, tree, changed: false };
+	}
+	const commit = (await git(runner, root, ['commit-tree', tree, '-p', head, '-m', options.message], delegationCommitIdentity(options.authorName))).trim();
+	return { commit, tree, changed: true };
 }
 
 /** Answers the commits of `candidates` that exist in the repository at `cwd`. */

@@ -11,7 +11,7 @@ import { hostname } from 'os';
 import { Emitter } from '../../../base/common/event.js';
 import { Disposable } from '../../../base/common/lifecycle.js';
 import { ILogService } from '../../log/common/log.js';
-import { DELEGATION_ERROR_NAME, DelegationErrorCode, IBringBackRequest, IBringBackResult, ICreaEditorDelegationService, IDelegateRequest, IDelegateResult, IDelegationProgress, IDelegationRecord, IDelegationServerKeyResponse, IDelegationServerTarget } from '../common/creaeditorDelegation.js';
+import { DELEGATION_ERROR_NAME, DelegationErrorCode, IBringBackRequest, IBringBackResult, ICreaEditorDelegationService, IDelegateRequest, IDelegateResult, IDelegationProgress, IDelegationRecord, IDelegationServerKeyResponse, IDelegationServerTarget, IDelegationWorktreeInfo } from '../common/creaeditorDelegation.js';
 import { bringBackChanges, delegateChat, DelegationHttpClient } from '../node/creaeditorDelegation/delegationClient.js';
 import { DelegationError, listUntrackedSecretFiles, readDelegationRepository } from '../node/creaeditorDelegation/delegationPack.js';
 import { git, IDelegationProcessRunner, nodeDelegationProcessRunner } from '../node/creaeditorDelegation/delegationProcess.js';
@@ -83,6 +83,17 @@ export class CreaEditorDelegationMainService extends Disposable implements ICrea
 
 	openPullRequest(server: IDelegationServerTarget, delegationId: string): Promise<string> {
 		return withTransferableErrors(() => new DelegationHttpClient(server).pullRequest(delegationId));
+	}
+
+	listServerWorktrees(server: IDelegationServerTarget): Promise<readonly IDelegationWorktreeInfo[]> {
+		return withTransferableErrors(() => new DelegationHttpClient(server).listWorktrees());
+	}
+
+	removeServerDelegation(server: IDelegationServerTarget, delegationId: string): Promise<void> {
+		return withTransferableErrors(async () => {
+			await new DelegationHttpClient(server).removeDelegation(delegationId);
+			this._logService.info(`[Delegation] Removed delegated chat ${delegationId} on ${server.name}`);
+		});
 	}
 
 	setServerGitHubToken(server: IDelegationServerTarget, token: string): Promise<void> {

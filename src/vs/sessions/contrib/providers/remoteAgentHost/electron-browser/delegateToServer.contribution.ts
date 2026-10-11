@@ -25,7 +25,7 @@ import { Action2, registerAction2 } from '../../../../../platform/actions/common
 import { IAgentHostConnectionsService } from '../../../../../platform/agentHost/common/agentHostConnectionsService.js';
 import { remoteAgentHostSessionTypeId } from '../../../../../platform/agentHost/common/agentHostSessionType.js';
 import { agentHostAuthority, toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
-import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_DELEGATE_REQUEST_KEY, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getBroughtBackBranchPrefix, getDelegationAgentKind, getDelegationAgentProvider, ICreaEditorDelegationService, IDelegateResult, IDelegateToServerRequest, IDelegationAccountsPayload, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationServerTarget, parseDelegationGatewayModel } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
+import { CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID, CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID, CREAEDITOR_DELEGATE_REQUEST_KEY, CREAEDITOR_DELEGATE_TO_SERVER_COMMAND_ID, CREAEDITOR_DELEGATION_ACCOUNTS_RESOURCE_PREFIX, CREAEDITOR_DELEGATION_DEFAULT_MAX_UPLOAD_MB, CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID, CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID, DELEGATION_ERROR_NAME, DelegationAgentKind, DelegationErrorCode, DelegationMaxUploadSettingId, DelegationProgressStage, DelegationResultsMode, getAgentSessionIdFromStateFile, getBroughtBackBranchName, getBroughtBackBranchPrefix, getDelegationAgentKind, getDelegationAgentProvider, ICreaEditorDelegationService, IDelegateResult, IDelegateToServerRequest, IDelegationAccountsPayload, IDelegationGatewayKey, IDelegationGatewayModel, IDelegationServerTarget, IDelegationWorktreeInfo, parseDelegationGatewayModel } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { IRemoteAgentHostService } from '../../../../../platform/agentHost/common/remoteAgentHostService.js';
 import { ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
@@ -57,7 +57,7 @@ import { ISession, SessionStatus } from '../../../../services/sessions/common/se
 import { ISessionsManagementService } from '../../../../services/sessions/common/sessionsManagement.js';
 import { getCreaEditorServerDeviceKeyName, ICreaEditorServer, ICreaEditorServersService } from '../browser/creaeditorServers.js';
 import { CreaEditorServerCommandIds } from '../browser/creaeditorServerActions.js';
-import { DelegatedChatsStore, describeDelegatedChatState, getServerFolderTrustUris, IDelegatedChat } from '../browser/delegatedChats.js';
+import { DelegatedChatsStore, describeDelegatedChatState, describeServerWorktree, getServerFolderTrustUris, IDelegatedChat } from '../browser/delegatedChats.js';
 
 /** True when the active session is a delegated chat (here or on its server). */
 const ActiveSessionDelegatedContext = new RawContextKey<boolean>('creaeditorActiveSessionDelegated', false, localize('activeSessionDelegated', "Whether the active chat was delegated to a CreaEditor Server."));
@@ -710,6 +710,99 @@ async function setServerGitHubTokenAction(accessor: ServicesAccessor, serverId?:
 	}
 }
 
+/**
+ * Clean Up Server...: lists the server's worktrees of delegated chats (size, the state of their chat,
+ * whether their work came back) and removes the chosen ones, after a warning when work would be lost.
+ */
+async function cleanUpServerAction(accessor: ServicesAccessor, serverId?: string): Promise<void> {
+	const quickInputService = accessor.get(IQuickInputService);
+	const notificationService = accessor.get(INotificationService);
+	const dialogService = accessor.get(IDialogService);
+	const progressService = accessor.get(IProgressService);
+	const delegationService = accessor.get(ICreaEditorDelegationService);
+	const serversService = accessor.get(ICreaEditorServersService);
+	const instantiationService = accessor.get(IInstantiationService);
+	const logService = accessor.get(ILogService);
+	const store = getDelegatedChats(accessor);
+	const servers = serversService.servers.get();
+	let server = typeof serverId === 'string' ? servers.find(candidate => candidate.id === serverId) : undefined;
+	if (!server) {
+		if (!servers.length) {
+			notificationService.info(localize('delegation.noServersForCleanUp', "Add a CreaEditor Server first."));
+			return;
+		}
+		server = servers.length === 1 ? servers[0] : (await quickInputService.pick(servers.map(candidate => ({ label: candidate.name, description: candidate.serverUrl, server: candidate })), { placeHolder: localize('delegation.pickCleanUpServer', "Clean up which server?") }))?.server;
+	}
+	if (!server) {
+		return;
+	}
+	const currentServer = server;
+	const target = await instantiationService.invokeFunction(innerAccessor => getServerTarget(innerAccessor, currentServer));
+	if (!target) {
+		notificationService.error(localize('delegation.noKey', "This computer has no key for {0}. Remove the server and add it again.", currentServer.name));
+		return;
+	}
+	let worktrees: readonly IDelegationWorktreeInfo[];
+	try {
+		worktrees = await progressService.withProgress({ location: ProgressLocation.Notification, title: localize('delegation.readingWorktrees', "Reading the worktrees on {0}...", currentServer.name) }, () => delegationService.listServerWorktrees(target));
+	} catch (error) {
+		notificationService.error(localize('delegation.listWorktreesFailed', "Cannot read the worktrees on {0}: {1}", currentServer.name, errorMessage(error)));
+		return;
+	}
+	if (!worktrees.length) {
+		notificationService.info(localize('delegation.noWorktrees', "{0} has no worktrees of delegated chats.", currentServer.name));
+		return;
+	}
+	const now = Date.now();
+	type WorktreePick = IQuickPickItem & { readonly info: IDelegationWorktreeInfo };
+	const picked = await quickInputService.pick<WorktreePick>(worktrees.map(info => ({ ...describeServerWorktree(info, now), info })), {
+		canPickMany: true,
+		title: localize('delegation.cleanUpTitle', "Clean Up {0}", currentServer.name),
+		placeHolder: localize('delegation.cleanUpPlaceholder', "Select the worktrees to remove (their branch and record go too; the chats stay)"),
+		matchOnDescription: true,
+		matchOnDetail: true,
+	});
+	if (!picked?.length) {
+		return;
+	}
+	const unsafe = picked.filter(item => !item.info.workSafe);
+	const { confirmed } = await dialogService.confirm({
+		type: unsafe.length ? Severity.Warning : Severity.Info,
+		message: picked.length === 1
+			? localize('delegation.cleanUpConfirmOne', "Remove the worktree of \"{0}\" on {1}?", picked[0].info.title, currentServer.name)
+			: localize('delegation.cleanUpConfirmMany', "Remove {0} worktrees on {1}?", picked.length, currentServer.name),
+		detail: unsafe.length
+			? (unsafe.length === 1
+				? localize('delegation.cleanUpUnsafeOne', "The work of \"{0}\" was NOT brought back or pushed since it last changed: it is lost. Use Bring Back Changes first to keep it.", unsafe[0].info.title)
+				: localize('delegation.cleanUpUnsafeMany', "{0} of them have work that was NOT brought back or pushed since it last changed: it is lost. Use Bring Back Changes first to keep it.", unsafe.length))
+			: localize('delegation.cleanUpSafe', "Their work was brought back, pushed in a pull request, or never changed. The chats stay on the server, without their files."),
+		primaryButton: localize({ key: 'delegation.cleanUpButton', comment: ['&& denotes a mnemonic'] }, "&&Remove"),
+	});
+	if (!confirmed) {
+		return;
+	}
+	const failed: string[] = [];
+	await progressService.withProgress({ location: ProgressLocation.Notification, title: localize('delegation.removingWorktrees', "Removing worktrees on {0}...", currentServer.name) }, async () => {
+		for (const item of picked) {
+			try {
+				await delegationService.removeServerDelegation(target, item.info.delegationId);
+				// Nothing is left on the server to bring back or take back.
+				store.remove(item.info.delegationId);
+			} catch (error) {
+				logService.warn(`[Delegation] Removing ${item.info.worktree} on ${currentServer.name} failed: ${errorMessage(error)}`);
+				failed.push(item.info.title);
+			}
+		}
+	});
+	if (failed.length) {
+		notificationService.error(localize('delegation.cleanUpFailed', "Some worktrees on {0} could not be removed: {1}", currentServer.name, failed.join(', ')));
+	} else {
+		notificationService.info(picked.length === 1
+			? localize('delegation.cleanUpDoneOne', "Removed 1 worktree on {0}.", currentServer.name)
+			: localize('delegation.cleanUpDoneMany', "Removed {0} worktrees on {1}.", picked.length, currentServer.name));
+	}
+}
+
 async function openOnServerAction(accessor: ServicesAccessor, context: DelegationActionContext): Promise<void> {
 	const notificationService = accessor.get(INotificationService);
 	const sessionsService = accessor.get(ISessionsService);
@@ -963,6 +1056,20 @@ registerAction2(class extends Action2 {
 	}
 	run(accessor: ServicesAccessor, serverId?: string): Promise<void> {
 		return setServerGitHubTokenAction(accessor, serverId);
+	}
+});
+
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID,
+			title: localize2('delegation.cleanUpServer', "Clean Up Server..."),
+			category: localize2('delegation.category', "Chat"),
+			f1: true,
+		});
+	}
+	run(accessor: ServicesAccessor, serverId?: string): Promise<void> {
+		return cleanUpServerAction(accessor, serverId);
 	}
 });
 

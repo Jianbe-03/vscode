@@ -72,6 +72,8 @@ export interface IDelegateToServerRequest {
 export const CREAEDITOR_BRING_BACK_CHANGES_COMMAND_ID = 'creaeditor.delegation.bringBackChanges';
 /** Open PR from the Server for a delegated chat. */
 export const CREAEDITOR_OPEN_PR_FROM_SERVER_COMMAND_ID = 'creaeditor.delegation.openPullRequestFromServer';
+/** Clean Up Server...: lists a server's worktrees of delegated chats and removes the chosen ones (argument: the server id). */
+export const CREAEDITOR_CLEAN_UP_SERVER_COMMAND_ID = 'creaeditor.delegation.cleanUpServer';
 /** Set GitHub Token on Server. */
 export const CREAEDITOR_SET_SERVER_GITHUB_TOKEN_COMMAND_ID = 'creaeditor.delegation.setServerGitHubToken';
 
@@ -295,6 +297,21 @@ export interface IDelegationRecord {
 	readonly sourceName: string;
 	readonly createdAt: number;
 	readonly pullRequestUrl?: string;
+	/** The worktree's tree when the chat arrived (the laptop's code with its uncommitted changes). */
+	readonly initialTree?: string;
+	/** The commit Bring Back Changes last fetched (the server's work with its uncommitted changes as a last commit). */
+	readonly broughtBackCommit?: string;
+	/** The tree of {@link broughtBackCommit}: the worktree is safe to remove while it still has this tree. */
+	readonly broughtBackTree?: string;
+	readonly broughtBackAt?: number;
+	/** The commit Open PR from the Server last pushed, and its tree (see {@link broughtBackTree}). */
+	readonly pushedCommit?: string;
+	readonly pushedTree?: string;
+	readonly pushedAt?: number;
+	/** When the server's cleanup first saw this chat on its agent host. */
+	readonly chatSeenAt?: number;
+	/** When the server's cleanup first saw this chat archived; cleared when it is unarchived. */
+	readonly archivedSeenAt?: number;
 }
 
 /** `POST delegations/<id>/results` `{ knownCommits }`: the result bundle, if any, is then downloaded from `GET downloads/<downloadId>`. */
@@ -303,6 +320,49 @@ export interface IDelegationResultsResponse {
 	readonly downloadId?: string;
 	readonly bytes: number;
 	readonly includesUncommitted: boolean;
+}
+
+/** The state of a delegated chat's conversation on the server's agent host. */
+export const enum DelegationChatState {
+	/** A chat works in the worktree and is not archived. */
+	Running = 'running',
+	/** Every chat in the worktree is archived (Take Back Here archives it, and the server archives idle chats). */
+	Archived = 'archived',
+	/** No chat on the server works in the worktree any more (deleted, or the server's chat data is gone). */
+	Deleted = 'deleted',
+	/** The server cannot tell (its agent host does not answer). */
+	Unknown = 'unknown',
+}
+
+/** A delegated chat's worktree, as `GET worktrees` lists it (Clean Up Server...). */
+export interface IDelegationWorktreeInfo {
+	readonly delegationId: string;
+	readonly shortId: string;
+	readonly title: string;
+	readonly sourceName: string;
+	readonly createdAt: number;
+	readonly worktree: string;
+	readonly branch: string;
+	/** Disk use of the worktree; undefined when unknown. */
+	readonly bytes?: number;
+	readonly chatState: DelegationChatState;
+	/** Since when the chat is archived (as the server noticed it). */
+	readonly archivedSince?: number;
+	readonly broughtBackAt?: number;
+	readonly pullRequestUrl?: string;
+	/**
+	 * The worktree holds nothing that is not on the laptop or in the pushed branch: its current state
+	 * (with uncommitted changes) is what Bring Back Changes last fetched or Open PR from the Server last
+	 * pushed, or it never changed.
+	 */
+	readonly workSafe: boolean;
+	/** When the server removes it on its own (while its work stays safe); undefined when it keeps it. */
+	readonly removeAfter?: number;
+}
+
+/** `GET worktrees` */
+export interface IDelegationWorktreesResponse {
+	readonly worktrees: readonly IDelegationWorktreeInfo[];
 }
 
 /** `POST delegations/<id>/pull-request` `{ title?, body? }` */
@@ -428,6 +488,12 @@ export interface ICreaEditorDelegationService {
 
 	/** Asks the server to push the branch and open a pull request. */
 	openPullRequest(server: IDelegationServerTarget, delegationId: string): Promise<string>;
+
+	/** Lists the server's worktrees of delegated chats (Clean Up Server...). */
+	listServerWorktrees(server: IDelegationServerTarget): Promise<readonly IDelegationWorktreeInfo[]>;
+
+	/** Removes a delegated chat's worktree, branch and record on the server, whatever its state. */
+	removeServerDelegation(server: IDelegationServerTarget, delegationId: string): Promise<void>;
 
 	/** Sets (or with an empty token removes) the server's GitHub token. */
 	setServerGitHubToken(server: IDelegationServerTarget, token: string): Promise<void>;

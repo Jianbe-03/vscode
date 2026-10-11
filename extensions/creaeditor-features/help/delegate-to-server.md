@@ -94,6 +94,34 @@ Important: the conversation on the server stays on the server, and its code does
 
 You can delegate a chat again after Take Back Here, to the same server or another one. It works like the first time: the server installs the laptop's full history as a fresh copy of the session (the first copy on the server stays as it was, archived), and only the commits the server lacks are sent.
 
+### When the server removes a worktree
+
+A delegated chat's worktree, its branch `creaeditor/delegated/<id>` and the server's record of it do not stay forever. The server removes them by itself, but only when nothing is lost:
+
+- **You delete the chat on the server**: removed at once.
+- **The chat on the server is archived** (Take Back Here archives it, and the server archives idle chats): removed **7 days** after it was archived, but only if its latest work is safe. If you unarchive the chat, it stays.
+- **No chat on the server works in it any more** (for example, the server's chat data was wiped): removed **30 days** after it was delegated, again only if its work is safe.
+
+The work is **safe** when the worktree, uncommitted changes included, is exactly what **Bring Back Changes** last fetched, what **Open PR from the Server** last pushed, or what it was when the chat arrived (the server changed nothing). As soon as the chat changes a file after that, the worktree stays until you bring the changes back again or remove it by hand. Untracked files that look like secrets (`.env*`, keys) are not brought back and do not count.
+
+The server checks this when it starts and every 4 hours, and writes a line to its log for every worktree it removes, such as "Removed the worktree /data/worktrees/app-3f9a2c1d (creaeditor/delegated/3f9a2c1d) of "Fix the login bug" from MacBook: its chat is archived for 7 days and its work was brought back, pushed or never changed".
+
+The conversation itself is not removed: an archived chat stays in the server's list until you delete it.
+
+New chats you start on the server itself, in a repository it has from a delegated chat, get their own worktree under `<repository>.worktrees/`. The server leaves those alone: they are removed with their chat, like on your laptop.
+
+### Clean Up Server...
+
+To see and remove worktrees yourself, run **Clean Up Server...** from the Command Palette, or click the server in **CreaEditor Servers** and choose **Clean Up Server...**. Any paired device can do this, not only the one that delegated the chat.
+
+The list shows every delegated chat's worktree with:
+
+- its size and the state of its chat on the server: **chat in use**, **chat archived** (with since when) or **no chat on the server**;
+- whether its work is safe: **work brought back** (with when), **work is in its pull request**, **no changes on the server**, or **work NOT brought back**;
+- when the server removes it by itself, or **kept until removed by hand**.
+
+Select the ones to remove and confirm. If the work of one of them was not brought back or pushed, the confirmation warns that it is lost; use **Bring Back Changes** first to keep it. The chats stay on the server, without their files, and the laptop forgets the delegation (its chat is no longer locked).
+
 ### When the laptop is off
 
 That is the point: the chat runs on the server without your laptop. It uses the server's own accounts (or the ones you sent along), its budgets with a hard stop still apply, and its OpenRouter or LiteLLM costs are recorded on the server. Your laptop picks up the costs and any **Bring Back Changes** the next time it is online and the Agents window is open.
@@ -110,6 +138,7 @@ That is the point: the chat runs on the server without your laptop. It uses the 
 - **Keys move with Copilot CLI chats only.** Claude and Codex chats use their own accounts on the server. On the server, OpenRouter and LiteLLM requests run without streaming.
 - **Uploads resume.** When the connection drops, the upload continues where it stopped. When the server is offline, delegating stops with **Try Again**.
 - **Failed delegations clean up.** If a later step fails, the server removes the worktree and branch it had made.
+- **Old worktrees clean up.** See [When the server removes a worktree](#when-the-server-removes-a-worktree).
 
 ## Troubleshooting
 

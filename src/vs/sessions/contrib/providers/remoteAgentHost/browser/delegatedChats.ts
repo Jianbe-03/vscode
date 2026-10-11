@@ -6,12 +6,13 @@
 // CreaEditor: the chats this machine delegated to a CreaEditor Server (Delegate to Server), kept in
 // application storage so every window knows which local chat continues where.
 
+import { fromNow } from '../../../../../base/common/date.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
 import { Disposable } from '../../../../../base/common/lifecycle.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { localize } from '../../../../../nls.js';
 import { toAgentHostUri } from '../../../../../platform/agentHost/common/agentHostUri.js';
-import { DelegationResultsMode } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
+import { DelegationChatState, DelegationResultsMode, IDelegationWorktreeInfo } from '../../../../../platform/agentHost/common/creaeditorDelegation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { SessionStatus } from '../../../../services/sessions/common/session.js';
 
@@ -45,6 +46,8 @@ export interface IDelegatedChat {
 	/** The local branch of the last Bring Back Changes. */
 	readonly broughtBackBranch?: string;
 	readonly pullRequestUrl?: string;
+	/** The chat started on the server with its first message (Start on Server...): no local turn ran. */
+	readonly startedOnServer?: boolean;
 }
 
 /** Reads the stored list, skipping anything malformed. */
@@ -92,6 +95,36 @@ export function describeDelegatedChatState(status: SessionStatus | undefined, co
 		case SessionStatus.Error: return localize('delegatedChat.error', "stopped with an error");
 		default: return localize('delegatedChat.starting', "starting");
 	}
+}
+
+/** How a server's worktree of a delegated chat reads in Clean Up Server... */
+export function describeServerWorktree(info: IDelegationWorktreeInfo, now: number): { readonly label: string; readonly description: string; readonly detail: string } {
+	let state: string;
+	switch (info.chatState) {
+		case DelegationChatState.Running: state = localize('serverWorktree.running', "chat in use"); break;
+		case DelegationChatState.Archived: state = info.archivedSince ? localize('serverWorktree.archivedSince', "chat archived {0}", fromNow(info.archivedSince, true)) : localize('serverWorktree.archived', "chat archived"); break;
+		case DelegationChatState.Deleted: state = localize('serverWorktree.deleted', "no chat on the server"); break;
+		default: state = localize('serverWorktree.unknown', "chat state unknown"); break;
+	}
+	const size = info.bytes === undefined ? undefined : localize('serverWorktree.size', "{0} MB", (info.bytes / (1024 * 1024)).toFixed(info.bytes < 10 * 1024 * 1024 ? 1 : 0));
+	const work = info.pullRequestUrl && info.workSafe
+		? localize('serverWorktree.pushed', "work is in its pull request")
+		: info.broughtBackAt && info.workSafe
+			? localize('serverWorktree.broughtBack', "work brought back {0}", fromNow(info.broughtBackAt, true))
+			: info.workSafe
+				? localize('serverWorktree.unchanged', "no changes on the server")
+				: localize('serverWorktree.notBroughtBack', "work NOT brought back");
+	const removal = info.removeAfter === undefined
+		? localize('serverWorktree.kept', "kept until removed by hand")
+		: info.removeAfter <= now
+			? localize('serverWorktree.removedSoon', "the server removes it at its next cleanup")
+			: localize('serverWorktree.removedOn', "the server removes it on {0}", new Date(info.removeAfter).toLocaleDateString());
+	const folder = info.worktree.split(/[\\/]/).pop() ?? info.worktree;
+	return {
+		label: info.title,
+		description: [size, state].filter(Boolean).join(' · '),
+		detail: [folder, localize('serverWorktree.from', "from {0}", info.sourceName), work, removal].join(' · '),
+	};
 }
 
 /** The delegated chats of this machine. */
