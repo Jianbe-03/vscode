@@ -158,20 +158,31 @@ export async function prepareDelegationWorktree(layout: IDelegationStoreLayout, 
 	if (fs.existsSync(worktree)) {
 		throw new DelegationError(DelegationErrorCode.InvalidRequest, 'This chat was already delegated to the server.');
 	}
+	let added = false;
 	try {
 		await git(runner, bare, ['worktree', 'add', '-q', '-b', branch, worktree, request.head]);
+		added = true;
 		if (request.snapshot !== request.head) {
 			// Make the files the snapshot's, then put the index back on the branch: the laptop's
 			// uncommitted changes are uncommitted changes here too, untracked files stay untracked.
 			await git(runner, worktree, ['read-tree', '-u', '--reset', request.snapshot]);
 			await git(runner, worktree, ['reset', '-q']);
 		}
+		const workingDirectory = request.subPath ? join(worktree, ...request.subPath.split('/')) : worktree;
+		fs.mkdirSync(workingDirectory, { recursive: true });
+		return { worktree, workingDirectory, branch };
+	} catch (error) {
+		// A failed delegation leaves nothing behind it created: the worktree and its branch (only when
+		// this call added them; the branch may be another chat's when adding failed), the base ref.
+		if (added) {
+			await removeDelegationWorktree(layout, request.repoId, request.delegationId, request.shortId, worktree, runner);
+		} else {
+			await runner.run('git', ['update-ref', '-d', `refs/creaeditor/base/${request.delegationId}`], { cwd: bare });
+		}
+		throw error;
 	} finally {
 		await runner.run('git', ['update-ref', '-d', snapshotRef], { cwd: bare });
 	}
-	const workingDirectory = request.subPath ? join(worktree, ...request.subPath.split('/')) : worktree;
-	fs.mkdirSync(workingDirectory, { recursive: true });
-	return { worktree, workingDirectory, branch };
 }
 
 /**

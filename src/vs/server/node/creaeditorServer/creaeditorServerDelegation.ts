@@ -15,15 +15,15 @@ import { homedir } from 'os';
 import { generateUuid } from '../../../base/common/uuid.js';
 import { join } from '../../../base/common/path.js';
 import { ILogService } from '../../../platform/log/common/log.js';
-import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationSessionRequest, IDelegationUploadResponse } from '../../../platform/agentHost/common/creaeditorDelegation.js';
+import { CREAEDITOR_DELEGATION_API_PREFIX, CREAEDITOR_DELEGATION_CHUNK_BYTES, CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME, CREAEDITOR_DELEGATION_KEY_PAIR_SECRET_NAME, DelegationAgentKind, DelegationErrorCode, DelegationResultsMode, IDelegationCreateRequest, IDelegationKnownCommitsResponse, IDelegationPullRequestResponse, IDelegationRecord, IDelegationResultsResponse, IDelegationServerKeyResponse, IDelegationSessionFile, IDelegationSessionRequest, IDelegationUploadResponse } from '../../../platform/agentHost/common/creaeditorDelegation.js';
 import { getDelegationSecretsDir } from '../../../platform/agentHost/node/creaeditorDelegation/delegationAccounts.js';
 import { generateDelegationKeyPair, IDelegationKeyPair } from '../../../platform/agentHost/node/creaeditorDelegation/delegationCrypto.js';
 import { DelegationError } from '../../../platform/agentHost/node/creaeditorDelegation/delegationPack.js';
 import { IDelegationProcessRunner, nodeDelegationProcessRunner } from '../../../platform/agentHost/node/creaeditorDelegation/delegationProcess.js';
-import { getClaudeConfigDir, getCopilotCliHome, installSessionFiles } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
+import { getClaudeConfigDir, getCopilotCliHome, hasInstalledSession, installSessionFiles, renameSessionFiles } from '../../../platform/agentHost/node/creaeditorDelegation/delegationSessionFiles.js';
 import { resolveDefaultCodexHome } from '../../../platform/agentHost/node/codex/codexAccountHomes.js';
 import { AgentHostCodexAgentCodexHomeEnvVar } from '../../../platform/agentHost/common/agentService.js';
-import { assertDelegationId, createResultBundle, IDelegationStoreLayout, listKnownCommits, nameExistingDelegationRepositories, openPullRequestFromServer, prepareDelegationWorktree } from '../../../platform/agentHost/node/creaeditorDelegation/delegationWorktrees.js';
+import { assertDelegationId, createResultBundle, IDelegationStoreLayout, listKnownCommits, nameExistingDelegationRepositories, openPullRequestFromServer, prepareDelegationWorktree, removeDelegationWorktree } from '../../../platform/agentHost/node/creaeditorDelegation/delegationWorktrees.js';
 import { FileSecretStore } from '../../../platform/agentHost/node/shared/fileSecretStore.js';
 import type { IRemoteAccessApiHandler } from '../../../platform/agentHost/node/remoteAccess/remoteAccessServer.js';
 import type { IRemoteAccessDevice } from '../../../platform/agentHost/node/remoteAccess/remoteAccessAuth.js';
@@ -32,6 +32,8 @@ import type { IRemoteAccessDevice } from '../../../platform/agentHost/node/remot
 const MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024;
 /** The largest JSON request (session files are in it, base64). */
 const MAX_JSON_BYTES = 96 * 1024 * 1024;
+/** How long after delegating a chat its device may still abandon it (a later step failed). */
+const ABANDON_WINDOW_MS = 30 * 60 * 1000;
 /** Unfinished uploads and unfetched result bundles are removed after this long. */
 const STALE_TRANSFER_MS = 24 * 60 * 60 * 1000;
 
@@ -184,6 +186,10 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 				if (method === 'GET' && parts.length === 2) {
 					return sendJson(response, 200, record);
 				}
+				if (method === 'DELETE' && parts.length === 2) {
+					await this._abandon(record, device);
+					return sendJson(response, 200, {});
+				}
 				if (method === 'POST' && parts[2] === 'session' && parts.length === 3) {
 					return sendJson(response, 200, await this._installSession(record, await readJson<IDelegationSessionRequest>(request)));
 				}
@@ -329,10 +335,16 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 			title: String(body.title).slice(0, 200),
 			sourceName: typeof body.sourceName === 'string' ? body.sourceName.slice(0, 100) : device.name,
 			createdAt: Date.now(),
+			deviceId: device.id,
 			...(typeof body.remoteUrl === 'string' && body.remoteUrl ? { remoteUrl: body.remoteUrl } : {}),
 			...(typeof body.defaultBranch === 'string' && body.defaultBranch ? { defaultBranch: body.defaultBranch } : {}),
 		};
-		this._writeRecord(record);
+		try {
+			this._writeRecord(record);
+		} catch (error) {
+			await this._inRepo(record.repoId, () => removeDelegationWorktree(this._options.layout, record.repoId, record.delegationId, record.shortId, record.worktree, this._runner));
+			throw error;
+		}
 		this._options.logService.info(`[Delegation] Device "${device.name}" delegated a chat into ${prepared.worktree} (${prepared.branch})`);
 		return record;
 	}
@@ -361,7 +373,8 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 			default:
 				throw new HttpError(400, DelegationErrorCode.NotSupported, 'This agent\'s sessions cannot resume on the server; the chat continues with a transcript.');
 		}
-		if (record.resumeSessionId === sessionId) {
+		if (record.resumeSessionId === sessionId || record.sourceSessionId === sessionId) {
+			// The laptop retried after the server answered.
 			return record;
 		}
 		for (const file of body.files) {
@@ -369,10 +382,35 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 				throw new HttpError(400, DelegationErrorCode.InvalidRequest, 'Invalid session file.');
 			}
 		}
-		installSessionFiles(agentDir, body.files);
-		const updated: IDelegationRecord = { ...record, resumeSessionId: sessionId };
+		// A chat delegated again after Take Back Here: its first copy is still here (archived, or even
+		// running a turn). It stays as it is; this copy, with the laptop's full history, resumes as a
+		// session of its own, so the agent host never serves the first copy's state for it.
+		let resumeSessionId = sessionId;
+		let files: readonly IDelegationSessionFile[] = body.files;
+		if (hasInstalledSession(body.agent, agentDir, sessionId, files)) {
+			resumeSessionId = generateUuid();
+			files = renameSessionFiles(files, sessionId, resumeSessionId);
+			this._options.logService.info(`[Delegation] Session ${sessionId} was delegated before; this copy resumes as ${resumeSessionId}`);
+		}
+		installSessionFiles(agentDir, files);
+		const updated: IDelegationRecord = { ...record, resumeSessionId, ...(resumeSessionId !== sessionId ? { sourceSessionId: sessionId } : {}) };
 		this._writeRecord(updated);
 		return updated;
+	}
+
+	/**
+	 * Removes a delegation whose later steps failed on the laptop (sending the session files): its
+	 * worktree, branch and record. Only the device that delegated it, only shortly after and before its
+	 * session files arrived: no chat has started in it (the laptop starts it after a delegation succeeded).
+	 */
+	private async _abandon(record: IDelegationRecord, device: IRemoteAccessDevice): Promise<void> {
+		// Installed session files mean the chat may be imported here already: then it stays.
+		if (record.deviceId !== device.id || Date.now() - record.createdAt > ABANDON_WINDOW_MS || record.resumeSessionId || record.pullRequestUrl) {
+			throw new HttpError(409, DelegationErrorCode.InvalidRequest, 'This delegated chat can no longer be removed this way.');
+		}
+		await this._inRepo(record.repoId, () => removeDelegationWorktree(this._options.layout, record.repoId, record.delegationId, record.shortId, record.worktree, this._runner));
+		fs.rmSync(this._recordFile(record.delegationId), { force: true });
+		this._options.logService.info(`[Delegation] Device "${device.name}" abandoned the delegation into ${record.worktree} after a failed step`);
 	}
 
 	private async _createResults(record: IDelegationRecord, knownCommits: readonly string[]): Promise<IDelegationResultsResponse> {

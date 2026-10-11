@@ -33,7 +33,8 @@ The server's Remote Access HTTP API with this device's key (`Authorization: Bear
 | `GET uploads/<id>` | `{ received }` (resume) |
 | `POST delegations` | Unpacks the upload, creates the worktree, answers the record |
 | `GET delegations/<id>` | The record |
-| `POST delegations/<id>/session` | Installs session files (Claude `projects/...` in the Claude config folder, Codex `sessions/...` in `CODEX_HOME`, Copilot CLI `session-state/<id>/...` in the Copilot home); the record gets `resumeSessionId` |
+| `POST delegations/<id>/session` | Installs session files (Claude `projects/...` in the Claude config folder, Codex `sessions/...` in `CODEX_HOME`, Copilot CLI `session-state/<id>/...` in the Copilot home); the record gets `resumeSessionId`. A chat delegated again after Take Back Here still has its first copy there (archived, maybe running): that copy stays untouched and the new one is installed under a fresh session id (paths and ids in its text rewritten), answered as `resumeSessionId` with the laptop's id as `sourceSessionId` |
+| `DELETE delegations/<id>` | Abandons a delegation whose later step failed on the laptop: removes its worktree, branch and record. Only the device that created it, within 30 minutes, before session files arrived |
 | `POST delegations/<id>/results` `{ knownCommits }` | `{ commit, downloadId?, bytes, includesUncommitted }` |
 | `GET downloads/<id>` | The result bundle (removed after download) |
 | `POST delegations/<id>/pull-request` | `{ url }` |

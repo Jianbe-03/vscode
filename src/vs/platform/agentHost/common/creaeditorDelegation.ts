@@ -282,6 +282,13 @@ export interface IDelegationRecord {
 	readonly agent: DelegationAgentKind;
 	/** The session files were installed, so the agent resumes this id on the server. */
 	readonly resumeSessionId?: string;
+	/**
+	 * The laptop's session id, when the server installed the session under another one
+	 * ({@link resumeSessionId}): the chat was delegated before and its first copy is still there.
+	 */
+	readonly sourceSessionId?: string;
+	/** The paired device that delegated the chat; only it may abandon a delegation that failed half-way. */
+	readonly deviceId?: string;
 	readonly remoteUrl?: string;
 	readonly defaultBranch?: string;
 	readonly title: string;

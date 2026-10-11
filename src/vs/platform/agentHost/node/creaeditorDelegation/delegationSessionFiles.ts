@@ -16,7 +16,7 @@
 import * as fs from 'fs';
 import { homedir } from 'os';
 import { join, relative, sep } from '../../../../base/common/path.js';
-import { DelegationErrorCode, IDelegationSessionFile } from '../../common/creaeditorDelegation.js';
+import { DelegationAgentKind, DelegationErrorCode, IDelegationSessionFile } from '../../common/creaeditorDelegation.js';
 import { DelegationError } from './delegationPack.js';
 
 /** The largest session (all files together) that is sent; larger chats use the transcript instead. */
@@ -171,11 +171,60 @@ export function installSessionFiles(agentDir: string, files: readonly IDelegatio
 			throw new DelegationError(DelegationErrorCode.InvalidRequest, 'This session exists on the server already.');
 		}
 	}
-	for (const file of files) {
-		const target = join(agentDir, ...file.relativePath.split('/'));
-		fs.mkdirSync(join(target, '..'), { recursive: true, mode: 0o700 });
-		fs.writeFileSync(target, Buffer.from(file.content, 'base64'), { mode: 0o600, flag: 'wx' });
+	const written: string[] = [];
+	try {
+		for (const file of files) {
+			const target = join(agentDir, ...file.relativePath.split('/'));
+			fs.mkdirSync(join(target, '..'), { recursive: true, mode: 0o700 });
+			fs.writeFileSync(target, Buffer.from(file.content, 'base64'), { mode: 0o600, flag: 'wx' });
+			written.push(target);
+		}
+	} catch (error) {
+		// Half a session would not resume: remove what this call wrote (never what was there).
+		for (const target of written) {
+			fs.rmSync(target, { force: true });
+		}
+		throw error;
 	}
+}
+
+/**
+ * Whether the agent folder of the server has session `sessionId` already: the chat was delegated
+ * before (and taken back), so its first copy is still there, maybe even running.
+ */
+export function hasInstalledSession(agent: DelegationAgentKind, agentDir: string, sessionId: string, files: readonly IDelegationSessionFile[]): boolean {
+	if (files.some(file => fs.existsSync(join(agentDir, ...file.relativePath.split('/'))))) {
+		return true;
+	}
+	switch (agent) {
+		case DelegationAgentKind.Claude:
+			// In the project folder of the first delegation's worktree.
+			return findClaudeSessionTranscript(agentDir, sessionId) !== undefined;
+		case DelegationAgentKind.Codex:
+			return findCodexRollout(agentDir, sessionId) !== undefined;
+		case DelegationAgentKind.CopilotCli:
+			return /^[A-Za-z0-9_-]{1,128}$/.test(sessionId) && fs.existsSync(join(agentDir, 'session-state', sessionId));
+		default:
+			return false;
+	}
+}
+
+/** Session files whose text names their session id; everything else (e.g. `session.db`) goes as it is. */
+const SESSION_TEXT_FILE = /\.(?:jsonl|json|ya?ml|md)$/;
+
+/**
+ * Gives session files the session id `to` instead of `from`: in their paths (`session-state/<id>/`,
+ * `<id>.jsonl`, `rollout-<time>-<id>.jsonl`) and in their text (`"sessionId"`, `id:`, `session_meta`).
+ */
+export function renameSessionFiles(files: readonly IDelegationSessionFile[], from: string, to: string): IDelegationSessionFile[] {
+	return files.map(file => {
+		const relativePath = file.relativePath.split(from).join(to);
+		if (!SESSION_TEXT_FILE.test(file.relativePath)) {
+			return { relativePath, content: file.content };
+		}
+		const text = Buffer.from(file.content, 'base64').toString('utf8');
+		return { relativePath, content: Buffer.from(text.split(from).join(to), 'utf8').toString('base64') };
+	});
 }
 
 /**

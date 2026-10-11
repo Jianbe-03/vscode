@@ -182,6 +182,89 @@ suite('CreaEditor Server - Delegate to Server', function () {
 		});
 	});
 
+	test('delegates a chat again after Take Back Here: the new copy has the full history and resumes as its own session', async () => {
+		const realLaptop = fs.realpathSync(laptop);
+		const copilotId = '11111111-2222-3333-4444-555555555555';
+		const copilotSession = join(dir, 'laptop-copilot', 'session-state', copilotId);
+		fs.mkdirSync(copilotSession, { recursive: true });
+		fs.writeFileSync(join(copilotSession, 'events.jsonl'), JSON.stringify({ type: 'session.start', data: { sessionId: copilotId, context: { cwd: realLaptop } } }) + '\n');
+		fs.writeFileSync(join(copilotSession, 'workspace.yaml'), `id: ${copilotId}\ncwd: ${realLaptop}\n`);
+		const threadId = '0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee';
+		const codexDay = join(dir, 'laptop-codex', 'sessions', '2026', '10', '09');
+		const rollout = `rollout-2026-10-09T10-00-00-${threadId}.jsonl`;
+		fs.mkdirSync(codexDay, { recursive: true });
+		fs.writeFileSync(join(codexDay, rollout), JSON.stringify({ type: 'session_meta', payload: { id: threadId, cwd: realLaptop } }) + '\n');
+		const claudeId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+		const claudeTranscript = join(dir, 'laptop-claude', 'projects', getClaudeProjectDirName(realLaptop), `${claudeId}.jsonl`);
+		fs.mkdirSync(join(claudeTranscript, '..'), { recursive: true });
+		fs.writeFileSync(claudeTranscript, JSON.stringify({ sessionId: claudeId, cwd: realLaptop }) + '\n');
+
+		const target = { serverId: 's1', name: 'Test Server', serverUrl, deviceKey };
+		const base = { server: target, folder: laptop, title: 'T', resultsMode: DelegationResultsMode.BringBack, includeSecretFiles: false, maxUploadBytes: 1e9, sourceName: 'Laptop' };
+		const options = { codexHome: join(dir, 'laptop-codex'), copilotHome: join(dir, 'laptop-copilot'), claudeConfigDir: join(dir, 'laptop-claude') };
+		const chats = [[DelegationAgentKind.CopilotCli, copilotId], [DelegationAgentKind.Codex, threadId], [DelegationAgentKind.Claude, claudeId]] as const;
+		for (const [agent, agentSessionId] of chats) {
+			await delegateChat({ ...base, agent, agentSessionId }, options);
+		}
+		// Taken back: the chats go on here.
+		fs.appendFileSync(join(copilotSession, 'events.jsonl'), JSON.stringify({ type: 'user.message', data: { content: 'later' } }) + '\n');
+		fs.appendFileSync(join(codexDay, rollout), JSON.stringify({ type: 'event_msg', payload: { message: 'later' } }) + '\n');
+		fs.appendFileSync(claudeTranscript, JSON.stringify({ sessionId: claudeId, message: 'later' }) + '\n');
+		const again = [];
+		for (const [agent, agentSessionId] of chats) {
+			again.push(await delegateChat({ ...base, agent, agentSessionId }, options));
+		}
+		const [copilot, codex, claude] = again.map(result => ({ id: result.record.resumeSessionId!, source: result.record.sourceSessionId, sent: result.sessionFilesSent }));
+		const lines = (file: string) => fs.readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+		const serverCopilot = join(dir, 'server-copilot', 'session-state', copilot.id);
+		const serverClaude = join(dir, 'server-claude', 'projects', getClaudeProjectDirName(again[2].record.workingDirectory), `${claude.id}.jsonl`);
+		assert.deepStrictEqual({
+			sources: [copilot.source, codex.source, claude.source],
+			sent: [copilot.sent, codex.sent, claude.sent],
+			newIds: [copilot.id, codex.id, claude.id].every(id => /^[0-9a-f-]{36}$/.test(id) && ![copilotId, threadId, claudeId].includes(id)),
+			copilotEvents: lines(join(serverCopilot, 'events.jsonl')).map(event => event.data.sessionId ?? event.data.content),
+			copilotYaml: fs.readFileSync(join(serverCopilot, 'workspace.yaml'), 'utf8') === `id: ${copilot.id}\ncwd: ${again[0].record.workingDirectory}\n`,
+			codexRollout: lines(join(dir, 'server-codex', 'sessions', '2026', '10', '09', `rollout-2026-10-09T10-00-00-${codex.id}.jsonl`)).map(line => line.payload.id ?? line.payload.message),
+			claudeTranscript: lines(serverClaude).map(line => [line.sessionId, line.message]),
+			// The first copies stay as they were.
+			firstCopilot: lines(join(dir, 'server-copilot', 'session-state', copilotId, 'events.jsonl')).length,
+			firstCodex: lines(join(dir, 'server-codex', 'sessions', '2026', '10', '09', rollout)).length,
+		}, {
+			sources: [copilotId, threadId, claudeId],
+			sent: [true, true, true],
+			newIds: true,
+			copilotEvents: [copilot.id, 'later'],
+			copilotYaml: true,
+			codexRollout: [codex.id, 'later'],
+			claudeTranscript: [[claude.id, undefined], [claude.id, 'later']],
+			firstCopilot: 1,
+			firstCodex: 1,
+		});
+	});
+
+	test('a delegation that fails after the worktree was created leaves no worktree, branch or record behind', async () => {
+		const copilotId = '11111111-2222-3333-4444-555555555555';
+		const copilotSession = join(dir, 'laptop-copilot', 'session-state', copilotId);
+		fs.mkdirSync(copilotSession, { recursive: true });
+		fs.writeFileSync(join(copilotSession, 'events.jsonl'), '{}\n');
+		// The server cannot write session files: its Copilot home is a file.
+		fs.writeFileSync(join(dir, 'server-copilot'), '');
+		const target = { serverId: 's1', name: 'Test Server', serverUrl, deviceKey };
+		const failed = await delegateChat({ server: target, folder: laptop, title: 'T', resultsMode: DelegationResultsMode.BringBack, includeSecretFiles: false, maxUploadBytes: 1e9, sourceName: 'Laptop', agent: DelegationAgentKind.CopilotCli, agentSessionId: copilotId }, { copilotHome: join(dir, 'laptop-copilot') }).then(() => 'ok', (error: DelegationError) => error.code);
+		const repos = join(dir, 'server', 'repos');
+		assert.deepStrictEqual({
+			failed,
+			worktrees: fs.readdirSync(join(dir, 'server', 'worktrees')),
+			records: fs.readdirSync(join(dir, 'server', 'delegations')).filter(name => name.endsWith('.json')),
+			branches: fs.readdirSync(repos).filter(name => name.endsWith('.git')).map(bare => git(join(repos, bare), 'branch', '--list', 'creaeditor/delegated/*')),
+		}, {
+			failed: DelegationErrorCode.Unexpected,
+			worktrees: [],
+			records: [],
+			branches: [''],
+		});
+	});
+
 	test('the second delegation of the same repository sends only new commits', async () => {
 		const target = { serverId: 's1', name: 'Test Server', serverUrl, deviceKey };
 		const request = { server: target, folder: laptop, title: 'T', resultsMode: DelegationResultsMode.BringBack, includeSecretFiles: false, maxUploadBytes: 1e9, agent: DelegationAgentKind.Transcript, sourceName: 'Laptop' };
