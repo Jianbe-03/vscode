@@ -540,6 +540,47 @@ suite('WorktreeIsolation', () => {
 		});
 	});
 
+	test('a bare repository always works in its own worktree, from its newest branch when HEAD is unborn', async () => {
+		// CreaEditor: a CreaEditor Server keeps delegated code in bare repositories with only chats' branches.
+		const gitService = createGitService();
+		gitService.getRepositoryRoot = async () => undefined;
+		gitService.getWorktreeRoots = async () => [repoRoot];
+		gitService.getDefaultBranch = async () => undefined;
+		gitService.getBranch = async () => undefined;
+		gitService.getBranches = async (_root, query) => [
+			{ ref: 'refs/heads/creaeditor/delegated/new', name: 'creaeditor/delegated/new', kind: GitRefType.Head as const },
+			{ ref: 'refs/heads/creaeditor/delegated/old', name: 'creaeditor/delegated/old', kind: GitRefType.Head as const },
+		].slice(0, query?.count);
+		headCommit = undefined;
+		const isolation = createIsolation(disposables, { gitService });
+
+		const resolved = await isolation.resolveIsolationConfig({ workingDirectory: repoRoot, config: { [SessionConfigKey.Isolation]: 'folder' } });
+		const worktree = await isolation.resolveWorkingDirectory({
+			sessionUri,
+			sessionId,
+			workingDirectory: repoRoot,
+			config: { [SessionConfigKey.Isolation]: resolved.isolationValue, [SessionConfigKey.Branch]: resolved.branchValue, [SessionConfigKey.WorktreeIncludeFiles]: ['.env'], [SessionConfigKey.WorktreeSymlinkFolders]: ['node_modules/**'] },
+			prompt: 'do a thing',
+		});
+
+		const expectedWorktree = URI.joinPath(worktreesRoot, getWorktreeName(branchName));
+		assert.deepStrictEqual({
+			isolation: { enum: resolved.isolationProperty.protocol.enum, readOnly: resolved.isolationProperty.protocol.readOnly, value: resolved.isolationValue },
+			branch: resolved.branchValue,
+			worktree: worktree?.toString(),
+			addWorktreeArgs: addWorktreeCalls.map(c => ({ worktree: c.path.toString(), branchName: c.newBranchName, startPoint: c.commitish })),
+			worktreeSetupCalls,
+			project: isolation.sessionWorktreeInfo(sessionId)?.project.uri.toString(),
+		}, {
+			isolation: { enum: ['folder', 'worktree'], readOnly: true, value: 'worktree' },
+			branch: 'creaeditor/delegated/new',
+			worktree: expectedWorktree.toString(),
+			addWorktreeArgs: [{ worktree: expectedWorktree.toString(), branchName, startPoint: 'creaeditor/delegated/new' }],
+			worktreeSetupCalls: [],
+			project: repoRoot.toString(),
+		});
+	});
+
 	test('detached worktree lifecycle is addressed by an opaque handle', async () => {
 		const isolation = createIsolation(disposables);
 		const created = await isolation.createDetachedWorktree({

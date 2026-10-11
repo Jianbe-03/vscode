@@ -767,6 +767,9 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 		// Bring Back Changes and Open PR from the Server take: work in that folder, not in another worktree.
 		const inDelegatedWorktree = request.workingDirectory?.scheme === Schemas.file && getServerGatewayKeys()?.findWorkContext(request.workingDirectory.fsPath) !== undefined;
 		const canIsolate = !!gitInfo && !inDelegatedWorktree;
+		// CreaEditor: a bare repository (a CreaEditor Server's delegated code) has no files to work in:
+		// a chat there always gets its own worktree (the New Worktree toggle shows checked and fixed).
+		const forceWorktree = canIsolate && !!gitInfo?.bare;
 
 		const isolationProperty = schemaProperty<'folder' | 'worktree'>({
 			type: 'string',
@@ -776,15 +779,17 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 			enumLabels: canIsolate ? [localize('agentHost.sessionConfig.isolation.folder', "Folder"), localize('agentHost.sessionConfig.isolation.worktree', "Worktree")] : [localize('agentHost.sessionConfig.isolation.folder', "Folder")],
 			enumDescriptions: canIsolate ? [localize('agentHost.sessionConfig.isolation.folderDescription', "Work directly in the folder"), localize('agentHost.sessionConfig.isolation.worktreeDescription', "Create a Git worktree for isolation")] : [localize('agentHost.sessionConfig.isolation.folderDescription', "Work directly in the folder")],
 			default: canIsolate ? 'worktree' : 'folder',
-			readOnly: !canIsolate,
+			readOnly: !canIsolate || forceWorktree,
 			sessionMutable: false,
 		});
 
 		// Resolve isolation first because the branch default depends on the effective value.
 		const isolationDefault: 'folder' | 'worktree' = canIsolate ? 'worktree' : 'folder';
-		const isolationValue = isolationProperty.validate(request.config?.[SessionConfigKey.Isolation])
-			? request.config![SessionConfigKey.Isolation] as 'folder' | 'worktree'
-			: isolationDefault;
+		const isolationValue = forceWorktree
+			? 'worktree'
+			: isolationProperty.validate(request.config?.[SessionConfigKey.Isolation])
+				? request.config![SessionConfigKey.Isolation] as 'folder' | 'worktree'
+				: isolationDefault;
 
 		let branchProperty: ISchemaProperty<string> | undefined;
 		let branchDefault: string | undefined;
@@ -937,7 +942,10 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 
 		onProgress?.(buildWorktreeProgressText(WorktreeCreationPhase.Starting));
 
-		const checkoutRoot = await this._gitService.getRepositoryRoot(workingDirectory);
+		// CreaEditor: a bare repository has no checkout: its worktree is made from the bare repository itself.
+		const repositoryCheckoutRoot = await this._gitService.getRepositoryRoot(workingDirectory);
+		const bareRoot = repositoryCheckoutRoot ? undefined : await this._getBareRepositoryRoot(workingDirectory);
+		const checkoutRoot = repositoryCheckoutRoot ?? bareRoot;
 		if (!checkoutRoot) {
 			return workingDirectory;
 		}
@@ -1019,11 +1027,12 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 			return { branchName: newBranchName ?? selectedBranch, worktreePath, baseBranch };
 		});
 
-		const worktreeIncludeFiles = Array.isArray(config[SessionConfigKey.WorktreeIncludeFiles])
+		// CreaEditor: a bare repository has no ignored files or folders to bring along.
+		const worktreeIncludeFiles = !bareRoot && Array.isArray(config[SessionConfigKey.WorktreeIncludeFiles])
 			&& config[SessionConfigKey.WorktreeIncludeFiles].every(pattern => typeof pattern === 'string')
 			? config[SessionConfigKey.WorktreeIncludeFiles] as readonly string[]
 			: undefined;
-		const worktreeSymlinkFolders = Array.isArray(config[SessionConfigKey.WorktreeSymlinkFolders])
+		const worktreeSymlinkFolders = !bareRoot && Array.isArray(config[SessionConfigKey.WorktreeSymlinkFolders])
 			&& config[SessionConfigKey.WorktreeSymlinkFolders].every(pattern => typeof pattern === 'string')
 			? config[SessionConfigKey.WorktreeSymlinkFolders] as readonly string[]
 			: undefined;
@@ -1537,21 +1546,50 @@ export class WorktreeIsolation extends Disposable implements IAgentHostWorktreeI
 		} : undefined;
 	}
 
-	private async _getGitInfo(workingDirectory: URI): Promise<{ currentBranch: string; defaultBranch: IDefaultBranch } | undefined> {
-		const repositoryRoot = await this._gitService.getRepositoryRoot(workingDirectory);
+	private async _getGitInfo(workingDirectory: URI): Promise<{ currentBranch: string; defaultBranch: IDefaultBranch; bare: boolean } | undefined> {
+		const checkoutRoot = await this._gitService.getRepositoryRoot(workingDirectory);
+		// CreaEditor: or a bare repository (no checkout, see `_getBareRepositoryRoot`).
+		const bareRoot = checkoutRoot ? undefined : await this._getBareRepositoryRoot(workingDirectory);
+		const repositoryRoot = checkoutRoot ?? bareRoot;
 		if (!repositoryRoot) {
 			return undefined;
 		}
 
 		// Skip worktree isolation for a repo with no commits yet (unborn HEAD); `git worktree add` would fail.
 		const headCommit = await this._gitService.revParse(repositoryRoot, 'HEAD').catch(() => undefined);
-		if (!headCommit) {
+		// CreaEditor: a bare repository's HEAD is often unborn (`git init --bare` names a branch nobody
+		// pushed, a CreaEditor Server only keeps chats' branches): its newest branch stands in for it.
+		const newestBranch = !headCommit && bareRoot
+			? (await this._gitService.getBranches(repositoryRoot, { pattern: ['refs/heads'], sort: 'committerdate', count: 1 }).catch(() => []))[0]?.name
+			: undefined;
+		if (!headCommit && !newestBranch) {
 			return undefined;
 		}
 
-		const currentBranch = await this._gitService.getCurrentBranch(repositoryRoot) ?? 'HEAD';
+		const currentBranch = newestBranch ?? await this._gitService.getCurrentBranch(repositoryRoot) ?? 'HEAD';
 		const defaultBranch = await this._gitService.getDefaultBranch(repositoryRoot) ?? { name: currentBranch, startPoint: currentBranch };
-		return { currentBranch, defaultBranch };
+		return { currentBranch, defaultBranch, bare: !!bareRoot };
+	}
+
+	/**
+	 * CreaEditor: the bare repository `workingDirectory` is, as git reports it (its real path), or
+	 * `undefined` for anything else. A bare repository (like a CreaEditor Server's
+	 * `<data>/repos/<repoId>.git` of delegated code) has no checkout, so `getRepositoryRoot` finds no
+	 * root there; git lists the bare repository itself as its first (primary) worktree.
+	 */
+	private async _getBareRepositoryRoot(workingDirectory: URI): Promise<URI | undefined> {
+		if (workingDirectory.scheme !== Schemas.file) {
+			return undefined;
+		}
+		const primaryRoot = (await this._gitService.getWorktreeRoots(workingDirectory).catch(() => []))[0];
+		if (!primaryRoot) {
+			return undefined;
+		}
+		if (isEqual(primaryRoot, workingDirectory)) {
+			return primaryRoot;
+		}
+		const realPath = await fs.realpath(workingDirectory.fsPath).catch(() => undefined);
+		return realPath && isEqual(URI.file(realPath), primaryRoot) ? primaryRoot : undefined;
 	}
 
 	private async _writeWorktreeMetadata(
