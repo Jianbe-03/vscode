@@ -23,6 +23,7 @@ import { SessionWorkspaceConversionContribution } from './sessionWorkspaceConver
 import { QueueDrainContribution } from './queueDrain/queueDrainContribution.js';
 import { RunningChatsLimitContribution } from './runningChatsLimit/runningChatsLimitContribution.js';
 import { ChatNotificationsContribution } from '../shared/chatNotifications.js';
+import { CompactBeforeCacheExpiresContribution } from './compactBeforeCacheExpires/compactBeforeCacheExpiresContribution.js';
 import { RemoteSessionOriginContribution } from './remoteSessionOrigin/remoteSessionOriginContribution.js';
 import { SessionFlagsContribution } from './sessionFlags/sessionFlagsContribution.js';
 import { SessionInputNeededContribution } from './sessionInputNeeded/sessionInputNeededContribution.js';
@@ -61,8 +62,10 @@ export function registerBuiltInChatContributions(
 	registrations.add(contributions.registerContribution(SessionFlagsContribution));
 	registrations.add(contributions.registerContribution(AdditionalWorktreeLifecycleContribution));
 	registrations.add(contributions.registerContribution(ChatArchiveContribution));
-	// CreaEditor: push notifications, and the running chats limit of a CreaEditor Server.
+	// CreaEditor: push notifications, the running chats limit of a CreaEditor Server, and compacting
+	// idle Claude chats before their prompt cache expires.
 	registrations.add(contributions.registerContribution(ChatNotificationsContribution));
 	registrations.add(contributions.registerContribution(RunningChatsLimitContribution));
+	registrations.add(contributions.registerContribution(CompactBeforeCacheExpiresContribution));
 	return registrations;
 }

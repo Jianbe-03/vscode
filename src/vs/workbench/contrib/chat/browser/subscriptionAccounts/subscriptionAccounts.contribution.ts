@@ -12,6 +12,7 @@ import { autorun } from '../../../../../base/common/observable.js';
 import { localize, localize2 } from '../../../../../nls.js';
 import { Action2, registerAction2 } from '../../../../../platform/actions/common/actions.js';
 import { ISubscriptionAccount, SUBSCRIPTION_USAGE_WARNING_DEFAULT_PERCENT } from '../../../../../platform/agentHost/common/meta/subscriptionAccounts.js';
+import { COMPACT_BEFORE_CACHE_EXPIRES_DEFAULT_MIN_TOKENS, CompactBeforeCacheExpiresRootKey } from '../../../../../platform/agentHost/common/creaeditorCacheCompaction.js';
 import { CommandsRegistry, ICommandService } from '../../../../../platform/commands/common/commands.js';
 import { ConfigurationScope, Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../platform/configuration/common/configurationRegistry.js';
 import { SyncDescriptor } from '../../../../../platform/instantiation/common/descriptors.js';
@@ -77,6 +78,23 @@ Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).regis
 			default: 'ask',
 			scope: ConfigurationScope.APPLICATION,
 			markdownDescription: localize('chat.subscriptionAccounts.whenNoAccountLeft', "What a chat does when its Claude or Codex account is used up and no other account of the pool is left. When it asks, its **Continue When Usage Resets** button waits for the reset. See the usage of every account with **Show Subscription Usage**."),
+		},
+		// CreaEditor: compact idle Claude chats before their prompt cache expires (see
+		// `platform/agentHost/common/creaeditorCacheCompaction.ts`); read by every connected agent host.
+		[CompactBeforeCacheExpiresRootKey.Enabled]: {
+			type: 'boolean',
+			default: true,
+			scope: ConfigurationScope.APPLICATION,
+			markdownDescription: localize('creaeditor.claude.compactBeforeCacheExpires', "Compact an idle Claude chat (run `/compact`) shortly before its prompt cache expires: 5 minutes after its last message, or an hour with 1 hour caching. The summary is made from the cached context, which is cheap, and your next message starts from the small summary instead of writing the whole conversation to the cache again at full price. The trade-off: a summary loses detail of the conversation. Only chats with at least `#creaeditor.claude.compactBeforeCacheExpiresMinTokens#` tokens of context are compacted, at most once until you send a new message."),
+			agentHost: { key: CompactBeforeCacheExpiresRootKey.Enabled },
+		},
+		[CompactBeforeCacheExpiresRootKey.MinTokens]: {
+			type: 'number',
+			default: COMPACT_BEFORE_CACHE_EXPIRES_DEFAULT_MIN_TOKENS,
+			minimum: 0,
+			scope: ConfigurationScope.APPLICATION,
+			markdownDescription: localize('creaeditor.claude.compactBeforeCacheExpiresMinTokens', "With `#creaeditor.claude.compactBeforeCacheExpires#`, the smallest context (in tokens) of an idle Claude chat that is compacted before its prompt cache expires. Smaller chats are cheap to send again and keep all their detail."),
+			agentHost: { key: CompactBeforeCacheExpiresRootKey.MinTokens },
 		},
 	},
 });

@@ -50,6 +50,7 @@ import { AgentHostToolCallTracker, IAgentHostToolCallTracker } from '../../node/
 import { AgentHostTurnTracker, IAgentHostTurnTracker } from '../../node/agentHostTurnTracker.js';
 import { AgentHostLocalCommands, IAgentHostLocalCommands } from '../../node/localCommands/localChatCommand.js';
 import { registerBuiltInChatContributions } from '../../node/chatContributions/builtInChatContributions.js';
+import { AgentHostTurnService, IAgentHostTurnService } from '../../node/agentHostTurnService.js';
 import { AgentHostChatInputService, IAgentHostChatInputService } from '../../node/agentHostChatInputService.js';
 import { AgentHostSubscriptionService } from '../../node/agentHostSubscriptionService.js';
 import { AgentHostDatabase } from '../../node/agentHostDatabase.js';
@@ -918,6 +919,7 @@ function createBuiltInContributions(disposables: ReturnType<typeof ensureNoDispo
 	const telemetryReporter = new AgentHostTelemetryReporter(new RecordingTelemetryService());
 	services.set(IAgentHostTelemetryReporter, telemetryReporter);
 	services.set(IAgentHostTurnTracker, disposables.add(instantiationService.createInstance(AgentHostTurnTracker)));
+	services.set(IAgentHostTurnService, new AgentHostTurnService(stateManager, service, instantiationService));
 	services.set(IAgentHostToolCallTracker, disposables.add(instantiationService.createInstance(AgentHostToolCallTracker)));
 	const localCommands = disposables.add(instantiationService.createInstance(AgentHostLocalCommands));
 	services.set(IAgentHostLocalCommands, localCommands);

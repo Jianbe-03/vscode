@@ -17,7 +17,7 @@ suite('ChatNotifications', () => {
 
 	interface ISent { readonly url: string; readonly authorization: string | undefined; readonly body: { topic: string; title: string; message: string; priority: number; tags: string[]; click?: string } }
 
-	function createNotifier(overrides: Partial<ICreaEditorNotificationsConfig> = {}, machineName?: string) {
+	function createNotifier(overrides: Partial<ICreaEditorNotificationsConfig> = {}, machineName?: string, automaticRuns: ReadonlySet<string> = new Set()) {
 		let now = 1_000_000;
 		const timers: { callback: () => void; at: number; disposed: boolean }[] = [];
 		const sent: ISent[] = [];
@@ -41,6 +41,7 @@ suite('ChatNotifications', () => {
 			getTitle: session => session === 'copilot:/a' ? 'Fix the login page' : undefined,
 			fetch,
 			machineName,
+			isAutomaticRun: session => automaticRuns.has(session),
 			logService: new NullLogService(),
 			now: () => now,
 			settleMs: 4000,
@@ -83,6 +84,21 @@ suite('ChatNotifications', () => {
 			['Chat', 'Stopped with an error on build-box.', 3, 'creaeditor-test', 'http://100.64.0.2:31600'],
 		]);
 		assert.deepStrictEqual([sent[0].url, sent[0].authorization], ['http://127.0.0.1:9/', 'Bearer fake-token']);
+	});
+
+	test('CreaEditor: an automatic compaction before the prompt cache expires does not notify', async () => {
+		const automaticRuns = new Set<string>(['copilot:/a']);
+		const { notifier, sent, advance } = createNotifier({ onlyWhenAway: false }, undefined, automaticRuns);
+		notifier.onStatusChanged('copilot:/a', SessionStatus.Idle);
+		notifier.onStatusChanged('copilot:/a', SessionStatus.InProgress);
+		notifier.onStatusChanged('copilot:/a', SessionStatus.Idle);
+		await advance(5000);
+		// The user's next turn notifies again.
+		automaticRuns.clear();
+		notifier.onStatusChanged('copilot:/a', SessionStatus.InProgress);
+		notifier.onStatusChanged('copilot:/a', SessionStatus.Idle);
+		await advance(5000);
+		assert.deepStrictEqual(sent.map(item => item.body.message), ['Finished.']);
 	});
 
 	test('debounces: an approval answered at once and a status that does not hold are not notified', async () => {

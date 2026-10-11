@@ -8,6 +8,7 @@ import { ActionType } from '../../../common/state/sessionActions.js';
 import { SessionStatus } from '../../../common/state/sessionState.js';
 import type { IAgentHostChatContribution, IAgentHostChatContributionContext, ITurnEnd } from '../../../common/agentHostChatContributionsService.js';
 import { AgentHostStateManager, IAgentHostStateManager } from '../../agentHostStateManager.js';
+import { isAutoCompactTurn } from '../../../common/creaeditorCacheCompaction.js';
 
 /** Marks a read session unread after a terminal turn outcome. */
 export class MarkUnreadContribution extends Disposable implements IAgentHostChatContribution {
@@ -32,6 +33,10 @@ export class MarkUnreadContribution extends Disposable implements IAgentHostChat
 		// Route subagent turns to their owning session too (a background subagent
 		// can complete after the parent turn). Each client keeps its active session
 		// read; marking it unread is idempotent.
+		// CreaEditor: compacting an idle chat before its prompt cache expires is not news for the user.
+		if (isAutoCompactTurn(this._stateManager.getChatState(turn.channel), turn.turnId)) {
+			return;
+		}
 		const status = this._stateManager.getSessionSummary(turn.session)?.status ?? 0;
 		if (!(status & SessionStatus.IsRead)) {
 			return;

@@ -16,6 +16,7 @@ import { parseSubagentSessionUri, SessionStatus } from '../../common/state/sessi
 import { IAgentConfigurationService } from '../agentConfigurationService.js';
 import { AgentHostStateManager, IAgentHostStateManager } from '../agentHostStateManager.js';
 import { FileSecretStore, getAgentHostSecretStore } from './fileSecretStore.js';
+import { isOnlyAutoCompactRunning } from '../chatContributions/compactBeforeCacheExpires/compactBeforeCacheExpiresContribution.js';
 
 /** A status change is only notified when it holds this long (an approval answered at once is not). */
 const DEFAULT_SETTLE_MS = 4000;
@@ -24,7 +25,8 @@ const RATE_LIMIT = 10;
 const RATE_WINDOW_MS = 60_000;
 const SEND_TIMEOUT_MS = 10_000;
 
-type ChatPhase = 'idle' | 'running' | 'needsInput' | 'failed';
+/** `automatic`: only an automatic compaction runs (`compactBeforeCacheExpires`); its end notifies nothing. */
+type ChatPhase = 'idle' | 'running' | 'needsInput' | 'failed' | 'automatic';
 
 function phaseOf(status: SessionStatus): ChatPhase {
 	if ((status & SessionStatus.InputNeeded) === SessionStatus.InputNeeded) {
@@ -61,6 +63,8 @@ export interface IChatNotifierOptions {
 	readonly getConfig: () => ICreaEditorNotificationsConfig;
 	/** The chat's title, if it has one. */
 	readonly getTitle: (session: string) => string | undefined;
+	/** Whether only automatic work (compacting before the prompt cache expires) runs in the session. */
+	readonly isAutomaticRun?: (session: string) => boolean;
 	readonly fetch: NotificationFetch;
 	/** The machine named in the message, e.g. the server's name; undefined on the laptop. */
 	readonly machineName?: string;
@@ -106,7 +110,10 @@ export class ChatNotifier extends Disposable {
 		if (parseSubagentSessionUri(session)) {
 			return;
 		}
-		const next = phaseOf(status);
+		let next = phaseOf(status);
+		if (next === 'running' && this._options.isAutomaticRun?.(session)) {
+			next = 'automatic';
+		}
 		const previous = this._phases.get(session);
 		if (previous === next) {
 			return;
@@ -212,6 +219,7 @@ export class ChatNotificationsContribution extends Disposable implements IAgentH
 		const notifier = this._register(new ChatNotifier({
 			getConfig: () => readCreaEditorNotificationsConfig(this._configurationService.getRootConfigValues?.()),
 			getTitle: session => this._stateManager.getSessionSummary(session)?.title,
+			isAutomaticRun: session => isOnlyAutoCompactRunning(this._stateManager, session),
 			fetch: globalFetch,
 			machineName,
 			logService: _logService,
