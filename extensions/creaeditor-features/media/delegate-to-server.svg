@@ -3,7 +3,7 @@
 
 	<!-- The laptop's chat with the session menu -->
 	<rect x="40" y="56" width="380" height="488" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="64" y="92" fill="#8E8CA8" font-size="12">This laptop</text>
+	<text x="64" y="92" fill="#8E8CA8" font-size="12">An example chat, on this laptop</text>
 	<text x="64" y="118" fill="#F8F7FA" font-size="16" font-weight="600">Fix the login redirect</text>
 	<rect x="64" y="138" width="332" height="62" rx="8" fill="#252347"/>
 	<text x="80" y="164" fill="#F8F7FA" font-size="13">Claude: I changed auth/redirect.ts and</text>
@@ -33,10 +33,12 @@
 		<path d="M432 300 H516"/>
 		<path d="M506 290 L516 300 L506 310"/>
 	</g>
+	<text x="474" y="270" fill="#00EC95" font-size="12" font-weight="600" text-anchor="middle">the same</text>
+	<text x="474" y="286" fill="#00EC95" font-size="12" font-weight="600" text-anchor="middle">chat moves</text>
 
 	<!-- The server -->
 	<rect x="528" y="56" width="392" height="488" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="552" y="92" fill="#8E8CA8" font-size="12">Office Mac mini</text>
+	<text x="552" y="92" fill="#8E8CA8" font-size="12">The same chat, now on Office Mac mini</text>
 	<text x="896" y="92" fill="#00EC95" font-size="12" text-anchor="end">Online</text>
 	<text x="552" y="118" fill="#F8F7FA" font-size="16" font-weight="600">Fix the login redirect</text>
 	<circle cx="558" cy="140" r="4" fill="#00EC95"/>

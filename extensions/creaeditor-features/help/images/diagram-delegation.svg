@@ -8,7 +8,7 @@
 
 	<!-- Laptop chat -->
 	<rect x="40" y="66" width="260" height="190" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
-	<text x="60" y="96" fill="#8E8CA8" font-size="13">Laptop · Agents window</text>
+	<text x="60" y="96" fill="#8E8CA8" font-size="13">An example chat, on the laptop</text>
 	<text x="60" y="120" fill="#F8F7FA" font-size="16" font-weight="600">Fix the login redirect</text>
 	<rect x="56" y="138" width="228" height="100" rx="8" fill="#0F0E22" stroke="#3B3866"/>
 	<text x="72" y="164" fill="#F8F7FA" font-size="13">This chat continues on</text>
@@ -20,6 +20,8 @@
 		<path d="M304 160 H640"/>
 		<path d="M630 150 L640 160 L630 170"/>
 	</g>
+	<rect x="398" y="149" width="150" height="22" rx="11" fill="#16152D"/>
+	<text x="473" y="165" fill="#00EC95" font-size="12" font-weight="600" text-anchor="middle">the same chat moves</text>
 	<rect x="330" y="86" width="286" height="52" rx="8" fill="#252347"/>
 	<text x="346" y="108" fill="#F8F7FA" font-size="13" font-weight="600">Code: one git bundle</text>
 	<text x="346" y="128" fill="#BCBBCA" font-size="13">branch + uncommitted + untracked</text>
@@ -29,8 +31,8 @@
 
 	<!-- Server -->
 	<rect x="652" y="66" width="268" height="190" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
-	<text x="672" y="96" fill="#8E8CA8" font-size="13">Office Server</text>
-	<text x="900" y="96" fill="#00EC95" font-size="13" text-anchor="end">running</text>
+	<text x="672" y="96" fill="#8E8CA8" font-size="13">The same chat, on Office Server</text>
+	<text x="900" y="120" fill="#00EC95" font-size="13" text-anchor="end">running</text>
 	<text x="672" y="120" fill="#F8F7FA" font-size="16" font-weight="600">Fix the login redirect</text>
 	<text x="672" y="150" fill="#BCBBCA" font-size="13">Own worktree on branch</text>
 	<text x="672" y="170" fill="#F8F7FA" font-size="13">creaeditor/delegated/3f9a2c1d</text>

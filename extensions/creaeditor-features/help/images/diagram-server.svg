@@ -50,13 +50,16 @@
 	<text x="396" y="306" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">ONE WORKTREE PER CHAT</text>
 	<rect x="392" y="318" width="246" height="40" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
 	<circle cx="410" cy="338" r="5" fill="#00EC95"/>
-	<text x="424" y="343" fill="#F8F7FA" font-size="13">web-3f9a · Fix login</text>
+	<text x="424" y="343" fill="#F8F7FA" font-size="13">Fix login redirect</text>
+	<text x="624" y="343" fill="#8E8CA8" font-size="12" text-anchor="end">running</text>
 	<rect x="392" y="366" width="246" height="40" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
 	<circle cx="410" cy="386" r="5" fill="#00EC95"/>
-	<text x="424" y="391" fill="#F8F7FA" font-size="13">web-8c21 · New pricing</text>
+	<text x="424" y="391" fill="#F8F7FA" font-size="13">New pricing page</text>
+	<text x="624" y="391" fill="#8E8CA8" font-size="12" text-anchor="end">running</text>
 	<rect x="392" y="414" width="246" height="40" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
 	<circle cx="410" cy="434" r="5" fill="#F2B24C"/>
-	<text x="424" y="439" fill="#F8F7FA" font-size="13">api-11d0 · queued</text>
+	<text x="424" y="439" fill="#F8F7FA" font-size="13">Add rate limits</text>
+	<text x="624" y="439" fill="#8E8CA8" font-size="12" text-anchor="end">waiting</text>
 	<text x="396" y="484" fill="#BCBBCA" font-size="13">Repositories are kept bare;</text>
 	<text x="396" y="504" fill="#BCBBCA" font-size="13">every chat works in its own copy.</text>
 
