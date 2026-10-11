@@ -285,6 +285,16 @@ Setup-tokens are stored in the keychain by the window and handed to the agent ho
 - The Claude and Codex agent SDKs ship inside CreaEditor.app (about 490 MB), because CreaEditor has no SDK download server.
 - After installing a new CreaEditor build, macOS asks once for access to **CreaEditor Safe Storage** (where the tokens are kept); choose **Always Allow**. Without an Apple Developer ID that answer does not carry over to the next build.
 
+## Compacting Idle Claude Chats Before the Cache Expires
+
+Anthropic keeps a Claude chat's context in its prompt cache for 5 minutes after each request (1 hour with 1 hour caching); reading it from the cache costs a tenth of the normal price. A message sent after the cache expired writes the whole context to the cache again at full price (more than the normal price), which adds up for a big chat you come back to later.
+
+So CreaEditor compacts an idle Claude chat shortly before its cache expires: 4 minutes 15 seconds after its last turn ended (57 minutes with 1 hour caching, seen from the turn's usage) it runs the Claude CLI's own `/compact`. The summary is made from the cached context (cheap), and your next message starts from the small summary. The chat shows it as a turn labeled "Compacted automatically: the prompt cache was about to expire", with "Conversation compacted". It does not send a phone notification and does not mark the chat unread.
+
+It only happens when all of this holds: the setting is on; the context of the last request (input, cache read and cache write tokens) is at least `creaeditor.claude.compactBeforeCacheExpiresMinTokens` (default 60000); the chat is idle (no running turn, no queued or steering message, nothing waiting for approval or an answer; a chat waiting for a usage reset ended with an error and is never compacted); it is not archived, read-only or delegated to a server (a delegated chat is archived on the laptop; on the server it is compacted there); and it was not compacted since your last message (a `/compact` you sent counts). A new message cancels it, and a chat is compacted at most once per idle period. On a CreaEditor Server at its running chats limit the compaction is skipped rather than queued.
+
+The trade-off: a summary loses detail of the conversation (exact file contents, tool output, earlier wording). Turn it off with `creaeditor.claude.compactBeforeCacheExpires` (on by default), or raise the threshold so only big chats are compacted. Both settings apply to every agent host this computer connects to.
+
 ## Remote Access
 
 Use the Agents window of your Mac from a phone or another computer: see the sessions and chats live, open a chat and follow its output, send messages, approve or skip tool calls, stop a chat or **Stop All Chats**, and pick the agent and model. The agents keep running on the Mac; the device shows the same sessions as every window.
