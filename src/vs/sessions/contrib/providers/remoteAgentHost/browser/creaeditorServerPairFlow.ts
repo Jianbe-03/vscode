@@ -54,6 +54,7 @@ export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, inp
 	let password: string | undefined;
 	let needsPassword = publicMode;
 	let lastError: string | undefined;
+	let name = options?.name;
 	for (let attempt = 0; attempt < 5; attempt++) {
 		if (!code || lastError) {
 			const typed = (await quickInputService.input({
@@ -87,6 +88,21 @@ export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, inp
 				return undefined;
 			}
 		}
+		// The name before pairing: no quick input is open while the server answers, so text typed then
+		// would land in the chat input behind it (and be sent as a chat message).
+		if (!pairAgain && name === undefined) {
+			const typedName = await quickInputService.input({
+				title,
+				prompt: localize('creaeditorServers.namePrompt', "Name this server."),
+				value: input.suggestedName,
+				valueSelection: [0, input.suggestedName.length],
+				ignoreFocusLost: true,
+			});
+			if (typedName === undefined) {
+				return undefined;
+			}
+			name = typedName.trim() || input.suggestedName;
+		}
 		const deviceName = localize('creaeditorServers.deviceName', "{0} on {1}", productService.nameShort, osName());
 		const result = await progressService.withProgress(
 			{ location: ProgressLocation.Notification, title: localize('creaeditorServers.pairing', "Pairing with {0}...", input.suggestedName) },
@@ -100,13 +116,6 @@ export async function pairAndAddCreaEditorServer(accessor: ServicesAccessor, inp
 			return server;
 		}
 		if (result.ok) {
-			const name = options?.name ?? (await quickInputService.input({
-				title,
-				prompt: localize('creaeditorServers.namePrompt', "Name this server."),
-				value: input.suggestedName,
-				valueSelection: [0, input.suggestedName.length],
-				ignoreFocusLost: true,
-			}))?.trim() ?? input.suggestedName;
 			const server = await serversService.addServer({ name: name || input.suggestedName, serverUrl: input.baseUrl, sshHost: options?.sshHost }, result);
 			try {
 				await progressService.withProgress(
@@ -143,13 +152,16 @@ export async function pairAgainWithCreaEditorServer(accessor: ServicesAccessor, 
 	const progressService = accessor.get(IProgressService);
 	const notificationService = accessor.get(INotificationService);
 	const instantiationService = accessor.get(IInstantiationService);
-	const check = await progressService.withProgress(
+	// The last health check usually knows whether the server is public: no request (and no moment
+	// without a quick input) before asking for the code.
+	const known = serversService.healthStates.get().get(server.id);
+	const health = known?.reachable ? known.health : (await progressService.withProgress(
 		{ location: ProgressLocation.Notification, title: localize('creaeditorServers.checkingServer', "Checking {0}...", server.name), delay: 500 },
 		() => serversService.checkAddress(server.serverUrl),
-	);
-	if (!check?.health) {
+	))?.health;
+	if (!health) {
 		notificationService.error(localize('creaeditorServers.pairAgainUnreachable', "{0} does not answer. Pair again once it is online.", server.name));
 		return undefined;
 	}
-	return instantiationService.invokeFunction(pairAndAddCreaEditorServer, { baseUrl: server.serverUrl, suggestedName: server.name }, check.health.publicMode, { pairAgain: server });
+	return instantiationService.invokeFunction(pairAndAddCreaEditorServer, { baseUrl: server.serverUrl, suggestedName: server.name }, health.publicMode, { pairAgain: server });
 }

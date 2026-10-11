@@ -44,7 +44,7 @@ import { Menus } from '../../../../browser/menus.js';
 import { SessionsCategories } from '../../../../common/categories.js';
 import { SessionWorkspacePickerGroupContext } from '../../../../common/contextkeys.js';
 import { SESSION_WORKSPACE_GROUP_REMOTE } from '../../../../services/sessions/common/session.js';
-import { describeCreaEditorServer, ICreaEditorServer, ICreaEditorServersService } from './creaeditorServers.js';
+import { describeCreaEditorServer, ICreaEditorServer, ICreaEditorServerCheck, ICreaEditorServersService } from './creaeditorServers.js';
 import { installCreaEditorServerOverSSH } from './creaeditorServerSshInstall.js';
 import { pairAgainWithCreaEditorServer, pairAndAddCreaEditorServer } from './creaeditorServerPairFlow.js';
 
@@ -63,6 +63,9 @@ async function addByAddress(accessor: ServicesAccessor): Promise<void> {
 	const notificationService = accessor.get(INotificationService);
 	const instantiationService = accessor.get(IInstantiationService);
 
+	// The answer of the last address check, so accepting needs no second request (text typed while
+	// waiting for one would land in the chat input behind the closed quick input).
+	let lastCheck: { readonly value: string; readonly check: ICreaEditorServerCheck | undefined } | undefined;
 	const value = await quickInputService.input({
 		title: localize('creaeditorServers.addTitle', "Add CreaEditor Server"),
 		prompt: localize('creaeditorServers.addressPrompt', "Paste the pairing link from the server, or its address (https://... or http://ip:port)."),
@@ -72,13 +75,15 @@ async function addByAddress(accessor: ServicesAccessor): Promise<void> {
 			if (!input.trim()) {
 				return localize('creaeditorServers.addressEmpty', "Enter the server's address or pairing link.");
 			}
-			return (await serversService.checkAddress(input)) === undefined ? localize('creaeditorServers.addressInvalid', "Enter an address like https://agents.example.com or http://100.64.0.2:31600.") : undefined;
+			const check = await serversService.checkAddress(input);
+			lastCheck = { value: input, check };
+			return check === undefined ? localize('creaeditorServers.addressInvalid', "Enter an address like https://agents.example.com or http://100.64.0.2:31600.") : undefined;
 		},
 	});
 	if (!value) {
 		return;
 	}
-	const check = await progressService.withProgress(
+	const check = lastCheck?.value === value && lastCheck.check?.health ? lastCheck.check : await progressService.withProgress(
 		{ location: ProgressLocation.Notification, title: localize('creaeditorServers.checking', "Looking for a CreaEditor Server...") },
 		() => serversService.checkAddress(value),
 	);
