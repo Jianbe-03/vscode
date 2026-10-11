@@ -10,6 +10,7 @@ import { createDecorator } from '../../../instantiation/common/instantiation.js'
 import { ILogService } from '../../../log/common/log.js';
 import { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { parseProxyBearer } from '../claude/claudeProxyAuth.js';
+import { encodeForwardedChatError, USER_FACING_CHAT_FETCH_TYPE } from '../shared/proxyChatError.js';
 import {
 	ILoopbackProxyHandle,
 	ILoopbackProxyRuntime,
@@ -258,6 +259,13 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 			const workingDirectory = runtime.state.sessionWorkingDirectories.get(sessionId);
 			const result = await connection.chat(bridgeRequest, { sessionId, signal: entry.ac.signal, ...(workingDirectory ? { workingDirectory } : {}) });
 			if (entry.ac.signal.aborted || res.writableEnded) {
+				return;
+			}
+			if (result.error && result.userFacingError) {
+				// CreaEditor: a refusal that a retry does not change (a used-up budget). The Copilot CLI
+				// retries a 5xx (and 409/429) five times, then wraps the last error; it gives up on a 402
+				// at once and keeps the message, which carries the marker so the chat shows just the text.
+				this._writeJsonError(res, 402, `${result.error} ${encodeForwardedChatError({ fetchError: { type: USER_FACING_CHAT_FETCH_TYPE, reason: result.error } })}`, 'api_error');
 				return;
 			}
 			if (result.error) {

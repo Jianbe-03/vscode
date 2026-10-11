@@ -31,6 +31,8 @@ export const enum ChatFetchResponseType {
 	NetworkError = 'networkError',
 	AgentUnauthorized = 'agent_unauthorized',
 	AgentFailedDependency = 'agent_failed_dependency',
+	/** CreaEditor: `reason` is a complete message for the user, such as a used-up budget (the agent host's `USER_FACING_CHAT_FETCH_TYPE`). */
+	UserFacing = 'user_facing',
 	InvalidStatefulMarker = 'invalid_stateful_marker',
 	Success = 'success'
 }
@@ -313,6 +315,8 @@ function getChatErrorDetailsInner(fetchError: IChatFetchErrorPayload, copilotPla
 			return { message: localize('chatError.somethingWrong', "Sorry, something went wrong.") };
 		case ChatFetchResponseType.AgentFailedDependency:
 			return { message: reason };
+		case ChatFetchResponseType.UserFacing:
+			return { message: reason, isExpectedError: true };
 		case ChatFetchResponseType.Length:
 			return { message: localize('chatError.length', "Sorry, the response hit the length limit. Please rephrase your prompt.") };
 		case ChatFetchResponseType.NotFound:

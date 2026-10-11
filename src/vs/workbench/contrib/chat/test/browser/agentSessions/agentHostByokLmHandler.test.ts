@@ -11,7 +11,7 @@ import { mock } from '../../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../../base/test/common/utils.js';
 import { ExtensionIdentifier } from '../../../../../../platform/extensions/common/extensions.js';
 import { NullLogService } from '../../../../../../platform/log/common/log.js';
-import type { IByokLmChatRequest } from '../../../../../../platform/agentHost/common/agentHostByokLm.js';
+import { USER_FACING_LM_ERROR_NAME, type IByokLmChatRequest } from '../../../../../../platform/agentHost/common/agentHostByokLm.js';
 import { TestConfigurationService } from '../../../../../../platform/configuration/test/common/testConfigurationService.js';
 import { ContextKeyService } from '../../../../../../platform/contextkey/browser/contextKeyService.js';
 import { IContextKey, IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
@@ -554,5 +554,24 @@ suite('AgentHostByokLmHandler', () => {
 		);
 
 		assert.deepStrictEqual(result, { output: [], error: 'provider exploded' });
+	});
+
+	test('CreaEditor: marks an error meant for the user (a used-up budget) as user-facing', async () => {
+		const service = new TestLanguageModelsService(
+			new Map([['id', byokModel('acme', 'claude')]]),
+			() => {
+				const error = new Error('The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.');
+				error.name = USER_FACING_LM_ERROR_NAME;
+				throw error;
+			},
+		);
+		const handler = createHandler(service);
+
+		const result = await handler.chat(
+			{ vendor: 'acme', modelId: 'claude', input: [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'hi' }] }] },
+			CancellationToken.None,
+		);
+
+		assert.deepStrictEqual(result, { output: [], error: 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.', userFacingError: true });
 	});
 });

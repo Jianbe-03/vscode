@@ -411,7 +411,7 @@ export class GatewayDirectConnection implements IByokLmBridgeConnection, IDispos
 		const stop = this._host.findHardStop({ providerGroup: key.label, ...(issueLabel ? { issue: issueLabel } : {}), ...(work?.repo ? { repo: work.repo } : {}) });
 		if (stop) {
 			this._host.log(`[GatewayDirect] Refused a request: budget ${stop.budget.id} is used up.`);
-			return { output: [], error: formatServerBudgetRefusal(stop) };
+			return { output: [], error: formatServerBudgetRefusal(stop), userFacingError: true };
 		}
 
 		const chatId = context?.sessionId ?? 'background';

@@ -201,7 +201,8 @@ suite('CreaEditor - server gateway connection', () => {
 		];
 		stopped.dispose();
 		wrongKey.dispose();
-		assert.deepStrictEqual({ errors: results.map(result => result.error), requests: received.length }, {
+		assert.deepStrictEqual({ errors: results.map(result => result.error), userFacing: results.map(result => !!result.userFacingError), requests: received.length }, {
+			userFacing: [true, false, false],
 			errors: [
 				'The monthly budget of $10 for the Work key is used up. Raise it on the AI Costs page.',
 				'This server has no litellm key for model "Home/claude-sonnet". Delegate a chat that uses this key to the server first.',

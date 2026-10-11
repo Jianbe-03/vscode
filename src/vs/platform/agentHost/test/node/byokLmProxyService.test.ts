@@ -10,6 +10,7 @@ import { NullLogService } from '../../../log/common/log.js';
 import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
 import { ByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
 import { ByokLmProxyService, type IByokLmProxyHandle } from '../../node/copilot/byokLmProxyService.js';
+import { stripProxyErrorMarker, tryParseForwardedChatError } from '../../node/shared/proxyChatError.js';
 
 /**
  * Exercises the inference path end-to-end without the Copilot SDK runtime:
@@ -360,6 +361,26 @@ suite('ByokLmProxyService', () => {
 				assert.strictEqual(response.status, 502);
 				const body = await response.json() as { error?: { message?: string } };
 				assert.strictEqual(body.error?.message, 'model unavailable');
+			},
+		);
+	});
+
+	test('CreaEditor: answers a user-facing refusal with a 402 that carries the message for the chat', async () => {
+		const refusal = 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.';
+		await withProxy(
+			async () => ({ output: [], error: refusal, userFacingError: true }),
+			async (handle) => {
+				const response = await fetch(responsesUrl(handle, 'acme'), {
+					method: 'POST',
+					headers: authHeaders(handle),
+					body: JSON.stringify({ model: 'm', input: [] }),
+				});
+				const message = ((await response.json()) as { error: { message: string } }).error.message;
+				assert.deepStrictEqual({ status: response.status, text: stripProxyErrorMarker(message), forwarded: tryParseForwardedChatError(message) }, {
+					status: 402,
+					text: refusal,
+					forwarded: { fetchError: { type: 'user_facing', reason: refusal } },
+				});
 			},
 		);
 	});

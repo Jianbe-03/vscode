@@ -53,8 +53,9 @@ export function buildForwardedChatErrorFromCopilotSdkFields(data: ICopilotSdkCha
 
 /** Converts a Copilot SDK error into the provider-neutral protocol shape. */
 export function buildChatErrorInfoFromCopilotSdkFields(data: ICopilotSdkChatErrorFields): ErrorInfo {
+	// CreaEditor: a marker our own proxy put in the message (a used-up budget) says more than the status.
 	const forwarded = buildForwardedChatErrorFromCopilotSdkFields(data);
-	const meta = forwarded ? toChatErrorMeta(forwarded) : tryBuildChatErrorMeta(data.message);
+	const meta = tryBuildChatErrorMeta(data.message) ?? (forwarded ? toChatErrorMeta(forwarded) : undefined);
 	return {
 		errorType: data.errorType,
 		message: stripProxyErrorMarker(data.message),

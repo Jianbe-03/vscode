@@ -18,6 +18,7 @@ import {
 	IByokLmModelInfo,
 	IByokLmOutputItem,
 	IByokLmReasoningItem,
+	USER_FACING_LM_ERROR_NAME,
 } from '../../../../../../platform/agentHost/common/agentHostByokLm.js';
 import { IContextKeyService } from '../../../../../../platform/contextkey/common/contextkey.js';
 import { ILogService } from '../../../../../../platform/log/common/log.js';
@@ -154,7 +155,8 @@ export class AgentHostByokLmHandler extends Disposable implements IAgentHostByok
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			this._logService.warn(`[AgentHostByokLmHandler] chat request failed for ${request.vendor}/${request.modelId}: ${message}`);
-			return { output: [], error: message };
+			// CreaEditor: keep a message meant for the user (a used-up budget) recognizable for the agent host.
+			return { output: [], error: message, ...(err instanceof Error && err.name === USER_FACING_LM_ERROR_NAME ? { userFacingError: true } : {}) };
 		}
 	}
 

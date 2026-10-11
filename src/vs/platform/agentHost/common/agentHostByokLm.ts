@@ -129,7 +129,19 @@ export interface IByokLmChatResult {
 		readonly reasoningTokens?: number;
 	};
 	readonly error?: string;
+	/**
+	 * CreaEditor: {@link error} is a complete message for the user that a retry does not change, such
+	 * as a used-up budget: the proxy answers it so the Copilot CLI does not retry, and the chat shows
+	 * just the message.
+	 */
+	readonly userFacingError?: boolean;
 }
+
+/**
+ * CreaEditor: the name of an error from the language model API whose message is a complete message
+ * for the user (the copilot extension's `USER_FACING_ERROR_NAME`, e.g. a used-up budget).
+ */
+export const USER_FACING_LM_ERROR_NAME = 'CreaEditorUserFacingError';
 
 /**
  * Metadata for a renderer BYOK model, enumerated over the bridge so the node

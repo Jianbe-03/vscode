@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { buildChatErrorInfoFromCopilotSdkFields, buildForwardedChatErrorFromCopilotSdkFields } from '../../node/copilot/copilotSdkChatError.js';
-import type { IForwardedChatError } from '../../node/shared/proxyChatError.js';
+import { encodeForwardedChatError, type IForwardedChatError } from '../../node/shared/proxyChatError.js';
 
 suite('copilotSdkChatError', () => {
 
@@ -76,6 +76,17 @@ suite('copilotSdkChatError', () => {
 					},
 				},
 			},
+		});
+	});
+
+	test('CreaEditor: a proxy marker in the message wins over the status code (a used-up budget answered with 402)', () => {
+		const refusal = 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.';
+		const marker = encodeForwardedChatError({ fetchError: { type: 'user_facing', reason: refusal } });
+		assert.deepStrictEqual(buildChatErrorInfoFromCopilotSdkFields({ errorType: 'query', statusCode: 402, message: `402 ${refusal} ${marker}` }), {
+			errorType: 'query',
+			message: `402 ${refusal}`,
+			stack: undefined,
+			_meta: { chatError: { fetchError: { type: 'user_facing', reason: refusal } } },
 		});
 	});
 });

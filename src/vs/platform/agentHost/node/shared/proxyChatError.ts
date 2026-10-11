@@ -45,6 +45,13 @@ export interface IForwardedChatFetchError {
 }
 
 /**
+ * CreaEditor: the {@link IForwardedChatFetchError.type} of an error whose `reason` is a complete
+ * message for the user, such as a used-up budget; the core formatter shows just the `reason`
+ * (mirrors `ChatFetchResponseType.UserFacing` in `chatErrorMessages.ts`).
+ */
+export const USER_FACING_CHAT_FETCH_TYPE = 'user_facing';
+
+/**
  * The full forwarded chat error placed at `ErrorInfo._meta.chatError`.
  */
 export interface IForwardedChatError {

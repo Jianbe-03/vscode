@@ -173,6 +173,11 @@ suite('ChatErrorMessages', () => {
 			assert.deepStrictEqual(details, { code: ChatFetchResponseType.AgentFailedDependency, message: 'timed out' });
 		});
 
+		test('CreaEditor: a user-facing error shows just its reason', () => {
+			const details = getChatErrorDetailsFromFetchError({ type: ChatFetchResponseType.UserFacing, reason: 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.' }, undefined);
+			assert.deepStrictEqual(details, { code: ChatFetchResponseType.UserFacing, message: 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.', isExpectedError: true });
+		});
+
 		test('rate-limit messages vary by capi code and auto flag', () => {
 			const messages = [
 				getChatErrorDetailsFromFetchError({ type: ChatFetchResponseType.RateLimited, retryAfter: 30, capiError: { code: 'agent_mode_limit_exceeded' } }, undefined).message,
