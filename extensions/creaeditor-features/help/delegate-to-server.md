@@ -166,7 +166,7 @@ Left out: settings and credential files, MCP configurations, `.env*` files and k
 They are encrypted for the server like the accounts and kept with the delegated chat, in the server's data folder (`user-customizations/<id>`). Only the server's agent for **that** chat uses them; the server's own home folder and its other chats are not touched:
 
 - **Claude** gets your agents, skills and commands as a plugin named `personal`, so they show as `personal:<name>`, and your `CLAUDE.md` at the end of its system prompt.
-- **Copilot CLI** gets your agents and skills as a plugin folder, and your `copilot-instructions.md` at the end of its system message.
+- **Copilot CLI** gets your agents as custom agents of that chat (by their own names), your skills from a plugin folder, and your `copilot-instructions.md` at the end of its system message.
 - **Codex** gets your `AGENTS.md` with its instructions.
 
 When you delegate a chat again, the current versions go along. They are removed together with the chat's worktree.

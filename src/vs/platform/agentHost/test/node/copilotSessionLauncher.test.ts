@@ -1034,7 +1034,7 @@ suite('CopilotSessionLauncher shared session config', () => {
 		}
 	});
 
-	test('a chat delegated to a CreaEditor Server gets the personal agents, also as custom agents when the session lists some, and the personal instructions', async () => {
+	test('a chat delegated to a CreaEditor Server gets the personal agents as custom agents, keeps the agents of plugin folders, and gets the personal instructions', async () => {
 		const dir = getRandomTestPath(tmpdir(), 'vsctests', 'copilotLauncherPersonal');
 		const worktree = join(dir, 'worktrees', 'app-1');
 		const root = join(dir, 'user-customizations');
@@ -1085,6 +1085,18 @@ suite('CopilotSessionLauncher shared session config', () => {
 			skills: [],
 			instructions: [],
 		};
+		// A plugin with a folder on disk: the SDK would load its agent, but not once `customAgents` lists any.
+		const folderAgent = join(dir, 'synced', 'folder-agent.agent.md');
+		fs.writeFileSync(folderAgent, '---\nname: folder-agent\ndescription: From a folder.\n---\nHi.\n');
+		const folderPlugin: ICopilotPluginInfo = {
+			format: PluginFormat.Copilot,
+			hooks: [],
+			mcpServers: [],
+			agents: [{ uri: URI.file(folderAgent), name: 'folder-agent', customization: { type: CustomizationType.Agent, id: 'folder-agent', uri: URI.file(folderAgent).toString(), name: 'folder-agent' } }],
+			skills: [],
+			instructions: [],
+			pluginDir: URI.file(join(dir, 'synced')),
+		};
 		const plan = (workingDirectory: URI, plugins: ICopilotPluginInfo[]): CopilotSessionLaunchPlan => ({
 			kind: 'create',
 			model: undefined,
@@ -1101,7 +1113,7 @@ suite('CopilotSessionLauncher shared session config', () => {
 		const sessions = new DisposableStore();
 		try {
 			sessions.add(await launcher.launch(plan(URI.file(join(worktree, 'src')), [syncedPlugin]), testRuntime));
-			sessions.add(await launcher.launch(plan(URI.file(worktree), []), testRuntime));
+			sessions.add(await launcher.launch(plan(URI.file(worktree), [folderPlugin]), testRuntime));
 			sessions.add(await launcher.launch(plan(URI.file(join(dir, 'elsewhere')), []), testRuntime));
 			const personalDir = join(root, 'd1', 'copilot');
 			assert.deepStrictEqual({
@@ -1114,12 +1126,12 @@ suite('CopilotSessionLauncher shared session config', () => {
 			}, {
 				configs: [
 					{ customAgents: ['director', 'copilot-helper'], personalPlugin: true, instructions: true },
-					{ customAgents: [], personalPlugin: true, instructions: true },
+					{ customAgents: ['folder-agent', 'copilot-helper'], personalPlugin: true, instructions: true },
 					{ customAgents: [], personalPlugin: false, instructions: false },
 				],
 				logs: [
-					`[Copilot:session-1] Using the personal customizations of the delegated chat in <dir>/worktrees/app-1/src: plugin folder <dir>/user-customizations/d1/copilot (1 agents, also as custom agents); copilot-instructions.md in the system message`,
-					`[Copilot:session-1] Using the personal customizations of the delegated chat in <dir>/worktrees/app-1: plugin folder <dir>/user-customizations/d1/copilot (1 agents); copilot-instructions.md in the system message`,
+					`[Copilot:session-1] Using the personal customizations of the delegated chat in <dir>/worktrees/app-1/src: plugin folder <dir>/user-customizations/d1/copilot (1 agents as custom agents); copilot-instructions.md in the system message`,
+					`[Copilot:session-1] Using the personal customizations of the delegated chat in <dir>/worktrees/app-1: plugin folder <dir>/user-customizations/d1/copilot (1 agents as custom agents); copilot-instructions.md in the system message`,
 				],
 			});
 		} finally {

@@ -966,16 +966,25 @@ export class CopilotSessionLauncher implements ICopilotSessionLauncher {
 		// skills and instructions, so it is left alone.
 		const sessionCustomAgents = plan.isEphemeral ? [] : await toSdkSessionCustomAgents(plugins, plan.resolvedAgentName, this._fileService);
 		// CreaEditor: a chat delegated to this CreaEditor Server uses the laptop user's personal agents and
-		// skills (a plugin folder of this session only) and copilot-instructions.md. The SDK drops the
-		// agents of plugin folders (and of ~/.copilot) as soon as `customAgents` lists any, so then the
-		// personal agents are listed there as well.
+		// skills (a plugin folder of this session only) and copilot-instructions.md. The SDK does not show
+		// that folder's agents in every setup (on a server they never reached the model), and it drops all
+		// folder agents once `customAgents` lists any. So the personal agents always go in `customAgents`,
+		// together with the agents of the session's other plugin folders, which would be dropped otherwise.
 		const delegated = findDelegatedUserCustomizations(plan.workingDirectory?.fsPath);
-		const personalAgents = delegated?.copilotAgents && sessionCustomAgents.length && !plan.isEphemeral
-			? (await toSdkCustomAgents(delegated.copilotAgents.map(agent => ({ name: agent.name, uri: URI.file(agent.path) })), this._fileService)).filter(agent => !sessionCustomAgents.some(existing => existing.name === agent.name))
+		const personalAgents = delegated?.copilotAgents?.length && !plan.isEphemeral
+			? await toSdkCustomAgents(delegated.copilotAgents.map(agent => ({ name: agent.name, uri: URI.file(agent.path) })), this._fileService)
 			: [];
-		const customAgents = [...sessionCustomAgents, ...personalAgents];
+		const folderAgents = personalAgents.length
+			? await toSdkCustomAgents(plugins.filter(p => p.pluginDir?.scheme === Schemas.file).flatMap(p => p.agents), this._fileService)
+			: [];
+		const customAgents = [...sessionCustomAgents];
+		for (const agent of [...folderAgents, ...personalAgents]) {
+			if (!customAgents.some(existing => existing.name === agent.name)) {
+				customAgents.push(agent);
+			}
+		}
 		const personalParts = [
-			...(delegated?.copilotPluginDir ? [`plugin folder ${delegated.copilotPluginDir}${delegated.copilotAgents?.length ? ` (${delegated.copilotAgents.length} agents${personalAgents.length ? ', also as custom agents' : ''})` : ''}`] : []),
+			...(delegated?.copilotPluginDir ? [`plugin folder ${delegated.copilotPluginDir}${delegated.copilotAgents?.length ? ` (${personalAgents.length} agents as custom agents)` : ''}`] : []),
 			...(delegated?.copilotInstructions ? ['copilot-instructions.md in the system message'] : []),
 		];
 		if (personalParts.length && plan.workingDirectory) {
