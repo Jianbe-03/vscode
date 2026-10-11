@@ -291,6 +291,7 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 			head: body.head,
 			snapshot: body.snapshot,
 			subPath: body.subPath,
+			...(typeof body.repoName === 'string' && body.repoName ? { repoName: body.repoName.slice(0, 200) } : {}),
 			...(bundleFile ? { bundleFile } : {}),
 			...(typeof body.remoteUrl === 'string' && body.remoteUrl ? { remoteUrl: body.remoteUrl } : {}),
 		}, this._runner));

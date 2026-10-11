@@ -5,13 +5,13 @@
 
 // CreaEditor: the server side of Delegate to Server's code. Every repository is a bare repository
 // `<data>/repos/<repoId>.git`; every delegated chat works in its own worktree
-// `<data>/worktrees/<delegationId>` on the branch `creaeditor/delegated/<shortId>`, with the laptop's
+// `<data>/worktrees/<repository name>-<shortId>` on the branch `creaeditor/delegated/<shortId>`, with the laptop's
 // uncommitted changes applied as uncommitted changes. Results go back as a bundle of that branch
 // (Bring Back Changes) or as a pull request (Open PR from the Server).
 
 import * as fs from 'fs';
 import { join } from '../../../../base/common/path.js';
-import { CREAEDITOR_DELEGATION_BRANCH_PREFIX, DelegationErrorCode } from '../../common/creaeditorDelegation.js';
+import { CREAEDITOR_DELEGATION_BRANCH_PREFIX, DelegationErrorCode, slugifyDelegationName } from '../../common/creaeditorDelegation.js';
 import { bundleFetchRefspecs, DelegationError, filterExistingCommits, snapshotWorkingTree } from './delegationPack.js';
 import { delegationCommitIdentity, git, gitSucceeds, IDelegationProcessRunner, nodeDelegationProcessRunner } from './delegationProcess.js';
 
@@ -49,9 +49,15 @@ export function getBareRepositoryPath(layout: IDelegationStoreLayout, repoId: st
 	return join(layout.repos, `${repoId}.git`);
 }
 
-export function getDelegationWorktreePath(layout: IDelegationStoreLayout, delegationId: string): string {
-	assertDelegationId(delegationId, 'delegation id');
-	return join(layout.worktrees, delegationId);
+/**
+ * The worktree of a delegated chat: `<worktrees>/<repository name>-<shortId>` (the Agents window shows
+ * the folder's name), or `<worktrees>/<delegationId>` without a usable name.
+ */
+export function getDelegationWorktreePath(layout: IDelegationStoreLayout, delegation: { readonly delegationId: string; readonly shortId: string; readonly repoName?: string }): string {
+	assertDelegationId(delegation.delegationId, 'delegation id');
+	assertDelegationId(delegation.shortId, 'short id');
+	const name = delegation.repoName ? slugifyDelegationName(delegation.repoName) : undefined;
+	return join(layout.worktrees, name ? `${name}-${delegation.shortId}` : delegation.delegationId);
 }
 
 /** The branch of a delegated chat. */
@@ -92,6 +98,8 @@ export interface IPrepareWorktreeRequest {
 	readonly remoteUrl?: string;
 	/** The chat's folder in the repository (`''` at the top). */
 	readonly subPath: string;
+	/** The repository's name, for the worktree's folder. */
+	readonly repoName?: string;
 }
 
 export interface IPreparedWorktree {
@@ -109,7 +117,7 @@ export async function prepareDelegationWorktree(layout: IDelegationStoreLayout, 
 		throw new DelegationError(DelegationErrorCode.InvalidRequest, 'Invalid folder.');
 	}
 	const bare = getBareRepositoryPath(layout, request.repoId);
-	const worktree = getDelegationWorktreePath(layout, request.delegationId);
+	const worktree = getDelegationWorktreePath(layout, request);
 	const branch = getDelegationBranch(request.shortId);
 	await ensureBareRepository(bare, runner);
 
@@ -162,9 +170,8 @@ export async function prepareDelegationWorktree(layout: IDelegationStoreLayout, 
 }
 
 /** Removes the worktree of a delegated chat and its branch (when the user deletes the chat on the server). */
-export async function removeDelegationWorktree(layout: IDelegationStoreLayout, repoId: string, delegationId: string, shortId: string, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<void> {
+export async function removeDelegationWorktree(layout: IDelegationStoreLayout, repoId: string, delegationId: string, shortId: string, worktree: string, runner: IDelegationProcessRunner = nodeDelegationProcessRunner): Promise<void> {
 	const bare = getBareRepositoryPath(layout, repoId);
-	const worktree = getDelegationWorktreePath(layout, delegationId);
 	await runner.run('git', ['worktree', 'remove', '--force', worktree], { cwd: bare });
 	await runner.run('git', ['branch', '-D', getDelegationBranch(shortId)], { cwd: bare });
 	await runner.run('git', ['update-ref', '-d', `refs/creaeditor/base/${delegationId}`], { cwd: bare });

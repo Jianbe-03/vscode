@@ -71,7 +71,8 @@ suite('CreaEditor Delegation - git', function () {
 	}
 
 	async function delegate(delegationId: string, includeSecretFiles = false) {
-		const knownCommits = await listKnownCommits(layout, (await readDelegationRepository(laptop)).repoId);
+		const repository = await readDelegationRepository(laptop);
+		const knownCommits = await listKnownCommits(layout, repository.repoId);
 		const packed = await packWorkspace({ folder: join(laptop, 'src'), outFile: join(dir, `${delegationId}.bundle`), knownCommits, includeSecretFiles, maxBytes: 1e9 });
 		const prepared = await prepareDelegationWorktree(layout, {
 			repoId: packed.repoId,
@@ -81,6 +82,7 @@ suite('CreaEditor Delegation - git', function () {
 			snapshot: packed.snapshot,
 			subPath: packed.subPath,
 			remoteUrl: packed.remoteUrl,
+			repoName: repository.name,
 			...(packed.bytes ? { bundleFile: join(dir, `${delegationId}.bundle`) } : {}),
 		});
 		return { packed, prepared };
@@ -101,6 +103,7 @@ suite('CreaEditor Delegation - git', function () {
 			serverHead: run(worktree, 'rev-parse', 'HEAD'),
 			serverBranch: run(worktree, 'symbolic-ref', '--short', 'HEAD'),
 			workingDirectory: prepared.workingDirectory === join(worktree, 'src'),
+			worktreeFolder: worktree === join(layout.worktrees, 'example-d1'),
 			files: {
 				a: read(worktree, 'src/a.ts'),
 				gone: read(worktree, 'src/gone.ts'),
@@ -123,6 +126,7 @@ suite('CreaEditor Delegation - git', function () {
 			serverHead: packed.head,
 			serverBranch: 'creaeditor/delegated/d1',
 			workingDirectory: true,
+			worktreeFolder: true,
 			files: { a: 'a2 uncommitted\n', gone: undefined, new: 'untracked\n', ignored: undefined, log: undefined, secret: undefined, tracked: 'TRACKED=2\n' },
 			serverStatus: [' D src/gone.ts', ' M config/.env.example', ' M src/a.ts', '?? src/new.ts'],
 			laptopStatusUnchanged: true,

@@ -43,4 +43,4 @@ Errors are `{ error: <DelegationErrorCode>, message }`.
 
 ## Server data
 
-`<data>/repos/<repoId>.git` (bare; `repoId` comes from the root commit, so the same project shares history), `<data>/worktrees/<delegationId>` on `creaeditor/delegated/<shortId>`, `<data>/delegations/<id>.json` (records, uploads, downloads), `<data>/secrets/delegation/` (key pair and GitHub token; its own master key, separate from the agent host's store).
+`<data>/repos/<repoId>.git` (bare; `repoId` comes from the root commit, so the same project shares history), `<data>/worktrees/<repository name>-<shortId>` (the Agents window shows the folder name; `<delegationId>` without a name) on `creaeditor/delegated/<shortId>`, `<data>/delegations/<id>.json` (records, uploads, downloads), `<data>/secrets/delegation/` (key pair and GitHub token; its own master key, separate from the agent host's store).

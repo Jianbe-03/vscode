@@ -19,7 +19,7 @@ import { createHash } from 'crypto';
 import * as fs from 'fs';
 import { tmpdir } from 'os';
 import { generateUuid } from '../../../../base/common/uuid.js';
-import { join } from '../../../../base/common/path.js';
+import { basename, dirname, join } from '../../../../base/common/path.js';
 import { delegationCommitIdentity, git, gitSucceeds, IDelegationProcessRunner, nodeDelegationProcessRunner } from './delegationProcess.js';
 import { CREAEDITOR_DELEGATION_BUNDLE_HEAD_REF, CREAEDITOR_DELEGATION_BUNDLE_SNAPSHOT_REF, CREAEDITOR_DELEGATION_SECRET_FILE_GLOBS, DelegationErrorCode } from '../../common/creaeditorDelegation.js';
 
@@ -45,6 +45,8 @@ export interface IDelegationRepositoryInfo {
 	readonly remoteUrl?: string;
 	/** The default branch of `origin` (`main`), when git knows it. */
 	readonly defaultBranch?: string;
+	/** The repository's name: of `origin`'s URL, else the folder of its main working tree (not of a worktree). */
+	readonly name: string;
 }
 
 /** Reads what Delegate to Server needs to know about the repository of `folder`. */
@@ -74,7 +76,19 @@ export async function readDelegationRepository(folder: string, runner: IDelegati
 		defaultBranch = remoteHead.code === 0 ? remoteHead.stdout.trim().replace(`${remote}/`, '') || undefined : undefined;
 	}
 	const relative = fs.realpathSync(folder).slice(fs.realpathSync(root).length).replace(/^[\\/]+/, '').replace(/\\/g, '/');
-	return { root, subPath: relative, repoId, head, ...(branch ? { branch } : {}), ...(remoteUrl ? { remoteUrl } : {}), ...(defaultBranch ? { defaultBranch } : {}) };
+	const name = await readRepositoryName(root, remoteUrl, runner);
+	return { root, subPath: relative, repoId, head, name, ...(branch ? { branch } : {}), ...(remoteUrl ? { remoteUrl } : {}), ...(defaultBranch ? { defaultBranch } : {}) };
+}
+
+/** The name of a repository: the last part of its remote URL, else the folder of its main working tree (`.git`'s parent). */
+async function readRepositoryName(root: string, remoteUrl: string | undefined, runner: IDelegationProcessRunner): Promise<string> {
+	const fromRemote = remoteUrl?.trim().replace(/\/+$/, '').replace(/\.git$/, '').split(/[/:]/).pop();
+	if (fromRemote) {
+		return fromRemote;
+	}
+	const commonDir = await runner.run('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root });
+	const gitDir = commonDir.code === 0 ? commonDir.stdout.trim() : '';
+	return gitDir && basename(gitDir) === '.git' ? basename(dirname(gitDir)) : basename(root);
 }
 
 /** Pathspecs that keep secret-looking files out. */

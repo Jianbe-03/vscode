@@ -248,6 +248,8 @@ export interface IDelegationCreateRequest {
 	readonly subPath: string;
 	/** The laptop's branch, for the pull request title. */
 	readonly sourceBranch?: string;
+	/** The repository's name: the worktree's folder is `<name>-<shortId>`, which the Agents window shows. */
+	readonly repoName?: string;
 	readonly title: string;
 	readonly resultsMode: DelegationResultsMode;
 	readonly agent: DelegationAgentKind;

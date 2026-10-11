@@ -266,6 +266,7 @@ export async function delegateChat(request: IDelegateRequest, options: IDelegate
 			...(packed.remoteUrl ? { remoteUrl: packed.remoteUrl } : {}),
 			...(packed.defaultBranch ? { defaultBranch: packed.defaultBranch } : {}),
 			...(packed.branch ? { sourceBranch: packed.branch } : {}),
+			repoName: repository.name,
 		});
 
 		let sessionFilesSent = false;
