@@ -3090,6 +3090,31 @@ suite('RemoteAgentHostSessionsProvider', () => {
 		});
 	}));
 
+	test('a server\'s bare repository of delegated code is named like its chats and shows no files', () => runWithFakedTimers<void>({ useFakeTimers: true }, async () => {
+		// CreaEditor: "New" on a delegated chat's group starts a chat in the bare repository.
+		const bareUri = toAgentHostUri(URI.file('/data/repos/54a368a017fe20e3.git'), 'localhost__4321');
+		connection.addSession(createSession('delegated-1', {
+			summary: 'Delegated Session',
+			project: { uri: bareUri, displayName: 'ws2' },
+		}));
+
+		const provider = createProvider(disposables, connection, { isWebPlatform: false, connectionName: 'Office Server' });
+		provider.getSessions();
+		await timeout(0);
+
+		const workspace = (uri: URI) => {
+			const resolved = provider.resolveWorkspace(uri);
+			return { label: resolved?.label, folders: resolved?.folders.map(folder => ({ name: folder.name, isBareRepository: folder.isBareRepository })) };
+		};
+		assert.deepStrictEqual({
+			bare: workspace(bareUri),
+			unknownBare: workspace(toAgentHostUri(URI.file('/data/repos/other.git'), 'localhost__4321')),
+		}, {
+			bare: { label: 'ws2 [Office Server]', folders: [{ name: 'ws2', isBareRepository: true }] },
+			unknownBare: { label: 'other.git [Office Server]', folders: [{ name: 'other.git', isBareRepository: undefined }] },
+		});
+	}));
+
 	test('container source workspace is retained without a connection', () => {
 		const source = toAgentHostUri(URI.file('/project'), agentHostAuthority('wsl:Ubuntu'));
 		const provider = createProvider(disposables, connection, { noConnection: true, devContainerSourceWorkspace: source });

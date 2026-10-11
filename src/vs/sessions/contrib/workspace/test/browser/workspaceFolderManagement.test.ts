@@ -460,6 +460,28 @@ suite('WorkspaceFolderManagementContribution', () => {
 		});
 	});
 
+	test('unmounts the current folder for a bare repository, which has no files to show', async () => {
+		// CreaEditor: a new chat in a CreaEditor Server's bare repository shows its worktree once it exists.
+		const { activeSession, workspaceEditing } = createContribution();
+		const folder = localFolder('/repo');
+		const bareFolder = { ...localFolder('/data/repos/54a368a017fe20e3.git'), isBareRepository: true };
+
+		activeSession.set(makeActiveSession('a', makeWorkspace(folder, false)), undefined);
+		await settle();
+		activeSession.set(makeActiveSession('b', makeWorkspace(bareFolder, false)), undefined);
+		await settle();
+
+		assert.deepStrictEqual({
+			added: workspaceEditing.addFoldersCalls.map(call => call.map(entry => entry.uri.toString())),
+			removed: workspaceEditing.removeFoldersCalls.map(call => call.map(uri => uri.toString())),
+			updated: workspaceEditing.updateFoldersCalls.length,
+		}, {
+			added: [[folder.workingDirectory.toString()]],
+			removed: [[folder.workingDirectory.toString()]],
+			updated: 0,
+		});
+	});
+
 	test('unmounts the current folder when switching to an untrusted session', async () => {
 		const { activeSession, workspaceEditing, workspaceTrust } = createContribution();
 		const trustedFolder = localFolder('/repo-trusted');

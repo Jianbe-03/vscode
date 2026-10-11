@@ -1070,7 +1070,9 @@ export class RemoteAgentHostSessionsProvider extends DevContainerAgentHostSessio
 	}
 
 	private _buildWorkspaceFromUri(uri: URI): ISessionWorkspace {
-		const folderName = basename(uri) || uri.path;
+		// CreaEditor: a server's bare repository of delegated code is named like its chats' group.
+		const bareRepositoryName = this._findBareRepositoryName(uri);
+		const folderName = bareRepositoryName ?? (basename(uri) || uri.path);
 		const hostLabel = this._workspaceHostLabel;
 		return {
 			uri,
@@ -1084,10 +1086,29 @@ export class RemoteAgentHostSessionsProvider extends DevContainerAgentHostSessio
 				name: folderName,
 				description: undefined,
 				gitRepository: { uri, workTreeUri: undefined, baseBranchName: undefined, gitHubInfo: constObservable(undefined) },
+				...(bareRepositoryName !== undefined ? { isBareRepository: true } : {}),
 			}],
 			requiresWorkspaceTrust: true,
 			isVirtualWorkspace: false,
 		};
+	}
+
+	/**
+	 * CreaEditor: the name of the bare repository `uri` (`<repoId>.git`) is, when chats of this host
+	 * work in worktrees of it (a CreaEditor Server's repository of delegated code); the host names
+	 * such a chat's project after the repository it came from.
+	 */
+	private _findBareRepositoryName(uri: URI): string | undefined {
+		if (!basename(uri).endsWith('.git')) {
+			return undefined;
+		}
+		for (const session of this._sessionCache.values()) {
+			const project = session.project;
+			if (project && isEqual(project.uri, uri) && project.displayName !== basename(uri)) {
+				return project.displayName;
+			}
+		}
+		return undefined;
 	}
 
 	resolveWorkspace(repositoryUri: URI): ISessionWorkspace | undefined {

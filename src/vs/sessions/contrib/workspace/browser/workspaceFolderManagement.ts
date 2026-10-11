@@ -85,7 +85,8 @@ export class WorkspaceFolderManagementContribution extends Disposable implements
 			return [];
 		}
 
-		return workspace.folders.map((folder, index) => {
+		// CreaEditor: a bare repository has no files: the Files view shows the chat's worktree once it exists.
+		return workspace.folders.filter(folder => !folder.isBareRepository).map((folder, index) => {
 			const name = index === 0 ? workspace.label : folder.name;
 			return {
 				uri: folder.workingDirectory,

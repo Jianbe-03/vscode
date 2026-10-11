@@ -208,6 +208,11 @@ export interface ISessionFolder {
 	readonly description: string | undefined;
 	/** Git repository information associated with this folder. */
 	readonly gitRepository?: ISessionGitRepository;
+	/**
+	 * CreaEditor: the folder is a bare git repository (no checkout, like a CreaEditor Server's
+	 * repository of delegated code): it has no files to show, a chat there works in its own worktree.
+	 */
+	readonly isBareRepository?: boolean;
 }
 
 /**
