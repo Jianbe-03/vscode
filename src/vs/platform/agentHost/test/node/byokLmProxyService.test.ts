@@ -366,7 +366,7 @@ suite('ByokLmProxyService', () => {
 	});
 
 	test('CreaEditor: answers a user-facing refusal with a 402 that carries the message for the chat', async () => {
-		const refusal = 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.';
+		const refusal = 'Your CreaEditor budget for the Work key ($20 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.';
 		await withProxy(
 			async () => ({ output: [], error: refusal, userFacingError: true }),
 			async (handle) => {

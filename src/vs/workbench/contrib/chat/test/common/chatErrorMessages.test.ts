@@ -174,8 +174,8 @@ suite('ChatErrorMessages', () => {
 		});
 
 		test('CreaEditor: a user-facing error shows just its reason', () => {
-			const details = getChatErrorDetailsFromFetchError({ type: ChatFetchResponseType.UserFacing, reason: 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.' }, undefined);
-			assert.deepStrictEqual(details, { code: ChatFetchResponseType.UserFacing, message: 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.', isExpectedError: true });
+			const details = getChatErrorDetailsFromFetchError({ type: ChatFetchResponseType.UserFacing, reason: 'Your CreaEditor budget for the Work key ($20 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.' }, undefined);
+			assert.deepStrictEqual(details, { code: ChatFetchResponseType.UserFacing, message: 'Your CreaEditor budget for the Work key ($20 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.', isExpectedError: true });
 		});
 
 		test('rate-limit messages vary by capi code and auto flag', () => {

@@ -560,7 +560,7 @@ suite('AgentHostByokLmHandler', () => {
 		const service = new TestLanguageModelsService(
 			new Map([['id', byokModel('acme', 'claude')]]),
 			() => {
-				const error = new Error('The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.');
+				const error = new Error('Your CreaEditor budget for the Work key ($20 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.');
 				error.name = USER_FACING_LM_ERROR_NAME;
 				throw error;
 			},
@@ -572,6 +572,6 @@ suite('AgentHostByokLmHandler', () => {
 			CancellationToken.None,
 		);
 
-		assert.deepStrictEqual(result, { output: [], error: 'The monthly budget of $20 for the Work key is used up. Raise it on the AI Costs page.', userFacingError: true });
+		assert.deepStrictEqual(result, { output: [], error: 'Your CreaEditor budget for the Work key ($20 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.', userFacingError: true });
 	});
 });

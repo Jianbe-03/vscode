@@ -70,7 +70,9 @@ As soon as a chat has a cost, its header shows it, subagents included: in the ch
 
 <img src="images/budgets.png" alt="The Budgets section of AI Costs" width="700">
 
-When a budget reaches 80% and 100%, a notification says so, once per period, with **Open AI Costs** and **Edit Budget**. With **Warn and Stop**, requests of that key, issue or repository, subagents included, are refused before they are sent, with a message such as "The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page."
+When a budget reaches 80% and 100%, a notification says so, once per period, with **Open AI Costs** and **Edit Budget**. With **Warn and Stop**, requests of that key, issue or repository, subagents included, are refused before they are sent, with a message such as "Your CreaEditor budget for the Personal key ($50 per month) is used up. Raise it with Edit under Budgets on the AI Costs page."
+
+CreaEditor budgets are CreaEditor's own limits, separate from a key's limit at LiteLLM or OpenRouter, which CreaEditor only reads (it shows it under **Keys**). Raising a budget changes nothing at the gateway, and a key that hits its own gateway limit stops with the gateway's error.
 
 ## Settings
 

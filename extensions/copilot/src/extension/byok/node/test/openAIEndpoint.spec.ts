@@ -859,8 +859,8 @@ describe('OpenAIEndpoint - budget hard stop (CreaEditor)', () => {
 			otherKey: otherKey.type,
 			warnOnly: warnOnly.type,
 		}).toEqual({
-			refused: [ChatFetchResponseType.Failed, 'The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page.', true],
-			namedKey: 'The monthly budget of $50 for the Personal key is used up. Raise it on the AI Costs page.',
+			refused: [ChatFetchResponseType.Failed, 'Your CreaEditor budget for the Personal key ($50 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.', true],
+			namedKey: 'Your CreaEditor budget for the Personal key ($50 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.',
 			otherKey: ChatFetchResponseType.Success,
 			warnOnly: ChatFetchResponseType.Success,
 		});

@@ -204,7 +204,7 @@ suite('CreaEditor - server gateway connection', () => {
 		assert.deepStrictEqual({ errors: results.map(result => result.error), userFacing: results.map(result => !!result.userFacingError), requests: received.length }, {
 			userFacing: [true, false, false],
 			errors: [
-				'The monthly budget of $10 for the Work key is used up. Raise it on the AI Costs page.',
+				'Your CreaEditor budget for the Work key ($10 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.',
 				'This server has no litellm key for model "Home/claude-sonnet". Delegate a chat that uses this key to the server first.',
 				'LiteLLM answered 401: Invalid key',
 			],

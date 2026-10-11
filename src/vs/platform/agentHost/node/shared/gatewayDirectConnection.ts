@@ -16,7 +16,7 @@ import { Emitter, Event } from '../../../../base/common/event.js';
 import { IDisposable } from '../../../../base/common/lifecycle.js';
 import { localize } from '../../../../nls.js';
 import { IByokLmBridgeConnection, IByokLmChatContext, IByokLmChatRequest, IByokLmChatResult, IByokLmContentPart, IByokLmModelInfo, IByokLmOutputItem } from '../../common/agentHostByokLm.js';
-import { CostBudgetPeriod, ICostBudget, IGatewayCostEntryLike, IServerHardStop } from '../../common/creaeditorCosts.js';
+import { ICostBudget, IGatewayCostEntryLike, IServerHardStop } from '../../common/creaeditorCosts.js';
 import { IDelegationGatewayKey, IDelegationGatewayModel, IDelegationWorkContext } from '../../common/creaeditorDelegation.js';
 import type { IGatewayCostRecord } from './gatewayCostLedger.js';
 
@@ -108,11 +108,11 @@ function formatUsd(value: number): string {
 	return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 }
 
-function formatPeriod(period: CostBudgetPeriod): string {
-	switch (period) {
-		case 'day': return localize('gatewayBudget.daily', "daily");
-		case 'week': return localize('gatewayBudget.weekly', "weekly");
-		case 'month': return localize('gatewayBudget.monthly', "monthly");
+function formatAmountPerPeriod(budget: Pick<ICostBudget, 'amount' | 'period'>): string {
+	switch (budget.period) {
+		case 'day': return localize('gatewayBudget.perDay', "{0} per day", formatUsd(budget.amount));
+		case 'week': return localize('gatewayBudget.perWeek', "{0} per week", formatUsd(budget.amount));
+		case 'month': return localize('gatewayBudget.perMonth', "{0} per month", formatUsd(budget.amount));
 	}
 }
 
@@ -126,7 +126,7 @@ function formatScope(budget: Pick<ICostBudget, 'scope' | 'value'>): string {
 
 /** The chat error of a request refused by a hard stop (same text as on the laptop). */
 export function formatServerBudgetRefusal(stop: IServerHardStop): string {
-	return localize('gatewayBudget.refusal', "The {0} budget of {1} for {2} is used up. Raise it on the AI Costs page.", formatPeriod(stop.budget.period), formatUsd(stop.budget.amount), formatScope(stop.budget));
+	return localize('gatewayBudget.refusal', "Your CreaEditor budget for {0} ({1}) is used up. Raise it with Edit under Budgets on the AI Costs page.", formatScope(stop.budget), formatAmountPerPeriod(stop.budget));
 }
 
 // --- Chat Completions translation ---
