@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="580" viewBox="0 0 960 580" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<title>CreaEditor Server: your laptop and phone connect to a server that runs the agents, each chat in its own worktree, with its own accounts</title>
+	<rect width="960" height="580" rx="16" fill="#16152D"/>
+
+	<!-- Laptop -->
+	<rect x="40" y="56" width="250" height="210" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="88" fill="#8E8CA8" font-size="13">Your laptop</text>
+	<text x="60" y="112" fill="#F8F7FA" font-size="16" font-weight="600">CreaEditor</text>
+	<rect x="56" y="128" width="218" height="40" rx="8" fill="#252347"/>
+	<text x="72" y="153" fill="#F8F7FA" font-size="13">Agents window</text>
+	<text x="60" y="198" fill="#BCBBCA" font-size="13">Server chats show next to</text>
+	<text x="60" y="218" fill="#BCBBCA" font-size="13">this laptop's. Delegates</text>
+	<text x="60" y="238" fill="#BCBBCA" font-size="13">chats, pulls costs.</text>
+
+	<!-- Phone -->
+	<rect x="40" y="300" width="250" height="168" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="332" fill="#8E8CA8" font-size="13">Your phone</text>
+	<text x="60" y="356" fill="#F8F7FA" font-size="16" font-weight="600">Web Agents window</text>
+	<text x="60" y="388" fill="#BCBBCA" font-size="13">Paired with Pair Phone</text>
+	<text x="60" y="408" fill="#BCBBCA" font-size="13">(a QR code from the</text>
+	<text x="60" y="428" fill="#BCBBCA" font-size="13">Servers list).</text>
+
+	<!-- Connections -->
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M294 160 H360"/>
+		<path d="M350 150 L360 160 L350 170"/>
+		<path d="M294 384 H360"/>
+		<path d="M350 374 L360 384 L350 394"/>
+	</g>
+	<text x="300" y="196" fill="#8E8CA8" font-size="12">Tailscale</text>
+	<text x="300" y="212" fill="#8E8CA8" font-size="12">or HTTPS,</text>
+	<text x="300" y="228" fill="#8E8CA8" font-size="12">device key</text>
+
+	<!-- Server -->
+	<rect x="372" y="40" width="548" height="500" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
+	<text x="396" y="74" fill="#8E8CA8" font-size="13">Always on: Docker on Linux, a Mac mini, a Linux box</text>
+	<text x="896" y="74" fill="#00EC95" font-size="13" text-anchor="end">Online</text>
+	<text x="396" y="100" fill="#F8F7FA" font-size="18" font-weight="600">CreaEditor Server</text>
+
+	<rect x="392" y="118" width="508" height="66" rx="8" fill="#252347"/>
+	<text x="408" y="144" fill="#F8F7FA" font-size="14" font-weight="600">One port (31600)</text>
+	<text x="408" y="166" fill="#BCBBCA" font-size="13">web Agents window · pairing · health · code receiver · agent connection</text>
+	<path d="M646 188 V206" stroke="#00EC95" stroke-width="2"/>
+
+	<rect x="392" y="208" width="508" height="66" rx="8" fill="#252347"/>
+	<text x="408" y="234" fill="#F8F7FA" font-size="14" font-weight="600">Agent host</text>
+	<text x="408" y="256" fill="#BCBBCA" font-size="13">runs Claude, Codex and Copilot CLI chats · at most 4 at once, the rest wait</text>
+
+	<!-- Worktrees -->
+	<text x="396" y="306" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">ONE WORKTREE PER CHAT</text>
+	<rect x="392" y="318" width="246" height="40" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
+	<circle cx="410" cy="338" r="5" fill="#00EC95"/>
+	<text x="424" y="343" fill="#F8F7FA" font-size="13">web-3f9a · Fix login</text>
+	<rect x="392" y="366" width="246" height="40" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
+	<circle cx="410" cy="386" r="5" fill="#00EC95"/>
+	<text x="424" y="391" fill="#F8F7FA" font-size="13">web-8c21 · New pricing</text>
+	<rect x="392" y="414" width="246" height="40" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
+	<circle cx="410" cy="434" r="5" fill="#F2B24C"/>
+	<text x="424" y="439" fill="#F8F7FA" font-size="13">api-11d0 · queued</text>
+	<text x="396" y="484" fill="#BCBBCA" font-size="13">Repositories are kept bare;</text>
+	<text x="396" y="504" fill="#BCBBCA" font-size="13">every chat works in its own copy.</text>
+
+	<!-- Accounts and data -->
+	<text x="662" y="306" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">ITS OWN ACCOUNTS</text>
+	<rect x="658" y="318" width="242" height="88" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
+	<text x="674" y="344" fill="#F8F7FA" font-size="13">Claude setup-tokens</text>
+	<text x="674" y="366" fill="#F8F7FA" font-size="13">Claude and Codex logins</text>
+	<text x="674" y="388" fill="#F8F7FA" font-size="13">OpenRouter / LiteLLM keys</text>
+	<rect x="658" y="414" width="242" height="40" rx="8" fill="#0F0E22" stroke="#2F2C55"/>
+	<text x="674" y="439" fill="#F8F7FA" font-size="13">Cost ledger · budgets</text>
+	<text x="662" y="484" fill="#BCBBCA" font-size="13">In its data folder (tokens and</text>
+	<text x="662" y="504" fill="#BCBBCA" font-size="13">keys encrypted), laptop off or not.</text>
+</svg>

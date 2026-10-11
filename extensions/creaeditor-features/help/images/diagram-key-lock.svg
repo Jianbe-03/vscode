@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="480" viewBox="0 0 960 480" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<title>The key lock: a chat and all its subagents use the key the chat started on; a model of another key is refused</title>
+	<rect width="960" height="480" rx="16" fill="#16152D"/>
+
+	<!-- Work key -->
+	<rect x="40" y="40" width="560" height="400" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
+	<text x="64" y="74" fill="#00EC95" font-size="13" font-weight="600" letter-spacing="1">WORK KEY · $12.40 LEFT OF $50</text>
+
+	<rect x="64" y="94" width="260" height="60" rx="8" fill="#252347"/>
+	<text x="80" y="120" fill="#F8F7FA" font-size="14" font-weight="600">Chat</text>
+	<text x="80" y="140" fill="#BCBBCA" font-size="13">Claude Opus (Work key)</text>
+
+	<g stroke="#00EC95" stroke-width="2" fill="none">
+		<path d="M110 154 V196 H150"/>
+		<path d="M110 196 V292 H150"/>
+		<path d="M190 322 V358 H230"/>
+	</g>
+	<rect x="150" y="170" width="300" height="56" rx="8" fill="#252347"/>
+	<text x="166" y="194" fill="#F8F7FA" font-size="14">Subagent: research</text>
+	<text x="166" y="214" fill="#BCBBCA" font-size="13">a model of the Work key</text>
+	<rect x="150" y="266" width="300" height="56" rx="8" fill="#252347"/>
+	<text x="166" y="290" fill="#F8F7FA" font-size="14">Subagent: write tests</text>
+	<text x="166" y="310" fill="#BCBBCA" font-size="13">no model of its own: the chat's model</text>
+	<rect x="230" y="330" width="340" height="56" rx="8" fill="#252347"/>
+	<text x="246" y="354" fill="#F8F7FA" font-size="14">Its subagent, a new session, a chat it starts</text>
+	<text x="246" y="374" fill="#BCBBCA" font-size="13">all on the Work key too</text>
+	<text x="64" y="420" fill="#BCBBCA" font-size="13">When the key hits its limit, the chat stops with the key's error. No other key is used.</text>
+
+	<!-- Personal key -->
+	<rect x="640" y="40" width="280" height="400" rx="12" fill="#1C1A37" stroke="#3B3866" stroke-dasharray="6 5"/>
+	<text x="664" y="74" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">PERSONAL KEY</text>
+	<rect x="664" y="170" width="232" height="56" rx="8" fill="#0F0E22" stroke="#F28B8B"/>
+	<text x="680" y="194" fill="#F8F7FA" font-size="14">GPT model (Personal)</text>
+	<text x="680" y="214" fill="#F28B8B" font-size="13">refused for this chat</text>
+	<g stroke="#F28B8B" stroke-width="2" fill="none" stroke-linecap="round" stroke-dasharray="5 5">
+		<path d="M454 198 H656"/>
+	</g>
+	<path d="M520 186 L544 210 M544 186 L520 210" stroke="#F28B8B" stroke-width="3" stroke-linecap="round"/>
+	<text x="664" y="270" fill="#BCBBCA" font-size="13">To use this key, start a</text>
+	<text x="664" y="290" fill="#BCBBCA" font-size="13">new chat on one of its</text>
+	<text x="664" y="310" fill="#BCBBCA" font-size="13">models.</text>
+</svg>

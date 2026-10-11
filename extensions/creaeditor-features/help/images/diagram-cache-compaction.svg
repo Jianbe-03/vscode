@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<title>Compacting an idle Claude chat 4 minutes 15 seconds after its last turn, just before the 5-minute prompt cache expires, so the next message starts small</title>
+	<rect width="960" height="560" rx="16" fill="#16152D"/>
+
+	<text x="40" y="56" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">AN IDLE CLAUDE CHAT WITH A BIG CONTEXT</text>
+
+	<!-- Timeline axis -->
+	<path d="M80 170 H880" stroke="#3B3866" stroke-width="4" stroke-linecap="round"/>
+	<!-- cached span -->
+	<path d="M80 170 H800" stroke="#00BD8B" stroke-width="4" stroke-linecap="round"/>
+	<text x="440" y="150" fill="#7FE3C1" font-size="13" text-anchor="middle">context is in the prompt cache: reading it costs a tenth of the price</text>
+
+	<!-- Turn ends -->
+	<circle cx="80" cy="170" r="9" fill="#00EC95"/>
+	<text x="80" y="204" fill="#F8F7FA" font-size="14" font-weight="600" text-anchor="middle">0:00</text>
+	<text x="80" y="224" fill="#BCBBCA" font-size="13" text-anchor="middle">last turn ends</text>
+
+	<!-- Compact -->
+	<circle cx="692" cy="170" r="11" fill="#16152D" stroke="#00EC95" stroke-width="3"/>
+	<circle cx="692" cy="170" r="4" fill="#00EC95"/>
+	<text x="692" y="204" fill="#F8F7FA" font-size="14" font-weight="600" text-anchor="middle">4:15</text>
+	<text x="692" y="224" fill="#BCBBCA" font-size="13" text-anchor="middle">/compact runs</text>
+	<text x="692" y="242" fill="#BCBBCA" font-size="13" text-anchor="middle">(from the cache, cheap)</text>
+
+	<!-- Expiry -->
+	<path d="M800 150 V190" stroke="#F28B8B" stroke-width="2"/>
+	<text x="800" y="110" fill="#F28B8B" font-size="13" text-anchor="middle">5:00</text>
+	<text x="800" y="128" fill="#F28B8B" font-size="13" text-anchor="middle">cache expires</text>
+
+	<text x="40" y="290" fill="#BCBBCA" font-size="13">With 1 hour caching the same happens at 57 minutes, before the cache expires at 60.</text>
+
+	<!-- Two outcomes -->
+	<rect x="40" y="316" width="430" height="112" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="346" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">WITHOUT COMPACTING</text>
+	<text x="60" y="374" fill="#F8F7FA" font-size="14">Your next message, after 5:00, writes the</text>
+	<text x="60" y="396" fill="#F8F7FA" font-size="14">whole conversation to the cache again,</text>
+	<text x="60" y="418" fill="#F28B8B" font-size="14">at more than the normal price.</text>
+
+	<rect x="490" y="316" width="430" height="112" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
+	<text x="510" y="346" fill="#00EC95" font-size="13" font-weight="600" letter-spacing="1">WITH COMPACTING (DEFAULT)</text>
+	<text x="510" y="374" fill="#F8F7FA" font-size="14">Your next message starts from a short</text>
+	<text x="510" y="396" fill="#F8F7FA" font-size="14">summary, so it is small and cheap.</text>
+	<text x="510" y="418" fill="#F2B24C" font-size="14">The trade-off: a summary loses detail.</text>
+
+	<!-- Conditions -->
+	<text x="40" y="468" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">ONLY WHEN</text>
+	<rect x="40" y="482" width="210" height="48" rx="8" fill="#252347"/>
+	<text x="145" y="511" fill="#F8F7FA" font-size="13" text-anchor="middle">60,000+ tokens of context</text>
+	<rect x="263" y="482" width="210" height="48" rx="8" fill="#252347"/>
+	<text x="368" y="511" fill="#F8F7FA" font-size="13" text-anchor="middle">idle: nothing runs or waits</text>
+	<rect x="486" y="482" width="210" height="48" rx="8" fill="#252347"/>
+	<text x="591" y="511" fill="#F8F7FA" font-size="13" text-anchor="middle">not archived or delegated</text>
+	<rect x="709" y="482" width="211" height="48" rx="8" fill="#252347"/>
+	<text x="814" y="511" fill="#F8F7FA" font-size="13" text-anchor="middle">once per idle period</text>
+</svg>

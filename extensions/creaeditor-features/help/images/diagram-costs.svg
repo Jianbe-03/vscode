@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<title>AI costs: every OpenRouter and LiteLLM request is labeled with its chat and issue, the gateway reports its cost, CreaEditor records it, and the AI Costs page and budgets use it, including the costs of your servers</title>
+	<rect width="960" height="560" rx="16" fill="#16152D"/>
+
+	<!-- Row of four stages -->
+	<rect x="40" y="56" width="200" height="200" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="88" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">1  REQUEST</text>
+	<text x="60" y="116" fill="#F8F7FA" font-size="14">A chat or subagent</text>
+	<text x="60" y="136" fill="#F8F7FA" font-size="14">calls a model</text>
+	<rect x="56" y="156" width="168" height="84" rx="8" fill="#252347"/>
+	<text x="70" y="180" fill="#BCBBCA" font-size="13">labeled with:</text>
+	<text x="70" y="200" fill="#F8F7FA" font-size="13">chat · issue · repo</text>
+	<text x="70" y="220" fill="#F8F7FA" font-size="13">branch · key</text>
+
+	<rect x="280" y="56" width="200" height="200" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="300" y="88" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">2  GATEWAY</text>
+	<text x="300" y="116" fill="#F8F7FA" font-size="14">OpenRouter or</text>
+	<text x="300" y="136" fill="#F8F7FA" font-size="14">LiteLLM answers</text>
+	<rect x="296" y="156" width="168" height="84" rx="8" fill="#252347"/>
+	<text x="310" y="180" fill="#BCBBCA" font-size="13">and reports</text>
+	<text x="310" y="200" fill="#00EC95" font-size="15" font-weight="600">$0.042</text>
+	<text x="310" y="220" fill="#BCBBCA" font-size="13">for this request</text>
+
+	<rect x="520" y="56" width="200" height="200" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="540" y="88" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">3  LEDGER</text>
+	<text x="540" y="116" fill="#F8F7FA" font-size="14">Recorded on</text>
+	<text x="540" y="136" fill="#F8F7FA" font-size="14">this computer</text>
+	<rect x="536" y="156" width="168" height="84" rx="8" fill="#252347"/>
+	<text x="550" y="180" fill="#BCBBCA" font-size="13">plus the costs of</text>
+	<text x="550" y="200" fill="#BCBBCA" font-size="13">your servers, pulled</text>
+	<text x="550" y="220" fill="#BCBBCA" font-size="13">every few minutes</text>
+
+	<rect x="760" y="56" width="160" height="200" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
+	<text x="780" y="88" fill="#00EC95" font-size="13" font-weight="600" letter-spacing="1">4  AI COSTS</text>
+	<text x="780" y="120" fill="#F8F7FA" font-size="14">Overview</text>
+	<text x="780" y="146" fill="#F8F7FA" font-size="14">Advanced</text>
+	<text x="780" y="172" fill="#F8F7FA" font-size="14">Cost in the</text>
+	<text x="780" y="192" fill="#F8F7FA" font-size="14">chat header</text>
+	<text x="780" y="226" fill="#BCBBCA" font-size="13">Subscriptions, Keys</text>
+
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M244 156 H274"/><path d="M266 148 L274 156 L266 164"/>
+		<path d="M484 156 H514"/><path d="M506 148 L514 156 L506 164"/>
+		<path d="M724 156 H754"/><path d="M746 148 L754 156 L746 164"/>
+	</g>
+
+	<!-- Budgets -->
+	<path d="M620 260 V300" stroke="#F2B24C" stroke-width="2" fill="none"/>
+	<path d="M612 292 L620 300 L628 292" stroke="#F2B24C" stroke-width="2" fill="none" stroke-linecap="round"/>
+	<rect x="40" y="306" width="880" height="214" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="338" fill="#F2B24C" font-size="13" font-weight="600" letter-spacing="1">BUDGETS: PER KEY, ISSUE OR REPOSITORY, PER DAY, WEEK OR MONTH</text>
+
+	<rect x="60" y="356" width="400" height="18" rx="9" fill="#16152D"/>
+	<rect x="60" y="356" width="320" height="18" rx="9" fill="#F2B24C"/>
+	<path d="M380 350 V380" stroke="#F8F7FA" stroke-width="2"/>
+	<path d="M460 350 V380" stroke="#F8F7FA" stroke-width="2"/>
+	<text x="380" y="398" fill="#F8F7FA" font-size="13" text-anchor="middle">80%</text>
+	<text x="460" y="398" fill="#F8F7FA" font-size="13" text-anchor="middle">100%</text>
+	<text x="60" y="430" fill="#BCBBCA" font-size="13">A notification at 80% and at 100%,</text>
+	<text x="60" y="450" fill="#BCBBCA" font-size="13">once per period.</text>
+
+	<rect x="500" y="352" width="400" height="98" rx="8" fill="#252347"/>
+	<text x="516" y="378" fill="#F8F7FA" font-size="14" font-weight="600">Warn and Stop</text>
+	<text x="516" y="400" fill="#BCBBCA" font-size="13">Once the budget is used up, its requests are</text>
+	<text x="516" y="420" fill="#BCBBCA" font-size="13">refused before they are sent, subagents too,</text>
+	<text x="516" y="440" fill="#BCBBCA" font-size="13">also on your CreaEditor Servers.</text>
+
+	<text x="60" y="494" fill="#BCBBCA" font-size="13">Budgets count the spend of every machine: this computer and all paired servers.</text>
+</svg>

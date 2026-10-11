@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<title>Subscription pool: several Claude accounts behind one model; a chat moves on to the next account when its account is used up</title>
+	<rect width="960" height="560" rx="16" fill="#16152D"/>
+
+	<!-- Model -->
+	<rect x="40" y="56" width="250" height="120" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="88" fill="#8E8CA8" font-size="13">Model picker</text>
+	<rect x="56" y="104" width="218" height="52" rx="8" fill="#252347"/>
+	<text x="72" y="128" fill="#F8F7FA" font-size="15" font-weight="600">Claude Opus</text>
+	<text x="72" y="146" fill="#BCBBCA" font-size="13">one entry for the pool</text>
+
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M294 116 H340"/>
+		<path d="M330 106 L340 116 L330 126"/>
+	</g>
+
+	<!-- Pool -->
+	<rect x="352" y="40" width="568" height="300" rx="12" fill="#1C1A37" stroke="#00BD8B"/>
+	<text x="376" y="74" fill="#F8F7FA" font-size="16" font-weight="600">Claude pool</text>
+	<text x="896" y="74" fill="#BCBBCA" font-size="13" text-anchor="end">tried in this order</text>
+
+	<!-- Account rows: name, bar, status -->
+	<rect x="372" y="92" width="528" height="68" rx="8" fill="#252347"/>
+	<text x="390" y="118" fill="#F8F7FA" font-size="14" font-weight="600">1  Work</text>
+	<text x="884" y="118" fill="#F28B8B" font-size="13" text-anchor="end">used up · resets in 2h 14m</text>
+	<rect x="390" y="134" width="494" height="8" rx="4" fill="#16152D"/>
+	<rect x="390" y="134" width="494" height="8" rx="4" fill="#F28B8B"/>
+
+	<rect x="372" y="168" width="528" height="68" rx="8" fill="#252347" stroke="#00EC95"/>
+	<text x="390" y="194" fill="#F8F7FA" font-size="14" font-weight="600">2  Personal</text>
+	<text x="884" y="194" fill="#F2B24C" font-size="13" text-anchor="end">82% used · warning shown</text>
+	<rect x="390" y="210" width="494" height="8" rx="4" fill="#16152D"/>
+	<rect x="390" y="210" width="405" height="8" rx="4" fill="#F2B24C"/>
+
+	<rect x="372" y="244" width="528" height="68" rx="8" fill="#252347"/>
+	<text x="390" y="270" fill="#F8F7FA" font-size="14" font-weight="600">3  Team</text>
+	<text x="884" y="270" fill="#00EC95" font-size="13" text-anchor="end">20% used</text>
+	<rect x="390" y="286" width="494" height="8" rx="4" fill="#16152D"/>
+	<rect x="390" y="286" width="99" height="8" rx="4" fill="#00EC95"/>
+
+	<!-- Chat moves -->
+	<rect x="40" y="208" width="250" height="132" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="240" fill="#8E8CA8" font-size="13">A chat</text>
+	<text x="60" y="264" fill="#F8F7FA" font-size="14">started on Work,</text>
+	<text x="60" y="286" fill="#F8F7FA" font-size="14">continues on Personal</text>
+	<text x="60" y="314" fill="#BCBBCA" font-size="13">with its whole conversation.</text>
+
+	<!-- Choices -->
+	<text x="40" y="384" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">WHEN THE CHAT'S ACCOUNT IS USED UP</text>
+	<rect x="40" y="400" width="280" height="120" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<rect x="56" y="416" width="248" height="36" rx="8" fill="#00BD8B"/>
+	<text x="180" y="439" fill="#0F0E22" font-size="13" font-weight="600" text-anchor="middle">Continue on Personal</text>
+	<text x="56" y="478" fill="#BCBBCA" font-size="13">Moves this chat to the next</text>
+	<text x="56" y="498" fill="#BCBBCA" font-size="13">account that has room.</text>
+
+	<rect x="340" y="400" width="280" height="120" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<rect x="356" y="416" width="248" height="36" rx="8" fill="#00BD8B"/>
+	<text x="480" y="439" fill="#0F0E22" font-size="13" font-weight="600" text-anchor="middle">Always Switch Automatically</text>
+	<text x="356" y="478" fill="#BCBBCA" font-size="13">From now on, chats move on</text>
+	<text x="356" y="498" fill="#BCBBCA" font-size="13">without asking.</text>
+
+	<rect x="640" y="400" width="280" height="120" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<rect x="656" y="416" width="248" height="36" rx="8" fill="#00BD8B"/>
+	<text x="780" y="439" fill="#0F0E22" font-size="13" font-weight="600" text-anchor="middle">Continue When Usage Resets</text>
+	<text x="656" y="478" fill="#BCBBCA" font-size="13">Waits, then continues on the</text>
+	<text x="656" y="498" fill="#BCBBCA" font-size="13">same account after the reset.</text>
+</svg>
