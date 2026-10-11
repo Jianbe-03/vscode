@@ -482,6 +482,7 @@ async function delegateToServer(accessor: ServicesAccessor, context: ISession | 
 		localSessionResource: session.resource.toString(),
 		folder: folderUri.fsPath,
 		worktree: result.record.worktree,
+		repositoriesDir: serverInfo.repositoriesDir,
 		baseCommit: result.record.baseCommit,
 		branch: result.record.branch,
 		resultsMode: modePick.mode,
@@ -725,7 +726,7 @@ async function openOnServerAction(accessor: ServicesAccessor, context: Delegatio
 	const server = serversService.servers.get().find(candidate => candidate.id === chat.serverId);
 	const authority = server ? agentHostAuthority(serversService.getAgentHostAddress(server)) : undefined;
 	if (authority && chat.worktree) {
-		await trustServerWorktrees(workspaceTrustManagementService, authority, [posix.dirname(chat.worktree), getServerRepositoriesDir(posix.dirname(chat.worktree)), chat.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
+		await trustServerWorktrees(workspaceTrustManagementService, authority, [posix.dirname(chat.worktree), chat.repositoriesDir ?? getServerRepositoriesDir(posix.dirname(chat.worktree)), chat.worktree]).catch(error => logService.warn(`[Delegation] Trusting the worktree failed: ${errorMessage(error)}`));
 	}
 	let resource = chat.remoteSessionResource ? URI.parse(chat.remoteSessionResource) : undefined;
 	if (!resource && authority) {

@@ -224,8 +224,10 @@ export class CreaEditorDelegationApi implements IRemoteAccessApiHandler {
 			publicKey: keyPair.publicKey,
 			hasGitHubToken: this._store.has(CREAEDITOR_DELEGATION_GITHUB_TOKEN_SECRET_NAME),
 			hasGh: await this._hasGh,
-			worktreesDir: this._options.layout.worktrees,
-			repositoriesDir: this._options.layout.repos,
+			// Real paths: git reports a chat's folders resolved (e.g. macOS `/tmp` is `/private/tmp`),
+			// and the laptop trusts these folders by path.
+			worktreesDir: realPath(this._options.layout.worktrees),
+			repositoriesDir: realPath(this._options.layout.repos),
 			agentHome: homedir(),
 		};
 	}
@@ -505,5 +507,14 @@ async function readJson<T>(request: httpTypes.IncomingMessage): Promise<Partial<
 		return value && typeof value === 'object' ? value as Partial<T> : {};
 	} catch {
 		throw new HttpError(400, DelegationErrorCode.InvalidRequest, 'Invalid JSON.');
+	}
+}
+
+/** The real path of a folder (symbolic links resolved); the path as it is when it does not exist. */
+function realPath(path: string): string {
+	try {
+		return fs.realpathSync(path);
+	} catch {
+		return path;
 	}
 }

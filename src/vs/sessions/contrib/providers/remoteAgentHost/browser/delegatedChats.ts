@@ -32,6 +32,8 @@ export interface IDelegatedChat {
 	readonly folder: string;
 	/** The chat's worktree on the server. */
 	readonly worktree?: string;
+	/** The server's folder of delegated repositories, as the server reports it (older servers do not). */
+	readonly repositoriesDir?: string;
 	/** The commit the server's branch started from (it is in this repository). */
 	readonly baseCommit: string;
 	/** The server's branch (`creaeditor/delegated/<shortId>`). */
