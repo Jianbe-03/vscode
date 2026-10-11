@@ -47,46 +47,53 @@ export function renderRemoteAccessPage(): string {
 	<meta name="mobile-web-app-capable" content="yes" />
 	<meta name="apple-mobile-web-app-capable" content="yes" />
 	<meta name="apple-mobile-web-app-title" content="CreaEditor" />
-	<meta name="color-scheme" content="light dark" />
+	<meta name="color-scheme" content="dark" />
+	<meta name="theme-color" content="#1B1A36" />
 	<title>CreaEditor</title>
 	<style>
-		:root { --bg: #f8f8f8; --fg: #1f1f1f; --muted: #616161; --border: #d4d4d4; --accent: #005fb8; --accent-fg: #ffffff; --error: #c72e2e; --input: #ffffff; }
-		@media (prefers-color-scheme: dark) {
-			:root { --bg: #1f1f1f; --fg: #cccccc; --muted: #9d9d9d; --border: #3c3c3c; --accent: #0078d4; --accent-fg: #ffffff; --error: #f48771; --input: #313131; }
-		}
-		html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
-		.ra-card { box-sizing: border-box; max-width: 420px; margin: 0 auto; padding: max(32px, env(safe-area-inset-top)) 16px 32px; }
-		.ra-card h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+		/* CreaEditor brand: navy surfaces, off-white text, green action. */
+		:root { --bg: #1B1A36; --surface: #16152D; --fg: #F8F7FA; --muted: #C4C2D4; --border: #3A3862; --accent: #00BD8B; --accent-hover: #00EC95; --accent-fg: #0F0E13; --focus: #00EC95; --error: #FF9B9B; }
+		html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+		.ra-card { box-sizing: border-box; max-width: 420px; margin: 0 auto; padding: max(40px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+		.ra-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 28px 20px 24px; }
+		.ra-mark { display: block; width: 44px; height: 44px; margin: 0 0 20px; }
+		.ra-card h1 { font-size: 24px; line-height: 1.25; font-weight: 700; letter-spacing: -0.01em; margin: 0 0 8px; }
 		.ra-card p { margin: 0 0 16px; color: var(--muted); }
-		.ra-card label { display: block; font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
-		.ra-card input { box-sizing: border-box; width: 100%; padding: 10px 12px; font-size: 16px; border-radius: 6px; border: 1px solid var(--border); background: var(--input); color: var(--fg); }
-		.ra-card input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-		.ra-card button { width: 100%; margin-top: 24px; padding: 12px; font-size: 16px; font-weight: 600; border: 0; border-radius: 6px; background: var(--accent); color: var(--accent-fg); }
-		.ra-card button:disabled { opacity: 0.6; }
+		.ra-card label { display: block; font-size: 13px; font-weight: 600; margin: 18px 0 6px; }
+		.ra-card input { box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; font: inherit; font-size: 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+		.ra-card input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
+		.ra-card button { width: 100%; min-height: 48px; margin-top: 24px; padding: 12px; font: inherit; font-size: 16px; font-weight: 700; border: 0; border-radius: 10px; background: var(--accent); color: var(--accent-fg); cursor: pointer; transition: background-color 120ms ease; }
+		.ra-card button:hover:not(:disabled) { background: var(--accent-hover); }
+		.ra-card button:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+		.ra-card button:disabled { opacity: 0.6; cursor: default; }
 		.ra-error { color: var(--error) !important; margin-top: 16px !important; }
 		.ra-hint { font-size: 13px; margin-top: 6px !important; }
 		[hidden] { display: none !important; }
+		@media (prefers-reduced-motion: reduce) { .ra-card button { transition: none; } }
 	</style>
 </head>
 <body aria-label="">
 	<div class="ra-card" id="ra-card" hidden>
-		<h1 id="ra-title"></h1>
-		<p id="ra-intro"></p>
-		<form id="ra-form" hidden>
-			<div id="ra-code-row">
-				<label for="ra-code" id="ra-code-label"></label>
-				<input id="ra-code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" />
-			</div>
-			<label for="ra-name" id="ra-name-label"></label>
-			<input id="ra-name" autocomplete="off" />
-			<div id="ra-password-row" hidden>
-				<label for="ra-password" id="ra-password-label"></label>
-				<input id="ra-password" type="password" autocomplete="current-password" />
-				<p class="ra-hint" id="ra-password-hint"></p>
-			</div>
-			<button type="submit" id="ra-submit"></button>
-		</form>
-		<p class="ra-error" id="ra-error" role="alert" hidden></p>
+		<div class="ra-panel">
+			<svg class="ra-mark" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><g stroke="#00BD8B" stroke-width="7" stroke-linecap="round"><path d="M24 6v36"/><path d="M8.4 15l31.2 18"/><path d="M8.4 33l31.2-18"/></g></svg>
+			<h1 id="ra-title"></h1>
+			<p id="ra-intro"></p>
+			<form id="ra-form" hidden>
+				<div id="ra-code-row">
+					<label for="ra-code" id="ra-code-label"></label>
+					<input id="ra-code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" />
+				</div>
+				<label for="ra-name" id="ra-name-label"></label>
+				<input id="ra-name" autocomplete="off" />
+				<div id="ra-password-row" hidden>
+					<label for="ra-password" id="ra-password-label"></label>
+					<input id="ra-password" type="password" autocomplete="current-password" />
+					<p class="ra-hint" id="ra-password-hint"></p>
+				</div>
+				<button type="submit" id="ra-submit"></button>
+			</form>
+			<p class="ra-error" id="ra-error" role="alert" hidden></p>
+		</div>
 	</div>
 	<script type="module">
 ${PAGE_SCRIPT.replace('__CONFIG__', () => json)}
