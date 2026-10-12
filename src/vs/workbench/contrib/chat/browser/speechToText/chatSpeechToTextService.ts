@@ -24,7 +24,8 @@ import { localize } from '../../../../../nls.js';
 import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, ILocalTranscriptionModelStatus, ILocalTranscriptionService, LocalTranscriptionModelState } from '../../../../../platform/localTranscription/common/localTranscription.js';
+import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, ILocalTranscriptionModelStatus, ILocalTranscriptionService, isSegmentedTranscriptionModel, LocalTranscriptionModelState, MODEL_NOT_INSTALLED_ERROR_CODE, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
+import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { IAuthenticationService } from '../../../../services/authentication/common/authentication.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
@@ -35,7 +36,7 @@ import { ChatMessageRole, ILanguageModelsService } from '../../common/languageMo
 import { IPromptsService } from '../../common/promptSyntax/service/promptsService.js';
 import { createPcmCaptureNode } from '../pcmCaptureWorklet.js';
 import { getMediaCaptureWindow } from '../voiceClient/micCaptureService.js';
-import { resolveDictationLanguage } from './dictationLanguage.js';
+import { resolveDictationLanguage, resolveWhisperDictationLanguage } from './dictationLanguage.js';
 import { ChatEntitlement, IChatEntitlementService } from '../../../../services/chat/common/chatEntitlementService.js';
 import { IVoiceCodeTranscription, IVoiceCodeTranscriptionClient } from './voiceCodeTranscriptionClient.js';
 import { getTranscriptionWebSocketUrl } from '../voiceClient/voiceEndpoint.js';
@@ -118,7 +119,12 @@ export const DICTATION_MODEL_SETTING = 'dictation.model';
 export const enum DictationSettingId {
 	ShowTranscript = 'dictation.showTranscript',
 	ShowButton = 'dictation.showButton',
+	/** CreaEditor: the spoken language hint for Whisper. */
+	Language = 'dictation.language',
 }
+
+/** CreaEditor: Whisper Large v3 Turbo's download size, when the catalog cannot be read. */
+const WHISPER_DOWNLOAD_SIZE_MB = 1284;
 
 /** `dictation.model` sentinel selecting the cloud transcription backend. */
 export const DICTATION_MAI_MODEL_ID = 'mai';
@@ -172,6 +178,11 @@ export function resolveDictationBackend(configuredModel: string | undefined, pol
 const MAI_FINAL_TIMEOUT_MS = 35_000;
 /** How long to wait for the on-device backend to finish before returning its streamed transcript. */
 const NEMO_FINAL_TIMEOUT_MS = 8000;
+/**
+ * CreaEditor: the same for Whisper, which transcribes what was said last (and any utterance still
+ * queued) after Stop; each utterance takes a few seconds on the CPU.
+ */
+const SEGMENTED_FINAL_TIMEOUT_MS = 60_000;
 
 type SpeechToTextSessionEvent = {
 	outcome: 'completed' | 'cancelled' | 'error';
@@ -314,6 +325,14 @@ export interface IChatSpeechToTextService {
 	/** Whether interim transcript text should be rendered while recording. */
 	readonly showTranscriptWhileDictating: boolean;
 
+	/**
+	 * CreaEditor: fires when {@link isTranscribingSegment} changes. Whisper transcribes an utterance
+	 * once it ends (at a pause), so this is what the listening bar shows as "Transcribing…".
+	 */
+	readonly onDidChangeTranscribingSegment: Event<boolean>;
+	/** CreaEditor: whether an utterance that ended is still being transcribed. */
+	readonly isTranscribingSegment: boolean;
+
 	/** Analyser for the active microphone capture, used for audio-reactive feedback. */
 	readonly analyserNode: AnalyserNode | undefined;
 
@@ -420,6 +439,20 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 
 	private readonly _onDidChangeModelDownloadProgress = this._register(new Emitter<void>());
 	readonly onDidChangeModelDownloadProgress = this._onDidChangeModelDownloadProgress.event;
+
+	private readonly _onDidChangeTranscribingSegment = this._register(new Emitter<boolean>());
+	readonly onDidChangeTranscribingSegment = this._onDidChangeTranscribingSegment.event;
+
+	private _isTranscribingSegment = false;
+	get isTranscribingSegment(): boolean {
+		return this._isTranscribingSegment;
+	}
+
+	/** CreaEditor: the consented model download in progress; cancelling it stops the download. */
+	private readonly _modelInstall = this._register(new MutableDisposable<CancellationTokenSource>());
+
+	/** CreaEditor: how long Stop waits for the on-device transcript of the current session. */
+	private _localFinalTimeoutMs: number | undefined;
 
 	private _modelDownloadProgress: number | undefined;
 	get modelDownloadProgress(): number | undefined {
@@ -562,6 +595,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		@ILanguageModelsService private readonly _languageModelsService: ILanguageModelsService,
 		@IPromptsService private readonly _promptsService: IPromptsService,
 		@IChatEntitlementService private readonly _chatEntitlementService: IChatEntitlementService,
+		@IDialogService private readonly _dialogService: IDialogService,
 	) {
 		super();
 		this._recordingContextKey = ChatContextKeys.speechToTextRecording.bindTo(contextKeyService);
@@ -824,6 +858,15 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			return;
 		}
 
+		// CreaEditor: never download the on-device model without the user's consent; dictation starts
+		// once it is installed.
+		if (backend === 'nemo' && !await this._ensureLocalModelInstalled()) {
+			return;
+		}
+		if (generation !== this._sessionGeneration) {
+			return;
+		}
+
 		const startGeneration = ++this._startGeneration;
 		this._startInProgress = startGeneration;
 		try {
@@ -1052,13 +1095,24 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		this._localSessionDisposables.add(local.onDidTranscribe(result => {
 			// The local service returns the full cumulative transcript each time.
 			this._emitTranscript(result.text, result.finalizedText ?? '', result.isFinal);
+			this._setTranscribingSegment(!result.isFinal && (result.pendingSegments ?? 0) > 0);
 		}));
-		const cacheDir = joinPath(this._environmentService.cacheHome, 'chatDictationModels').fsPath;
+		const cacheDir = this._getModelCacheDir();
 		const model = this._getModelId();
-		const language = resolveDictationLanguage(
-			this._configurationService.getValue('agents.voice.language'),
-			window.navigator.language,
-		);
+		// CreaEditor: Whisper needs a language hint (see resolveWhisperDictationLanguage) and takes
+		// longer to finish after Stop.
+		const segmented = isSegmentedTranscriptionModel(model);
+		this._localFinalTimeoutMs = segmented ? SEGMENTED_FINAL_TIMEOUT_MS : NEMO_FINAL_TIMEOUT_MS;
+		const language = segmented
+			? resolveWhisperDictationLanguage(
+				this._configurationService.getValue(DictationSettingId.Language),
+				this._configurationService.getValue('agents.voice.language'),
+				window.navigator.languages,
+			)
+			: resolveDictationLanguage(
+				this._configurationService.getValue('agents.voice.language'),
+				window.navigator.language,
+			);
 		await local.start({ cacheDir, model, language });
 		if (generation !== this._sessionGeneration) {
 			return;
@@ -1082,6 +1136,123 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 	private _getModelId(): string | undefined {
 		const value = this._configurationService.getValue<string>(DICTATION_MODEL_SETTING);
 		return value ? value.trim() || undefined : undefined;
+	}
+
+	private _getModelCacheDir(): string {
+		return joinPath(this._environmentService.cacheHome, 'chatDictationModels').fsPath;
+	}
+
+	private _setTranscribingSegment(transcribing: boolean): void {
+		if (!!this._isTranscribingSegment === transcribing) {
+			return;
+		}
+		this._isTranscribingSegment = transcribing;
+		this._onDidChangeTranscribingSegment.fire(transcribing);
+	}
+
+	/** CreaEditor: the model's name in the install prompt and its notifications. */
+	private _getModelDisplayName(model: string | undefined): string {
+		return isSegmentedTranscriptionModel(model)
+			? localize('chatStt.whisperName', "Whisper Large")
+			: (model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL);
+	}
+
+	/**
+	 * CreaEditor: whether the on-device model is installed, so dictation can start. When it is not,
+	 * asks (in a modal dialog) to download it; on Download it is downloaded in the background with a
+	 * progress notification, and dictation does not start: the user starts it again once it is
+	 * installed. Nothing is downloaded without that consent.
+	 */
+	private async _ensureLocalModelInstalled(): Promise<boolean> {
+		const model = this._getModelId();
+		const name = this._getModelDisplayName(model);
+		if (this._modelInstall.value) {
+			this._notificationService.info(localize('chatStt.modelStillDownloading', "The {0} speech model is still downloading. Start dictation again once it is installed.", name));
+			return false;
+		}
+		const options = { cacheDir: this._getModelCacheDir(), model };
+		let sizeMb: number | undefined;
+		try {
+			const state = await this._localTranscription.getModelInstallState(options);
+			if (state.installed) {
+				return true;
+			}
+			sizeMb = state.sizeMb;
+		} catch (err) {
+			this._logService.warn('[chat-stt] could not check whether the dictation model is installed', err);
+		}
+		const sizeGb = ((sizeMb ?? (isSegmentedTranscriptionModel(model) ? WHISPER_DOWNLOAD_SIZE_MB : 0)) / 1000).toFixed(1);
+		const { confirmed } = await this._dialogService.confirm({
+			type: Severity.Info,
+			message: localize('chatStt.installModel.title', "Install the {0} Speech Model?", name),
+			detail: sizeMb !== undefined || isSegmentedTranscriptionModel(model)
+				? localize('chatStt.installModel.detail', "Dictation needs the {0} speech model (about {1} GB, downloaded once from Microsoft's Foundry Local catalog). It runs on this computer; your audio never leaves it.", name, sizeGb)
+				: localize('chatStt.installModel.detailNoSize', "Dictation needs the {0} speech model (downloaded once from Microsoft's Foundry Local catalog). It runs on this computer; your audio never leaves it.", name),
+			primaryButton: localize({ key: 'chatStt.installModel.download', comment: ['&& denotes a mnemonic'] }, "&&Download"),
+			cancelButton: localize('chatStt.installModel.cancel', "Cancel"),
+		});
+		if (confirmed) {
+			void this._downloadLocalModel(options, name);
+		}
+		return false;
+	}
+
+	/** CreaEditor: the consented download, with a cancellable progress notification. */
+	private async _downloadLocalModel(options: { readonly cacheDir: string; readonly model: string | undefined }, name: string): Promise<void> {
+		const cts = new CancellationTokenSource();
+		this._modelInstall.value = cts;
+		let succeeded = false;
+		try {
+			await this._progressService.withProgress({
+				location: ProgressLocation.Notification,
+				title: localize('chatStt.installModel.progress', "Downloading the {0} speech model", name),
+				cancellable: true,
+			}, async progress => {
+				let reported = 0;
+				const listener = this._localTranscription.onDidChangeModelStatus(status => {
+					if (status.state === LocalTranscriptionModelState.Downloading && typeof status.progress === 'number') {
+						const percent = Math.max(0, Math.min(100, Math.round(status.progress * 100)));
+						progress.report({ increment: Math.max(0, percent - reported), total: 100, message: localize('chatStt.installModel.percent', "{0}%", percent) });
+						reported = Math.max(reported, percent);
+					} else if (status.state === LocalTranscriptionModelState.Loading && reported > 0) {
+						progress.report({ message: localize('chatStt.installModel.loading', "Preparing the model…") });
+					}
+				});
+				try {
+					await raceCancellation(this._localTranscription.downloadModel(options), cts.token);
+					succeeded = !cts.token.isCancellationRequested;
+				} finally {
+					listener.dispose();
+				}
+			}, () => {
+				cts.cancel();
+				this._localTranscription.cancel().catch(err => this._logService.warn('[chat-stt] could not cancel the dictation model download', err));
+			});
+		} catch (err) {
+			if (!cts.token.isCancellationRequested) {
+				this._logService.error('[chat-stt] dictation model download failed', err);
+				this._notificationService.error(localize('chatStt.installModel.failed', "Could not download the {0} speech model: {1}", name, toErrorMessage(err)));
+			}
+		} finally {
+			if (this._modelInstall.value === cts) {
+				this._modelInstall.clear();
+			} else {
+				cts.dispose();
+			}
+		}
+		if (succeeded) {
+			this._notificationService.notify({
+				severity: Severity.Info,
+				message: localize('chatStt.installModel.done', "{0} is installed. Start dictation again to talk.", isSegmentedTranscriptionModel(options.model) ? localize('chatStt.whisperShortName', "Whisper") : name),
+				actions: {
+					secondary: [toAction({
+						id: 'chatStt.chooseLanguage',
+						label: localize('chatStt.installModel.language', "Choose Spoken Language"),
+						run: () => this._commandService.executeCommand('workbench.action.openSettings', DictationSettingId.Language),
+					})],
+				},
+			});
+		}
 	}
 
 	/**
@@ -1231,7 +1402,14 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 	 * offline install flow. Other failures show a plain error.
 	 */
 	private _failModelSession(status: ILocalTranscriptionModelStatus): void {
+		// CreaEditor: dictation never downloads; the install prompt does (see _ensureLocalModelInstalled).
+		if (status.errorCode === MODEL_NOT_INSTALLED_ERROR_CODE) {
+			this._failSession('model', localize('chatStt.modelNotInstalled', "The {0} speech model is not installed. Start dictation again to install it.", this._getModelDisplayName(this._getModelId())));
+			return;
+		}
+		// CreaEditor: the local package import only knows the Nemotron package.
 		const canImport = this._localTranscription.isSupported
+			&& this._getModelId() === NEMOTRON_LOCAL_TRANSCRIPTION_MODEL
 			&& (status.errorCode === 'network' || status.errorCode === 'notFound');
 		if (!canImport) {
 			this._failSession('model', localize('chatStt.modelError', "On-device speech-to-text model failed to load: {0}", status.error ?? ''));
@@ -1239,7 +1417,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		}
 		// Name the specific model so users know exactly which package to obtain
 		// on a machine that can reach the download, then sideload via the command.
-		const message = localize('chatStt.modelErrorOffline', "Could not download the {0} speech-to-text model, which can happen on networks that block the model registry. You can install it from a downloaded package instead.", DEFAULT_LOCAL_TRANSCRIPTION_MODEL);
+		const message = localize('chatStt.modelErrorOffline', "Could not download the {0} speech-to-text model, which can happen on networks that block the model registry. You can install it from a downloaded package instead.", NEMOTRON_LOCAL_TRANSCRIPTION_MODEL);
 		const importAction = toAction({
 			id: INSTALL_DICTATION_MODEL_COMMAND_ID,
 			label: localize('chatStt.installFromPackage', "Install from Local Package..."),
@@ -1550,11 +1728,12 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			return { text: this._transcript, timedOut: !receivedFinal };
 		}
 		const stop = this._localTranscription.stop();
-		const finalText = await raceTimeout(stop, NEMO_FINAL_TIMEOUT_MS);
+		const finalTimeoutMs = this._localFinalTimeoutMs ?? NEMO_FINAL_TIMEOUT_MS;
+		const finalText = await raceTimeout(stop, finalTimeoutMs);
 		if (finalText !== undefined) {
 			return { text: finalText, timedOut: false };
 		}
-		this._logService.warn(`[chat-stt] on-device final transcription timed out after ${NEMO_FINAL_TIMEOUT_MS}ms; using streamed transcript`);
+		this._logService.warn(`[chat-stt] on-device final transcription timed out after ${finalTimeoutMs}ms; using streamed transcript`);
 		const cancel = this._localTranscription.cancel();
 		const teardown = Promise.all([
 			stop.catch(error => this._logService.warn('[chat-stt] on-device final transcription failed after timing out', error)),
@@ -1732,6 +1911,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		if (this._activeBackend === 'mai') {
 			this._transcriptionClient.disconnect();
 		}
+		this._setTranscribingSegment(false);
 		// Do not retain transcript text beyond the session that produced it.
 		this._finalizedText = '';
 		this._deltaText = '';

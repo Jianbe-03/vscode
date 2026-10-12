@@ -87,3 +87,35 @@ function resolveSupportedDictationLanguage(candidate: string | undefined): strin
 		return undefined;
 	}
 }
+
+/** CreaEditor: the ISO 639-1 base of a language tag (`nl-NL` → `nl`), or `undefined` for none or `auto`. */
+function toBaseLanguage(candidate: unknown): string | undefined {
+	if (typeof candidate !== 'string') {
+		return undefined;
+	}
+	const base = candidate.trim().toLowerCase().split(/[-_]/)[0];
+	return base && base !== 'auto' && /^[a-z]{2,3}$/.test(base) ? base : undefined;
+}
+
+/**
+ * CreaEditor: the language hint for Whisper dictation. Foundry Local's Whisper does not detect the
+ * language: without a hint (or with English) it writes English, translating other speech. With a
+ * hint for another language it still keeps English words and sentences in English, so for people
+ * who mix English with another language the other language is the right hint.
+ *
+ * In order: `dictation.language`, then the Voice Mode language, then the first language other than
+ * English among the display language and the system/browser languages, and English when there is none.
+ */
+export function resolveWhisperDictationLanguage(dictationLanguage: unknown, voiceLanguage: unknown, systemLanguages: readonly string[], displayLanguage = getConfiguredDisplayLanguage()): string {
+	const explicit = toBaseLanguage(dictationLanguage) ?? toBaseLanguage(voiceLanguage);
+	if (explicit) {
+		return explicit;
+	}
+	for (const candidate of [displayLanguage, ...systemLanguages]) {
+		const base = toBaseLanguage(candidate);
+		if (base && base !== 'en') {
+			return base;
+		}
+	}
+	return 'en';
+}

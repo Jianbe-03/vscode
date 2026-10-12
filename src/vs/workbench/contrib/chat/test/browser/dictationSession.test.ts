@@ -42,6 +42,8 @@ suite('DictationSession', () => {
 			onDidChangePreparingModel: store.add(new Emitter<boolean>()).event,
 			onDidChangeDownloadingModel: store.add(new Emitter<boolean>()).event,
 			onDidChangeModelDownloadProgress: store.add(new Emitter<void>()).event,
+			onDidChangeTranscribingSegment: store.add(new Emitter<boolean>()).event,
+			get isTranscribingSegment() { return false; },
 			get state() { return state; },
 			get isBusy() { return state !== ChatSpeechToTextState.Idle; },
 			get currentSurface() { return currentSurface; },

@@ -7,17 +7,18 @@ import assert from 'assert';
 import sinon from 'sinon';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise } from '../../../../../base/common/async.js';
-import { CancellationToken } from '../../../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../../base/common/event.js';
-import { DisposableStore } from '../../../../../base/common/lifecycle.js';
+import { DisposableStore, MutableDisposable } from '../../../../../base/common/lifecycle.js';
+import { IProgress, IProgressStep } from '../../../../../platform/progress/common/progress.js';
 import { URI } from '../../../../../base/common/uri.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { ChatSpeechToTextService, ChatSpeechToTextState, createDictationCleanupSystemPrompt, isDictationEntitled, resolveDictationBackend, selectAuthoritativeDictationTranscript, selectFinalDictationTranscript, stripDictationFillers } from '../../browser/speechToText/chatSpeechToTextService.js';
-import { resolveDictationLanguage } from '../../browser/speechToText/dictationLanguage.js';
+import { resolveDictationLanguage, resolveWhisperDictationLanguage } from '../../browser/speechToText/dictationLanguage.js';
 import { ChatEntitlement } from '../../../../services/chat/common/chatEntitlementService.js';
 import { ILanguageModelChatRequestOptions, ILanguageModelChatResponse, ILanguageModelChatSelector, ILanguageModelsService } from '../../common/languageModels.js';
 import { IVoiceCodeTranscriptionClient, IVoiceCodeTranscriptionError } from '../../browser/speechToText/voiceCodeTranscriptionClient.js';
-import { ILocalTranscriptionModelStatus, LocalTranscriptionModelState } from '../../../../../platform/localTranscription/common/localTranscription.js';
+import { ILocalTranscriptionModelInstallState, ILocalTranscriptionModelStatus, LocalTranscriptionModelState } from '../../../../../platform/localTranscription/common/localTranscription.js';
 
 type CleanupTestService = {
 	_configurationService: {
@@ -160,6 +161,23 @@ type AudioPushTestService = {
 	_transcriptionClient: Pick<IVoiceCodeTranscriptionClient, 'sendPttAudioChunk'>;
 	_onAudioPushError: (error: unknown) => void;
 	_pushAudio: (samples: Float32Array, window: Window & typeof globalThis) => void;
+};
+
+type ModelConsentTestService = {
+	_configurationService: { getValue: () => string };
+	_environmentService: { cacheHome: URI };
+	_logService: { warn: (message: string) => void; error: (message: string) => void };
+	_modelInstall: MutableDisposable<CancellationTokenSource>;
+	_localTranscription: {
+		getModelInstallState: () => Promise<ILocalTranscriptionModelInstallState>;
+		downloadModel: () => Promise<void>;
+		onDidChangeModelStatus: Event<ILocalTranscriptionModelStatus>;
+		cancel: () => Promise<void>;
+	};
+	_dialogService: { confirm: (confirmation: { message: string; detail?: string; primaryButton?: string }) => Promise<{ confirmed: boolean }> };
+	_progressService: { withProgress: (options: unknown, task: (progress: IProgress<IProgressStep>) => Promise<void>) => Promise<void> };
+	_notificationService: { info: (message: string) => void; notify: (notification: { message: string }) => void; error: (message: string) => void };
+	_ensureLocalModelInstalled: () => Promise<boolean>;
 };
 
 suite('ChatSpeechToTextService', () => {
@@ -971,4 +989,85 @@ suite('ChatSpeechToTextService', () => {
 		]);
 	});
 
+	test('asks before downloading the on-device model, and downloads only on Download', async () => {
+		const run = async (installed: boolean, confirmed: boolean) => {
+			const calls: string[] = [];
+			const downloaded = new DeferredPromise<void>();
+			const service = Object.create(ChatSpeechToTextService.prototype) as ModelConsentTestService;
+			service._configurationService = { getValue: () => '' };
+			service._environmentService = { cacheHome: URI.file('/cache') };
+			service._logService = { warn: message => calls.push(`warn:${message}`), error: message => calls.push(`error:${message}`) };
+			service._modelInstall = new MutableDisposable<CancellationTokenSource>();
+			service._localTranscription = {
+				getModelInstallState: async () => ({ installed, sizeMb: 1284 }),
+				downloadModel: async () => { calls.push('download'); downloaded.complete(); },
+				onDidChangeModelStatus: Event.None,
+				cancel: async () => { calls.push('cancel'); },
+			};
+			service._dialogService = {
+				confirm: async confirmation => {
+					calls.push(`confirm:${confirmation.message}|${confirmation.detail}|${confirmation.primaryButton}`);
+					return { confirmed };
+				},
+			};
+			service._progressService = { withProgress: async (_options, task) => { calls.push('progress'); await task({ report: () => { } }); } };
+			service._notificationService = {
+				info: message => calls.push(`info:${message}`),
+				notify: notification => calls.push(`notify:${notification.message}`),
+				error: message => calls.push(`error:${message}`),
+			};
+			const canStart = await service._ensureLocalModelInstalled();
+			if (confirmed && !installed) {
+				await downloaded.p;
+				await new Promise(resolve => setTimeout(resolve, 0));
+			}
+			const installInProgress = service._modelInstall.value !== undefined;
+			service._modelInstall.dispose();
+			return { canStart, calls, installInProgress };
+		};
+		const prompt = 'confirm:Install the Whisper Large Speech Model?|Dictation needs the Whisper Large speech model (about 1.3 GB, downloaded once from Microsoft\'s Foundry Local catalog). It runs on this computer; your audio never leaves it.|&&Download';
+		assert.deepStrictEqual({
+			installed: await run(true, false),
+			cancelled: await run(false, false),
+			download: await run(false, true),
+		}, {
+			installed: { canStart: true, calls: [], installInProgress: false },
+			cancelled: { canStart: false, calls: [prompt], installInProgress: false },
+			download: { canStart: false, calls: [prompt, 'progress', 'download', 'notify:Whisper is installed. Start dictation again to talk.'], installInProgress: false },
+		});
+	});
+
+	test('does not prompt again while the model is still downloading', async () => {
+		const calls: string[] = [];
+		const service = Object.create(ChatSpeechToTextService.prototype) as ModelConsentTestService;
+		service._configurationService = { getValue: () => '' };
+		service._modelInstall = new MutableDisposable<CancellationTokenSource>();
+		service._modelInstall.value = new CancellationTokenSource();
+		service._notificationService = { info: message => calls.push(`info:${message}`), notify: () => calls.push('notify'), error: () => calls.push('error') };
+		service._dialogService = { confirm: async () => { calls.push('confirm'); return { confirmed: true }; } };
+		try {
+			assert.deepStrictEqual({ canStart: await service._ensureLocalModelInstalled(), calls }, {
+				canStart: false,
+				calls: ['info:The Whisper Large speech model is still downloading. Start dictation again once it is installed.'],
+			});
+		} finally {
+			service._modelInstall.dispose();
+		}
+	});
+
+	test('resolves the Whisper language hint so mixed Dutch and English stays as spoken', () => {
+		assert.deepStrictEqual({
+			dictationSetting: resolveWhisperDictationLanguage('nl', 'de', ['en-US'], 'en'),
+			voiceSetting: resolveWhisperDictationLanguage('auto', 'fr', ['en-US'], 'en'),
+			systemLanguage: resolveWhisperDictationLanguage('auto', 'auto', ['en-US', 'nl-NL'], 'en'),
+			displayLanguage: resolveWhisperDictationLanguage(undefined, undefined, ['en-US'], 'nl'),
+			englishOnly: resolveWhisperDictationLanguage('auto', 'auto', ['en-US', 'en-GB'], 'en'),
+		}, {
+			dictationSetting: 'nl',
+			voiceSetting: 'fr',
+			systemLanguage: 'nl',
+			displayLanguage: 'nl',
+			englishOnly: 'en',
+		});
+	});
 });

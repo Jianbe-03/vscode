@@ -35,7 +35,7 @@ import { SyncDescriptor } from '../../../../platform/instantiation/common/descri
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IJSONContributionRegistry, Extensions as JSONExtensions } from '../../../../platform/jsonschemas/common/jsonContributionRegistry.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL } from '../../../../platform/localTranscription/common/localTranscription.js';
+import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL } from '../../../../platform/localTranscription/common/localTranscription.js';
 import { McpAccessValue, McpAutoStartValue, mcpAccessConfig, mcpAllowedServersConfig, mcpAppsEnabledConfig, mcpAutoStartConfig, mcpDeniedServersConfig, mcpGalleryServiceEnablementConfig, mcpGalleryServiceUrlConfig } from '../../../../platform/mcp/common/mcpManagement.js';
 import { AgentNetworkFilterService, IAgentNetworkFilterService } from '../../../../platform/networkFilter/common/networkFilterService.js';
 import { AgentNetworkDomainSettingId } from '../../../../platform/networkFilter/common/settings.js';
@@ -361,15 +361,19 @@ configurationRegistry.registerConfiguration({
 		},
 		'dictation.model': {
 			type: 'string',
+			// CreaEditor: Whisper Large v3 Turbo is the default; Nemotron stays selectable.
 			enum: [
 				DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
+				NEMOTRON_LOCAL_TRANSCRIPTION_MODEL,
 				DICTATION_MAI_MODEL_ID,
 			],
 			enumItemLabels: [
+				nls.localize('dictation.model.whisper.label', "Whisper Large v3 Turbo — On-Device"),
 				nls.localize('dictation.model.nemotronMultilingual.label', "Nemotron 3.5 ASR (Multilingual) — On-Device"),
 				nls.localize('dictation.model.mai.label', "MAI — Cloud"),
 			],
 			markdownEnumDescriptions: [
+				nls.localize('dictation.model.whisper', "OpenAI Whisper Large v3 Turbo, run on-device through Microsoft Foundry Local. The most accurate option, also when you mix languages in one sentence: set `#dictation.language#` to the language you speak besides English. Text appears per sentence, at each pause. About 1.3 GB, downloaded once after you agree to it; no audio leaves the device."),
 				nls.localize('dictation.model.nemotronMultilingual', "NVIDIA Nemotron 3.5 multilingual streaming RNN-T, run on-device through Microsoft Foundry Local. Works offline; no audio leaves the device. Automatic language selection follows the Voice Mode language setting; when that setting is Automatic, dictation uses the configured display language when supported, then the system or browser locale, with model detection as a fallback. Downloaded on first use and cached on disk."),
 				nls.localize('dictation.model.mai', "Cloud transcription through the same Microsoft AI voice service used by Voice Mode. Requires a network connection and GitHub sign-in; audio is streamed to the service."),
 			],
@@ -388,6 +392,10 @@ configurationRegistry.registerConfiguration({
 					},
 					enumDescriptions: [
 						{
+							key: 'dictation.model.whisper.policy',
+							value: nls.localize('dictation.model.whisper.policy', "Use the on-device Whisper transcription model. Audio does not leave the device.")
+						},
+						{
 							key: 'dictation.model.nemotronMultilingual.policy',
 							value: nls.localize('dictation.model.nemotronMultilingual.policy', "Use the on-device transcription model. Audio does not leave the device.")
 						},
@@ -398,6 +406,35 @@ configurationRegistry.registerConfiguration({
 					]
 				},
 			}
+		},
+		// CreaEditor: the spoken language for Whisper, which needs a hint (without one it writes English).
+		[DictationSettingId.Language]: {
+			type: 'string',
+			enum: ['auto', 'nl', 'en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'sv', 'da', 'nb', 'fi', 'tr', 'uk', 'ru', 'ja', 'ko', 'zh'],
+			enumItemLabels: [
+				nls.localize('dictation.language.auto', "Automatic"),
+				nls.localize('dictation.language.nl', "Dutch"),
+				nls.localize('dictation.language.en', "English"),
+				nls.localize('dictation.language.de', "German"),
+				nls.localize('dictation.language.fr', "French"),
+				nls.localize('dictation.language.es', "Spanish"),
+				nls.localize('dictation.language.it', "Italian"),
+				nls.localize('dictation.language.pt', "Portuguese"),
+				nls.localize('dictation.language.pl', "Polish"),
+				nls.localize('dictation.language.sv', "Swedish"),
+				nls.localize('dictation.language.da', "Danish"),
+				nls.localize('dictation.language.nb', "Norwegian"),
+				nls.localize('dictation.language.fi', "Finnish"),
+				nls.localize('dictation.language.tr', "Turkish"),
+				nls.localize('dictation.language.uk', "Ukrainian"),
+				nls.localize('dictation.language.ru', "Russian"),
+				nls.localize('dictation.language.ja', "Japanese"),
+				nls.localize('dictation.language.ko', "Korean"),
+				nls.localize('dictation.language.zh', "Chinese"),
+			],
+			markdownDescription: nls.localize('dictation.language', "The language you dictate in with the Whisper model. Whisper keeps English words and sentences in English, so when you mix English with another language, choose the other language (for example Dutch). Automatic uses the Voice Mode language (`#agents.voice.language#`) when it is set, otherwise the first language other than English of the display language and the system languages, and English when there is none. With English, Whisper translates other languages into English."),
+			default: 'auto',
+			scope: ConfigurationScope.APPLICATION,
 		},
 		[DictationSettingId.ShowTranscript]: {
 			type: 'boolean',
