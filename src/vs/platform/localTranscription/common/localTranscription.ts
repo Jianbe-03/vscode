@@ -168,6 +168,13 @@ export interface ILocalTranscriptionService {
 	downloadModel(options: ILocalTranscriptionModelOptions): Promise<void>;
 
 	/**
+	 * CreaEditor: the languages the user set up in the operating system, most preferred first (on
+	 * macOS the full "Preferred Languages" list, which the renderer's `navigator.languages` does not
+	 * show). Whisper's automatic language hint picks the first one that is not English.
+	 */
+	getSystemLanguages(): Promise<string[]>;
+
+	/**
 	 * Ensure the model is loaded (idempotent) and begin a new transcription
 	 * session. CreaEditor: never downloads; a model that is not on disk fails
 	 * with {@link MODEL_NOT_INSTALLED_ERROR_CODE}. `cacheDir` is where model files are stored. `model`

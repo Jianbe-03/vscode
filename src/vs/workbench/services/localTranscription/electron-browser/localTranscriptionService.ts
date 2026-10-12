@@ -86,6 +86,7 @@ export class LocalTranscriptionService {
 	// CreaEditor: whether the model is on disk, and its consented download.
 	getModelInstallState(options: { cacheDir: string; model?: string }) { return this._getProxy().getModelInstallState(this._withEnvironment(options)); }
 	downloadModel(options: { cacheDir: string; model?: string }) { return this._getProxy().downloadModel(this._withEnvironment(options)); }
+	getSystemLanguages() { return this._getProxy().getSystemLanguages(); }
 	start(options: { cacheDir: string; model?: string; language?: string }) {
 		return this._getProxy().start({ ...this._withEnvironment(options), language: options.language });
 	}

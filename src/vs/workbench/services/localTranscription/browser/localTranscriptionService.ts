@@ -38,6 +38,10 @@ export class NullLocalTranscriptionService implements ILocalTranscriptionService
 		throw new Error('On-device transcription is not supported in this environment.');
 	}
 
+	async getSystemLanguages(): Promise<string[]> {
+		return [];
+	}
+
 	async start(): Promise<void> {
 		throw new Error('On-device transcription is not supported in this environment.');
 	}

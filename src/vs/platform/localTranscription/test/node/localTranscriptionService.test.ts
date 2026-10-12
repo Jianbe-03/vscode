@@ -9,7 +9,7 @@ import { tmpdir } from 'os';
 import { join } from '../../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { getRandomTestPath } from '../../../../base/test/node/testUtils.js';
-import { hasCachedModelFiles, selectCachedModelVariant, toWhisperLanguage } from '../../node/localTranscriptionService.js';
+import { hasCachedModelFiles, parseAppleLanguages, selectCachedModelVariant, toWhisperLanguage } from '../../node/localTranscriptionService.js';
 
 suite('LocalTranscriptionService', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -62,5 +62,9 @@ suite('LocalTranscriptionService', () => {
 
 	test('passes Whisper a bare language code, and no hint for automatic', () => {
 		assert.deepStrictEqual(['nl-NL', 'en', 'pt_BR', 'auto', '', undefined, 'not a language'].map(toWhisperLanguage), ['nl', 'en', 'pt', undefined, undefined, undefined, undefined]);
+	});
+
+	test('reads the macOS preferred languages list', () => {
+		assert.deepStrictEqual(parseAppleLanguages('(\n    "en-US",\n    "nl-NL",\n    fr\n)\n'), ['en-US', 'nl-NL', 'fr']);
 	});
 });

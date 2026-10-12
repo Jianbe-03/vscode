@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as fs from 'fs';
+import { execFile } from 'child_process';
 import { tmpdir } from 'os';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
@@ -134,6 +135,40 @@ export async function hasCachedModelFiles(cacheDir: string, modelId: string): Pr
 		}
 	}
 	return false;
+}
+
+/**
+ * CreaEditor: the language tags in the output of `defaults read -g AppleLanguages` (a property list
+ * array such as `(\n    "en-US",\n    "nl-NL"\n)`). Exported for tests.
+ */
+export function parseAppleLanguages(output: string): string[] {
+	const languages: string[] = [];
+	for (const match of output.matchAll(/^\s*"?(?<tag>[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)*)"?,?\s*$/gm)) {
+		if (match.groups?.tag) {
+			languages.push(match.groups.tag);
+		}
+	}
+	return languages;
+}
+
+/** CreaEditor: the operating system's preferred languages (see {@link ILocalTranscriptionService.getSystemLanguages}). */
+async function readSystemLanguages(): Promise<string[]> {
+	const languages: string[] = [];
+	if (process.platform === 'darwin') {
+		const output = await new Promise<string>(resolve => {
+			execFile('/usr/bin/defaults', ['read', '-g', 'AppleLanguages'], { timeout: 2000 }, (error, stdout) => resolve(error ? '' : stdout));
+		});
+		languages.push(...parseAppleLanguages(output));
+	}
+	for (const value of [process.env.LANGUAGE, process.env.LC_ALL, process.env.LANG]) {
+		for (const tag of value?.split(':') ?? []) {
+			const language = tag.split('.')[0];
+			if (/^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]+)*$/.test(language) && language !== 'C' && language !== 'POSIX') {
+				languages.push(language);
+			}
+		}
+	}
+	return languages;
 }
 
 /** CreaEditor: PCM16 mono samples as a WAV file, the input Whisper's `transcribe` reads. */
@@ -470,6 +505,13 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 			// The catalog could not be read (offline): look at the cache itself.
 			return { installed: await hasCachedModelFiles(options.cacheDir, modelId) };
 		}
+	}
+
+	private _systemLanguages: Promise<string[]> | undefined;
+
+	getSystemLanguages(): Promise<string[]> {
+		this._systemLanguages ??= readSystemLanguages();
+		return this._systemLanguages;
 	}
 
 	async downloadModel(options: ILocalTranscriptionModelOptions): Promise<void> {

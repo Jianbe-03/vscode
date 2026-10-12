@@ -1107,7 +1107,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			? resolveWhisperDictationLanguage(
 				this._configurationService.getValue(DictationSettingId.Language),
 				this._configurationService.getValue('agents.voice.language'),
-				window.navigator.languages,
+				[...window.navigator.languages, ...await local.getSystemLanguages().catch(() => [])],
 			)
 			: resolveDictationLanguage(
 				this._configurationService.getValue('agents.voice.language'),

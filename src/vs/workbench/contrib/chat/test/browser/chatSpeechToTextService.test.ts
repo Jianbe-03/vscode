@@ -116,6 +116,7 @@ type LocalStartupTestService = {
 		onDidTranscribe: Event<{ text: string; finalizedText?: string; isFinal: boolean }>;
 		start: () => Promise<void>;
 		getModelStatus: () => Promise<ILocalTranscriptionModelStatus>;
+		getSystemLanguages: () => Promise<string[]>;
 	};
 	_environmentService: { cacheHome: URI };
 	_configurationService: { getValue: () => string };
@@ -465,6 +466,7 @@ suite('ChatSpeechToTextService', () => {
 			onDidTranscribe: Event.None,
 			start: async () => { },
 			getModelStatus: async () => status,
+			getSystemLanguages: async () => [],
 		};
 		service._environmentService = { cacheHome: URI.file('/cache') };
 		service._configurationService = { getValue: () => '' };
