@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as fs from 'fs';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { CancellationTokenSource } from '../../../base/common/cancellation.js';
@@ -93,6 +94,43 @@ export function selectCachedModelVariant<T extends { readonly isCached: boolean 
 	const cachedVariant = model.variants.find(variant => variant.isCached);
 	if (cachedVariant) {
 		model.selectVariant(cachedVariant);
+	}
+}
+
+/**
+ * CreaEditor: copies the dictation model the build bundled (`<appRoot>/dictation-model`, laid out like
+ * the model cache: `<publisher>/<variant>/v<version>/...`) into `cacheDir` where it is missing, so the
+ * SDK finds it cached and never downloads it. The copy is a clone on APFS (no extra disk space) and
+ * is staged, so an interrupted copy is never taken for a complete model. Exported for tests.
+ */
+export async function seedBundledDictationModel(bundledDir: string, cacheDir: string): Promise<void> {
+	let publishers: string[];
+	try {
+		publishers = await fs.promises.readdir(bundledDir);
+	} catch {
+		return; // Nothing bundled (dev builds, other platforms).
+	}
+	for (const publisher of publishers) {
+		let variants: string[];
+		try {
+			variants = await fs.promises.readdir(join(bundledDir, publisher));
+		} catch {
+			continue; // Not a folder.
+		}
+		for (const variant of variants) {
+			const target = join(cacheDir, publisher, variant);
+			if (fs.existsSync(target)) {
+				continue;
+			}
+			const staging = `${target}.seeding-${Date.now().toString(36)}`;
+			await fs.promises.mkdir(dirname(target), { recursive: true });
+			try {
+				await fs.promises.cp(join(bundledDir, publisher, variant), staging, { recursive: true, mode: fs.constants.COPYFILE_FICLONE });
+				await fs.promises.rename(staging, target);
+			} finally {
+				await fs.promises.rm(staging, { recursive: true, force: true });
+			}
+		}
 	}
 }
 
@@ -563,6 +601,9 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 						logLevel: 'warn',
 					});
 				}
+
+				// CreaEditor: the build bundles the model; put it in the cache so it is never downloaded.
+				await seedBundledDictationModel(join(dirname(FileAccess.asFileUri('').fsPath), 'dictation-model'), cacheDir);
 
 				const model = await withTimeout(
 					this._manager.catalog.getModel(modelId),

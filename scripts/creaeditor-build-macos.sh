@@ -97,6 +97,21 @@ for entry in "claude:@anthropic-ai/claude-agent-sdk @anthropic-ai/claude-agent-s
 	done
 done
 
+# On-device dictation downloads its speech-to-text model on first use; ship it inside the app instead
+# (<app>/Contents/Resources/app/dictation-model, laid out like the model cache; see
+# seedBundledDictationModel in localTranscriptionService.ts). Downloaded once into .build/dictation-model.
+step "Bundling the dictation model"
+MODEL_CACHE="$ROOT/.build/dictation-model"
+if ! ls "$MODEL_CACHE"/*/*/v*/inference_model.json >/dev/null 2>&1; then
+	node scripts/creaeditor-fetch-dictation-model.mjs "$MODEL_CACHE"
+fi
+MODEL_OUT="$APP/Contents/Resources/app/dictation-model"
+rm -rf "$MODEL_OUT"
+mkdir -p "$MODEL_OUT"
+for publisher in "$MODEL_CACHE"/*/; do
+	cp -cR "${publisher%/}" "$MODEL_OUT/" 2>/dev/null || cp -R "${publisher%/}" "$MODEL_OUT/"
+done
+
 # Remote Access serves the web Agents window (sessions.web.main) to phones and other devices from
 # <app>/Contents/Resources/app/out-sessions-web (see remoteAccessMainService.ts). Only the Agents
 # window and its workers are needed: drop the vscode.dev workbench bundle and source maps.
