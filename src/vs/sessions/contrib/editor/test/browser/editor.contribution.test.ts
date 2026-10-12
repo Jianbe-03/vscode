@@ -22,7 +22,7 @@ import { IEditorOptions } from '../../../../../platform/editor/common/editor.js'
 import { Registry } from '../../../../../platform/registry/common/platform.js';
 import { editorBackground } from '../../../../../platform/theme/common/colorRegistry.js';
 import { Extensions as ThemeServiceExtensions, IThemingRegistry } from '../../../../../platform/theme/common/themeService.js';
-import { EditorInputCapabilities } from '../../../../../workbench/common/editor.js';
+import { EditorCloseContext, EditorInputCapabilities, IEditorCloseEvent, IEditorWillOpenEvent } from '../../../../../workbench/common/editor.js';
 import { EditorInput } from '../../../../../workbench/common/editor/editorInput.js';
 import { TAB_ACTIVE_BACKGROUND } from '../../../../../workbench/common/theme.js';
 import { IPartVisibilityChangeEvent, IWorkbenchLayoutService, LayoutSettings, ModernUIEditorTabStyle, Parts } from '../../../../../workbench/services/layout/browser/layoutService.js';
@@ -44,7 +44,7 @@ import { ISessionChangesService } from '../../../changes/browser/sessionChangesS
 import { NewBrowserTabAction, NewChangesTabAction, NewFileTabAction, NewSearchTabAction } from '../../browser/addTabActions.js';
 import { EmptyFileEditorInput, EmptyFileEditorSerializer } from '../../browser/emptyFileEditorInput.js';
 import { EditorTabsVisibleContext, IsAuxiliaryWindowContext, IsSessionsWindowContext, IsTopRightEditorGroupContext } from '../../../../../workbench/common/contextkeys.js';
-import { TestEnvironmentService, TestLayoutService } from '../../../../../workbench/test/browser/workbenchTestServices.js';
+import { TestEditorInput, TestEnvironmentService, TestLayoutService } from '../../../../../workbench/test/browser/workbenchTestServices.js';
 import { IsQuickChatSessionContext, SinglePaneChangesTabAvailableContext, SinglePaneChangesTabMissingContext, SinglePaneFilesTabAvailableContext, SinglePaneFilesTabMissingContext } from '../../../../common/contextkeys.js';
 
 // Import editor contribution to trigger action registration.
@@ -876,5 +876,112 @@ suite('Sessions - Editor Contribution', () => {
 		assert.deepStrictEqual(layoutService.shownParts, []);
 		assert.deepStrictEqual(layoutService.maximizedStates, [true, false]);
 		assert.strictEqual(layoutService.panelVisible, true);
+	});
+
+	// CreaEditor: AI Costs and Subscription Usage open maximized over the chat until they close.
+	suite('open editor maximized', () => {
+
+		function createFixture(initial: { editor: boolean; auxiliaryBar: boolean; maximized: boolean }) {
+			const instantiationService = store.add(new TestInstantiationService());
+			const calls: string[] = [];
+			const layoutService = new class extends mock<IAgentWorkbenchLayoutService>() {
+				readonly state = { ...initial };
+				override isEditorMaximized(): boolean { return this.state.maximized; }
+				override setEditorMaximized(maximized: boolean): void {
+					calls.push(maximized ? 'maximize' : 'restore');
+					this.state.maximized = maximized;
+				}
+				override isVisible(part: Parts): boolean {
+					return part === Parts.EDITOR_PART ? this.state.editor : part === Parts.AUXILIARYBAR_PART ? this.state.auxiliaryBar : false;
+				}
+				override setPartHidden(hidden: boolean, part: Parts): void {
+					calls.push(`${hidden ? 'hide' : 'show'} ${part}`);
+					if (part === Parts.EDITOR_PART) {
+						this.state.editor = !hidden;
+					} else if (part === Parts.AUXILIARYBAR_PART) {
+						this.state.auxiliaryBar = !hidden;
+					}
+				}
+				override isEditorPartAutoVisibilitySuppressed(): boolean { return false; }
+				override suppressEditorPartAutoVisibility() { return { dispose: () => { } }; }
+			};
+			const onWillOpenEditor = store.add(new Emitter<IEditorWillOpenEvent>());
+			const onDidCloseEditor = store.add(new Emitter<IEditorCloseEvent>());
+			const onWillCloseEditor = store.add(new Emitter<IEditorCloseEvent>());
+			const editors: EditorInput[] = [];
+			const group = new class extends mock<IEditorGroup>() {
+				override readonly id = 1;
+				override onWillCloseEditor = onWillCloseEditor.event;
+				override get isEmpty(): boolean { return editors.length === 0; }
+				override contains(editor: EditorInput): boolean { return editors.includes(editor); }
+			};
+			instantiationService.set(IAgentWorkbenchLayoutService, layoutService);
+			instantiationService.set(IViewsService, new class extends mock<IViewsService>() {
+				override isViewVisible(): boolean { return false; }
+			});
+			instantiationService.set(IEditorService, new class extends mock<IEditorService>() {
+				override onWillOpenEditor = onWillOpenEditor.event;
+				override onDidCloseEditor = onDidCloseEditor.event;
+			});
+			instantiationService.set(IEditorGroupsService, new class extends mock<IEditorGroupsService>() {
+				override mainPart = new class extends mock<IEditorGroupsService['mainPart']>() {
+					override groups = [group];
+					override onDidAddGroup = Event.None;
+					override onDidRemoveGroup = Event.None;
+				};
+			});
+
+			const handler = CommandsRegistry.getCommand('workbench.action.agentSessions.openEditorMaximized')?.handler;
+			assert.ok(handler, 'Command handler should be registered');
+			const changesTab = store.add(new TestEditorInput(URI.parse('test://changes'), 'testEditorInput'));
+			const page = store.add(new TestEditorInput(URI.parse('test://ai-costs'), 'testEditorInput'));
+			editors.push(changesTab);
+
+			return {
+				layoutService,
+				calls,
+				/** Opens the page like the Copilot extension does: opening it reveals the editor area. */
+				open: () => handler(instantiationService, async () => {
+					onWillOpenEditor.fire({ editor: page, groupId: group.id });
+					editors.push(page);
+					layoutService.state.editor = true;
+				}),
+				/** Closes the page; the Changes tab stays in the group. */
+				close: () => {
+					const event = { editor: page, groupId: group.id, context: EditorCloseContext.UNKNOWN, index: 1, sticky: false };
+					onWillCloseEditor.fire(event);
+					editors.splice(editors.indexOf(page), 1);
+					onDidCloseEditor.fire(event);
+				},
+			};
+		}
+
+		test('restores the layout from before the page opened when it closes', async () => {
+			const fixture = createFixture({ editor: false, auxiliaryBar: false, maximized: false });
+
+			await fixture.open();
+			// While maximized the layout shows the Changes details next to the page.
+			fixture.layoutService.state.auxiliaryBar = true;
+			const whileOpen = { ...fixture.layoutService.state };
+			fixture.close();
+
+			assert.deepStrictEqual({ whileOpen, afterClose: fixture.layoutService.state, calls: fixture.calls }, {
+				whileOpen: { editor: true, auxiliaryBar: true, maximized: true },
+				afterClose: { editor: false, auxiliaryBar: false, maximized: false },
+				calls: ['maximize', 'restore', `hide ${Parts.EDITOR_PART}`, `hide ${Parts.AUXILIARYBAR_PART}`],
+			});
+		});
+
+		test('leaves an editor area the user maximized themselves alone', async () => {
+			const fixture = createFixture({ editor: true, auxiliaryBar: false, maximized: true });
+
+			await fixture.open();
+			fixture.close();
+
+			assert.deepStrictEqual({ afterClose: fixture.layoutService.state, calls: fixture.calls }, {
+				afterClose: { editor: true, auxiliaryBar: false, maximized: true },
+				calls: [],
+			});
+		});
 	});
 });

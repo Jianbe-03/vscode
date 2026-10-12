@@ -37,13 +37,28 @@ const GET_CHAT_COSTS_COMMAND_ID = 'creaeditor.aiCosts.getChatCosts';
 const SHOW_AI_COSTS_COMMAND_ID = 'creaeditor.showAiCosts';
 /** Called by the Copilot extension with the ids of the chats whose cost changed, or without when any may have. */
 const DID_CHANGE_CHAT_COSTS_COMMAND_ID = '_creaeditor.chatGatewayCosts.didChange';
-/** Maximizes the editor area of the Agents window over the chat (see the sessions editor contribution). */
-const MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID = 'workbench.action.agentSessions.maximizeMainEditorPart';
+/**
+ * Opens a page maximized over the chat in the Agents window, and gives the layout back as it was
+ * when the page closes (see the sessions editor contribution).
+ */
+const OPEN_EDITOR_MAXIMIZED_COMMAND_ID = 'workbench.action.agentSessions.openEditorMaximized';
 
 /** The action behind the counter; its menu items get a {@link ChatGatewayCostActionViewItem}. */
 export const SHOW_CHAT_GATEWAY_COST_ACTION_ID = 'workbench.action.chat.showGatewayCost';
 /** Opens the AI Costs page in any window: in the Agents window it covers the chat. */
 export const SHOW_AI_COSTS_ACTION_ID = 'workbench.action.chat.showAiCosts';
+
+/**
+ * Runs `open`, which opens a page like AI Costs. In the Agents window the page covers the chat
+ * until it closes, after which the layout is as it was before.
+ */
+export async function openPageOverChat(commandService: ICommandService, isSessionsWindow: boolean, open: () => Promise<unknown>): Promise<void> {
+	if (isSessionsWindow) {
+		await commandService.executeCommand(OPEN_EDITOR_MAXIMIZED_COMMAND_ID, open);
+	} else {
+		await open();
+	}
+}
 
 /** Gateway cost of a chat, the requests of its subagents included. */
 export interface IChatGatewayCost {
@@ -256,10 +271,7 @@ registerAction2(class ShowChatGatewayCostAction extends Action2 {
 		const isSessionsWindow = accessor.get(IWorkbenchEnvironmentService).isSessionsWindow;
 		const contextResource = (context as { sessionResource?: unknown } | undefined)?.sessionResource;
 		const sessionResource = URI.isUri(contextResource) ? contextResource : accessor.get(IChatWidgetService).lastFocusedWidget?.viewModel?.sessionResource;
-		await commandService.executeCommand(SHOW_AI_COSTS_COMMAND_ID, sessionResource ? { chatId: getChatCostId(sessionResource) } : undefined);
-		if (isSessionsWindow) {
-			await commandService.executeCommand(MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID);
-		}
+		await openPageOverChat(commandService, isSessionsWindow, () => commandService.executeCommand(SHOW_AI_COSTS_COMMAND_ID, sessionResource ? { chatId: getChatCostId(sessionResource) } : undefined));
 	}
 });
 
@@ -281,10 +293,7 @@ registerAction2(class ShowAiCostsAction extends Action2 {
 	override async run(accessor: ServicesAccessor): Promise<void> {
 		const commandService = accessor.get(ICommandService);
 		const isSessionsWindow = accessor.get(IWorkbenchEnvironmentService).isSessionsWindow;
-		await commandService.executeCommand(SHOW_AI_COSTS_COMMAND_ID);
-		if (isSessionsWindow) {
-			await commandService.executeCommand(MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID);
-		}
+		await openPageOverChat(commandService, isSessionsWindow, () => commandService.executeCommand(SHOW_AI_COSTS_COMMAND_ID));
 	}
 });
 

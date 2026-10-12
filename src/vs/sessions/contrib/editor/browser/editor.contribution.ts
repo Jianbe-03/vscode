@@ -13,13 +13,15 @@ import { NewBrowserTabAction, NewChangesTabAction, NewFileTabAction, NewSearchTa
 import { localize2 } from '../../../../nls.js';
 import { Codicon } from '../../../../base/common/codicons.js';
 import { KeyCode, KeyMod } from '../../../../base/common/keyCodes.js';
-import { Disposable, DisposableStore } from '../../../../base/common/lifecycle.js';
+import { Disposable, DisposableMap, DisposableStore } from '../../../../base/common/lifecycle.js';
 import { getWindow } from '../../../../base/browser/dom.js';
+import { mainWindow } from '../../../../base/browser/window.js';
 import { Schemas } from '../../../../base/common/network.js';
 import { URI } from '../../../../base/common/uri.js';
 import { ServicesAccessor } from '../../../../editor/browser/editorExtensions.js';
 import { Action2, isIMenuItem, MenuId, MenuRegistry, registerAction2 } from '../../../../platform/actions/common/actions.js';
-import { ICommandService } from '../../../../platform/commands/common/commands.js';
+import { CommandsRegistry, ICommandService } from '../../../../platform/commands/common/commands.js';
+import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ContextKeyExpr } from '../../../../platform/contextkey/common/contextkey.js';
 import { KeybindingWeight } from '../../../../platform/keybinding/common/keybindingsRegistry.js';
 import { ActiveEditorContext, EditorPartModalContext, IsAuxiliaryWindowContext, IsSessionsWindowContext, IsTopRightEditorGroupContext, MainEditorAreaVisibleContext } from '../../../../workbench/common/contextkeys.js';
@@ -29,10 +31,11 @@ import { IAgentWorkbenchLayoutService } from '../../../browser/workbench.js';
 import { CustomViewVisibleContext, EditorMaximizedContext, SinglePaneLayoutEnabledContext } from '../../../common/contextkeys.js';
 import { IViewsService } from '../../../../workbench/services/views/common/viewsService.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
-import { IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
+import { IEditorGroup, IEditorGroupsService } from '../../../../workbench/services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../workbench/services/editor/common/editorService.js';
 import { IListService } from '../../../../platform/list/browser/listService.js';
-import { EditorResourceAccessor, SideBySideEditor } from '../../../../workbench/common/editor.js';
+import { EditorCloseContext, EditorResourceAccessor, GroupIdentifier, IEditorCloseEvent, SideBySideEditor } from '../../../../workbench/common/editor.js';
+import { EditorInput } from '../../../../workbench/common/editor/editorInput.js';
 import { resolveCommandsContext } from '../../../../workbench/browser/parts/editor/editorCommandsContext.js';
 import { MultiDiffEditorInput } from '../../../../workbench/contrib/multiDiffEditor/browser/multiDiffEditorInput.js';
 import { CHANGES_VIEW_ID } from '../../changes/common/changes.js';
@@ -171,23 +174,29 @@ class MaximizeMainEditorPartAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const layoutService = accessor.get(IAgentWorkbenchLayoutService);
-		const viewsService = accessor.get(IViewsService);
-		let hidTerminalPanel = false;
-
-		if (layoutService.isVisible(Parts.PANEL_PART) && viewsService.isViewVisible(TERMINAL_VIEW_ID)) {
-			layoutService.setPartHidden(true, Parts.PANEL_PART);
-			hidTerminalPanel = true;
-		}
-
-		if (hidTerminalPanel) {
-			terminalPanelHiddenForMaximizedEditor.add(layoutService);
-		} else {
-			terminalPanelHiddenForMaximizedEditor.delete(layoutService);
-		}
-
-		layoutService.setEditorMaximized(true);
+		maximizeMainEditorPart(accessor.get(IAgentWorkbenchLayoutService), accessor.get(IViewsService));
 	}
+}
+
+/**
+ * Maximizes the main editor part, hiding a visible terminal panel first (restored by
+ * {@link restoreMainEditorPart}).
+ */
+function maximizeMainEditorPart(layoutService: IAgentWorkbenchLayoutService, viewsService: IViewsService): void {
+	let hidTerminalPanel = false;
+
+	if (layoutService.isVisible(Parts.PANEL_PART) && viewsService.isViewVisible(TERMINAL_VIEW_ID)) {
+		layoutService.setPartHidden(true, Parts.PANEL_PART);
+		hidTerminalPanel = true;
+	}
+
+	if (hidTerminalPanel) {
+		terminalPanelHiddenForMaximizedEditor.add(layoutService);
+	} else {
+		terminalPanelHiddenForMaximizedEditor.delete(layoutService);
+	}
+
+	layoutService.setEditorMaximized(true);
 }
 
 registerAction2(MaximizeMainEditorPartAction);
@@ -225,20 +234,182 @@ class RestoreMainEditorPartAction extends Action2 {
 	}
 
 	async run(accessor: ServicesAccessor): Promise<void> {
-		const layoutService = accessor.get(IAgentWorkbenchLayoutService);
-		const shouldRestoreTerminalPanel = terminalPanelHiddenForMaximizedEditor.has(layoutService);
-
-		layoutService.setEditorMaximized(false);
-
-		if (shouldRestoreTerminalPanel && !layoutService.isVisible(Parts.PANEL_PART)) {
-			layoutService.setPartHidden(false, Parts.PANEL_PART);
-		}
-
-		terminalPanelHiddenForMaximizedEditor.delete(layoutService);
+		restoreMainEditorPart(accessor.get(IAgentWorkbenchLayoutService));
 	}
 }
 
+/** Restores the main editor part, and the terminal panel that {@link maximizeMainEditorPart} hid. */
+function restoreMainEditorPart(layoutService: IAgentWorkbenchLayoutService): void {
+	const shouldRestoreTerminalPanel = terminalPanelHiddenForMaximizedEditor.has(layoutService);
+
+	layoutService.setEditorMaximized(false);
+
+	if (shouldRestoreTerminalPanel && !layoutService.isVisible(Parts.PANEL_PART)) {
+		layoutService.setPartHidden(false, Parts.PANEL_PART);
+	}
+
+	terminalPanelHiddenForMaximizedEditor.delete(layoutService);
+}
+
 registerAction2(RestoreMainEditorPartAction);
+
+//#region CreaEditor: pages opened maximized over the chat
+
+/** Called by the AI Costs and Subscription Usage actions of the chat contribution with the function that opens the page. */
+const OPEN_EDITOR_MAXIMIZED_COMMAND_ID = 'workbench.action.agentSessions.openEditorMaximized';
+
+/** Visibility of the side pane before a page opened maximized over the chat. */
+interface ISidePaneVisibilityBeforeMaximizedEditor {
+	readonly editor: boolean;
+	readonly auxiliaryBar: boolean;
+}
+
+/** Restorer of each Agents window, while a page it opened maximized is open. */
+const maximizedEditorLayoutRestorers = new WeakMap<IAgentWorkbenchLayoutService, MaximizedEditorLayoutRestorer>();
+
+/**
+ * CreaEditor: gives the layout back as it was before pages opened maximized over the chat
+ * (AI Costs, Subscription Usage) once the last of them closes.
+ *
+ * The editor area is restored while the page is still closing: closing the last editor (or the
+ * empty side pane rules of the single-pane layout) would otherwise remember the maximized state
+ * and maximize again on the next Toggle Side Panel or editor open, and editors left in the group
+ * (the Changes and Files tabs) would stay maximized over the chat. After the close the editor
+ * area and the details are shown or hidden as they were before the page opened.
+ */
+class MaximizedEditorLayoutRestorer extends Disposable {
+
+	private readonly _editors = new Set<EditorInput>();
+	private readonly _groupListeners = this._register(new DisposableMap<GroupIdentifier>());
+	private _closingEditor: EditorInput | undefined;
+
+	constructor(
+		readonly sidePaneBefore: ISidePaneVisibilityBeforeMaximizedEditor,
+		@IAgentWorkbenchLayoutService private readonly _layoutService: IAgentWorkbenchLayoutService,
+		@IEditorGroupsService private readonly _editorGroupsService: IEditorGroupsService,
+		@IEditorService editorService: IEditorService,
+	) {
+		super();
+
+		const mainPart = this._editorGroupsService.mainPart;
+		for (const group of mainPart.groups) {
+			this._watchGroup(group);
+		}
+		this._register(mainPart.onDidAddGroup(group => this._watchGroup(group)));
+		this._register(mainPart.onDidRemoveGroup(group => this._groupListeners.deleteAndDispose(group.id)));
+		this._register(editorService.onDidCloseEditor(e => this._onDidCloseEditor(e)));
+	}
+
+	/** Restores the layout once `editor` and the other tracked editors are closed. */
+	track(editor: EditorInput): void {
+		this._editors.add(editor);
+	}
+
+	get isTracking(): boolean {
+		return this._editors.size > 0;
+	}
+
+	private _watchGroup(group: IEditorGroup): void {
+		this._groupListeners.set(group.id, group.onWillCloseEditor(e => this._onWillCloseEditor(e)));
+	}
+
+	private _onWillCloseEditor(e: IEditorCloseEvent): void {
+		if (e.context === EditorCloseContext.MOVE || !this._editors.delete(e.editor) || this._editors.size > 0) {
+			return;
+		}
+		if (!this._layoutService.isEditorMaximized()) {
+			// Restored by the user while the page was open: the layout is theirs.
+			this.dispose();
+			return;
+		}
+		restoreMainEditorPart(this._layoutService);
+		this._closingEditor = e.editor;
+	}
+
+	private _onDidCloseEditor(e: IEditorCloseEvent): void {
+		if (!this._closingEditor || e.editor !== this._closingEditor) {
+			return;
+		}
+		this.dispose();
+
+		// A session switch restoring its editors owns the layout, and an empty side pane is
+		// closed by the layout's own rules.
+		const mainPartEmpty = this._editorGroupsService.mainPart.groups.every(group => group.isEmpty);
+		if (this._layoutService.isEditorPartAutoVisibilitySuppressed() || mainPartEmpty) {
+			return;
+		}
+
+		const suppression = this._layoutService.suppressEditorPartAutoVisibility();
+		try {
+			const { editor, auxiliaryBar } = this.sidePaneBefore;
+			if (!editor && this._layoutService.isVisible(Parts.EDITOR_PART, mainWindow)) {
+				this._layoutService.setPartHidden(true, Parts.EDITOR_PART);
+			}
+			if (auxiliaryBar !== this._layoutService.isVisible(Parts.AUXILIARYBAR_PART)) {
+				this._layoutService.setPartHidden(!auxiliaryBar, Parts.AUXILIARYBAR_PART);
+			}
+			if (editor && !this._layoutService.isVisible(Parts.EDITOR_PART, mainWindow)) {
+				this._layoutService.setPartHidden(false, Parts.EDITOR_PART);
+			}
+		} finally {
+			suppression.dispose();
+		}
+	}
+
+	override dispose(): void {
+		if (maximizedEditorLayoutRestorers.get(this._layoutService) === this) {
+			maximizedEditorLayoutRestorers.delete(this._layoutService);
+		}
+		super.dispose();
+	}
+}
+
+/**
+ * CreaEditor: runs `open` (which opens a page, like AI Costs) and maximizes the page over the chat.
+ * When the page closes, the layout from before it opened comes back, see {@link MaximizedEditorLayoutRestorer}.
+ * An editor area the user maximized themselves stays theirs: then the page only opens in it.
+ */
+CommandsRegistry.registerCommand(OPEN_EDITOR_MAXIMIZED_COMMAND_ID, async (accessor: ServicesAccessor, open: () => Promise<unknown>) => {
+	const layoutService = accessor.get(IAgentWorkbenchLayoutService);
+	const viewsService = accessor.get(IViewsService);
+	const editorService = accessor.get(IEditorService);
+	const editorGroupsService = accessor.get(IEditorGroupsService);
+	const instantiationService = accessor.get(IInstantiationService);
+
+	let restorer = maximizedEditorLayoutRestorers.get(layoutService);
+	if (!restorer && !layoutService.isEditorMaximized()) {
+		restorer = instantiationService.createInstance(MaximizedEditorLayoutRestorer, {
+			editor: layoutService.isVisible(Parts.EDITOR_PART, mainWindow),
+			auxiliaryBar: layoutService.isVisible(Parts.AUXILIARYBAR_PART),
+		});
+		maximizedEditorLayoutRestorers.set(layoutService, restorer);
+	}
+
+	// The page is the editor `open` opens (or reveals) in the main editor part.
+	const opened: EditorInput[] = [];
+	const onWillOpenEditor = editorService.onWillOpenEditor(e => {
+		if (editorGroupsService.mainPart.groups.some(group => group.id === e.groupId)) {
+			opened.push(e.editor);
+		}
+	});
+	try {
+		await open();
+		const page = opened.at(-1) ?? editorService.activeEditor;
+		if (restorer && page && editorGroupsService.mainPart.groups.some(group => group.contains(page))) {
+			restorer.track(page);
+		}
+		if (!layoutService.isEditorMaximized()) {
+			maximizeMainEditorPart(layoutService, viewsService);
+		}
+	} finally {
+		onWillOpenEditor.dispose();
+		if (restorer && !restorer.isTracking) {
+			restorer.dispose();
+		}
+	}
+});
+
+//#endregion
 
 class HideMainEditorPartAction extends Action2 {
 	static readonly ID = 'workbench.action.agentSessions.hideMainEditorPart';

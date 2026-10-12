@@ -26,6 +26,7 @@ import { IEditorService } from '../../../../services/editor/common/editorService
 import { IWorkbenchEnvironmentService } from '../../../../services/environment/common/environmentService.js';
 import { IStatusbarEntry, IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../../services/statusbar/browser/statusbar.js';
 import { CHAT_CATEGORY } from '../actions/chatActions.js';
+import { openPageOverChat } from '../gatewayCost/chatGatewayCost.js';
 import { SubscriptionAccountsFlows } from './subscriptionAccountsFlows.js';
 import { ADD_CLAUDE_ACCOUNT_COMMAND_ID, ADD_CODEX_ACCOUNT_COMMAND_ID, MANAGE_SUBSCRIPTION_ACCOUNTS_COMMAND_ID, SHOW_SUBSCRIPTION_USAGE_COMMAND_ID, SWITCH_SUBSCRIPTION_ACCOUNT_COMMAND_ID } from './subscriptionAccountsLimit.js';
 import { SubscriptionUsageEditor, SubscriptionUsageEditorInput } from './subscriptionUsageEditor.js';
@@ -41,9 +42,6 @@ interface ISubscriptionAccountsSnapshot {
 	readonly accounts: readonly ISubscriptionAccount[];
 	readonly pools: readonly ISubscriptionPoolSummary[];
 }
-
-/** Maximizes the editor area of the Agents window over the chat (see the sessions editor contribution). */
-const MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID = 'workbench.action.agentSessions.maximizeMainEditorPart';
 
 Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).registerConfiguration({
 	id: 'chatSidebar',
@@ -105,11 +103,8 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 );
 
 async function showSubscriptionUsage(editorService: IEditorService, commandService: ICommandService, environmentService: IWorkbenchEnvironmentService): Promise<void> {
-	await editorService.openEditor(SubscriptionUsageEditorInput.getOrCreate(), { pinned: true });
-	if (environmentService.isSessionsWindow) {
-		// Like AI Costs: full screen over the chat in the Agents window.
-		await commandService.executeCommand(MAXIMIZE_MAIN_EDITOR_PART_COMMAND_ID);
-	}
+	// Like AI Costs: full screen over the chat in the Agents window, until it closes.
+	await openPageOverChat(commandService, environmentService.isSessionsWindow, () => editorService.openEditor(SubscriptionUsageEditorInput.getOrCreate(), { pinned: true }));
 }
 
 registerAction2(class AddClaudeAccountAction extends Action2 {
