@@ -204,6 +204,21 @@ export function isRuntimeProvisioned(overrideDir: string, platformKey: string): 
 }
 
 /**
+ * CreaEditor: the native runtime that a build bundles itself, unpacked next to the app's
+ * `node_modules.asar` (`<appRoot>/node_modules.asar.unpacked/foundry-local-sdk`). CreaEditor's macOS
+ * build ships it, as it has no CDN copy (`product.dictationRuntime`) to download it from. Returns
+ * the folder to set as `VSCODE_FOUNDRY_LOCAL_NATIVE_DIR`, or `undefined` when nothing is bundled for
+ * this host (dev builds load it from `node_modules` instead).
+ */
+export function findBundledFoundryLocalRuntime(appRoot: string, platformKey: string | undefined = foundryLocalPlatformKey()): string | undefined {
+	if (!platformKey) {
+		return undefined;
+	}
+	const dir = join(appRoot, 'node_modules.asar.unpacked', 'foundry-local-sdk');
+	return fs.existsSync(foundryAddonPath(dir, platformKey)) && hasAllCoreLibraries(foundryCoreDir(dir, platformKey)) ? dir : undefined;
+}
+
+/**
  * Atomically move the fully-staged directory `from` to `to`. If another process
  * already promoted the same payload (the destination exists), keep the existing
  * copy — the caller re-verifies completeness afterwards. Exported for tests.

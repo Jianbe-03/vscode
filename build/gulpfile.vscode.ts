@@ -124,11 +124,20 @@ function computeChecksum(filename: string): string {
 // downloaded on demand at runtime, only on supported platforms, into a per-user
 // cache (see `src/vs/platform/localTranscription/node/foundryLocalRuntime.ts`).
 // Exclude every prebuilt addon and core library from the package here.
-function getFoundryLocalExcludeFilter(): string[] {
+// CreaEditor: has no CDN copy of that runtime (`product.dictationRuntime`), so its macOS build
+// ships the runtime of its own platform (the glibc floor is a Linux concern), unpacked next to the
+// archive; `findBundledFoundryLocalRuntime` points the SDK at it.
+function getFoundryLocalExcludeFilter(platform: string, arch: string): string[] {
+	const bundled = platform === 'darwin' ? `${platform}-${arch}` : undefined;
 	return [
 		'**',
-		'!**/foundry-local-sdk/prebuilds/**',
-		'!**/foundry-local-sdk/foundry-local-core/**',
+		...(bundled ? [
+			'!**/foundry-local-sdk/prebuilds/!(' + bundled + ')/**',
+			'!**/foundry-local-sdk/foundry-local-core/!(' + bundled + ')/**',
+		] : [
+			'!**/foundry-local-sdk/prebuilds/**',
+			'!**/foundry-local-sdk/foundry-local-core/**',
+		]),
 	];
 }
 
@@ -259,7 +268,7 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 			.pipe(filter(getCopilotTgrepExcludeFilter(platform, arch)))
 			.pipe(filter(getRipgrepExcludeFilter(platform, arch)))
 			.pipe(filter(getMxcExcludeFilter(arch)))
-			.pipe(filter(getFoundryLocalExcludeFilter()))
+			.pipe(filter(getFoundryLocalExcludeFilter(platform, arch)))
 			.pipe(filter(getOSProxyResolverExcludeFilter(platform, arch)))
 			.pipe(jsFilter)
 			.pipe(util.rewriteSourceMappingURL(sourceMappingURLBase))
@@ -287,6 +296,8 @@ function packageTask(platform: string, arch: string, sourceFolderName: string, d
 				'**/node-pty/package.json',
 				'**/*.wasm',
 				'**/@vscode/vsce-sign/bin/*',
+				// CreaEditor: the on-device dictation core libraries are loaded by native code.
+				'**/foundry-local-sdk/foundry-local-core/**',
 			], [
 				'**/*.mk',
 			], [

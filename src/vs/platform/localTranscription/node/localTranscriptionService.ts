@@ -8,7 +8,8 @@ import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
 import { CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
 import { dirname, join } from '../../../base/common/path.js';
-import { ensureFoundryLocalRuntime } from './foundryLocalRuntime.js';
+import { ensureFoundryLocalRuntime, findBundledFoundryLocalRuntime } from './foundryLocalRuntime.js';
+import { FileAccess } from '../../../base/common/network.js';
 import {
 	ILocalTranscriptionModelStatus,
 	ILocalTranscriptionResult,
@@ -539,6 +540,13 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 				if (this._runtimeDownload) {
 					const nativeDir = await ensureFoundryLocalRuntime(runtimeCacheDir(cacheDir), this._runtimeDownload, cts.token);
 					process.env.VSCODE_FOUNDRY_LOCAL_NATIVE_DIR = nativeDir;
+				} else {
+					// CreaEditor: no CDN copy to download; use the runtime the build bundled, unpacked
+					// next to the archive (native code cannot load from inside `node_modules.asar`).
+					const bundledDir = findBundledFoundryLocalRuntime(dirname(FileAccess.asFileUri('').fsPath));
+					if (bundledDir) {
+						process.env.VSCODE_FOUNDRY_LOCAL_NATIVE_DIR = bundledDir;
+					}
 				}
 
 				if (!this._sdk) {

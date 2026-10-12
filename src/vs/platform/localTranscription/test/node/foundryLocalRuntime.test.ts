@@ -15,6 +15,7 @@ import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/c
 import { flakySuite, getRandomTestPath } from '../../../../base/test/node/testUtils.js';
 import {
 	FOUNDRY_LOCAL_SUPPORTED_PLATFORMS,
+	findBundledFoundryLocalRuntime,
 	foundryLocalPlatformKey,
 	isFoundryLocalRuntimeSupported,
 	isRuntimeProvisioned,
@@ -78,6 +79,18 @@ flakySuite('FoundryLocalRuntime', () => {
 		writeMarker(testDir, platformKey);
 		fs.rmSync(join(testDir, 'foundry-local-core', platformKey, requiredCoreLibraryNames()[0]));
 		assert.strictEqual(isRuntimeProvisioned(testDir, platformKey), false);
+	});
+
+	test('findBundledFoundryLocalRuntime: the unpacked runtime of this platform, complete, or nothing', () => {
+		const bundledDir = join(testDir, 'node_modules.asar.unpacked', 'foundry-local-sdk');
+		const before = findBundledFoundryLocalRuntime(testDir, platformKey);
+		writePayload(bundledDir, 'win32-x64');
+		const otherPlatformOnly = findBundledFoundryLocalRuntime(testDir, platformKey);
+		writePayload(bundledDir, platformKey);
+		const complete = findBundledFoundryLocalRuntime(testDir, platformKey);
+		fs.rmSync(join(bundledDir, 'foundry-local-core', platformKey, requiredCoreLibraryNames()[0]));
+		const partial = findBundledFoundryLocalRuntime(testDir, platformKey);
+		assert.deepStrictEqual({ before, otherPlatformOnly, complete, partial, unsupported: findBundledFoundryLocalRuntime(testDir, undefined) }, { before: undefined, otherPlatformOnly: undefined, complete: bundledDir, partial: undefined, unsupported: undefined });
 	});
 
 	test('isRuntimeProvisioned: a different arch marker does not satisfy this arch', () => {
