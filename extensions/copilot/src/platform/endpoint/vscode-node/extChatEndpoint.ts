@@ -25,6 +25,7 @@ import { ITelemetryService } from '../../telemetry/common/telemetry';
 import { TelemetryData } from '../../telemetry/common/telemetryData';
 import { EndpointEditToolName, isEndpointEditToolName } from '../common/endpointProvider';
 import { CustomDataPartMimeTypes, modelVendorHandlesCacheBreakpoints } from '../common/endpointTypes';
+import type { IChatWorkLocation } from '../common/gatewayTracking';
 import { decodeStatefulMarker, encodeStatefulMarker, rawPartAsStatefulMarker } from '../common/statefulMarkerContainer';
 import { rawPartAsThinkingEnvelope } from '../common/thinkingDataContainer';
 import { thinkingOriginToMetadata } from '../../thinking/common/thinking';
@@ -36,6 +37,8 @@ import { ExtensionContributedChatTokenizer } from './extChatTokenizer';
 export interface ExtensionLanguageModelRequestOptions extends OTelModelOptions {
 	readonly _enableThinking?: boolean;
 	readonly _conversationId?: string;
+	/** CreaEditor: where the chat of the request works (an Agents window chat in its own worktree), for the cost ledger. */
+	readonly _creaeditorWorkLocation?: IChatWorkLocation;
 }
 
 enum ChatImageMimeType {

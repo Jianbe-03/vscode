@@ -98,6 +98,23 @@ export interface IByokLmCustomTool {
 
 export type IByokLmTool = IByokLmFunctionTool | IByokLmCustomTool;
 
+/**
+ * CreaEditor: the agent host session a BYOK request belongs to. The renderer passes it to the language
+ * model so the cost ledger keeps each Agents window chat apart (instead of putting every request under
+ * "background requests") and reads the issue from the session's own branch (a Director's worker runs in
+ * its own worktree, not in the window's repository).
+ */
+export interface IByokLmSessionInfo {
+	/** The raw session id (subagents of the Copilot CLI share their session's). */
+	readonly id: string;
+	/** Whether {@link branch} and {@link repo} were read from the session's working directory. */
+	readonly hasWorkLocation?: boolean;
+	/** The branch checked out in the session's working directory. */
+	readonly branch?: string;
+	/** `owner/repo` of the working directory's remote. */
+	readonly repo?: string;
+}
+
 export interface IByokLmChatRequest {
 	readonly vendor: string;
 	readonly modelId: string;
@@ -107,6 +124,8 @@ export interface IByokLmChatRequest {
 	readonly previousResponseId?: string;
 	readonly reasoningEffort?: string;
 	readonly modelOptions?: Record<string, unknown>;
+	/** CreaEditor: the session the request belongs to, see {@link IByokLmSessionInfo}. */
+	readonly session?: IByokLmSessionInfo;
 }
 
 export interface IByokLmOutputMessageItem {

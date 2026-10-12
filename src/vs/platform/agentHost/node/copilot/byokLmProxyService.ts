@@ -5,11 +5,12 @@
 
 import type * as http from 'http';
 import { localize } from '../../../../nls.js';
-import { getByokLmKeyLock, getByokLmSelectionModelId, IByokLmKeyLock } from '../../common/agentHostByokLm.js';
+import { getByokLmKeyLock, getByokLmSelectionModelId, IByokLmChatRequest, IByokLmKeyLock } from '../../common/agentHostByokLm.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { parseProxyBearer } from '../claude/claudeProxyAuth.js';
+import { GitWorkLocationCache } from '../shared/gitWorkLocation.js';
 import { encodeForwardedChatError, USER_FACING_CHAT_FETCH_TYPE } from '../shared/proxyChatError.js';
 import {
 	ILoopbackProxyHandle,
@@ -113,6 +114,9 @@ type ByokLmProxyState = IByokLmProxyState;
 export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> implements IByokLmProxyService {
 
 	declare readonly _serviceBrand: undefined;
+
+	/** CreaEditor: the branch and repository of the sessions' working directories (the cost ledger). */
+	private readonly _gitWorkLocations = new GitWorkLocationCache();
 
 	constructor(
 		@ILogService logService: ILogService,
@@ -255,9 +259,13 @@ export class ByokLmProxyService extends LoopbackProxyServer<ByokLmProxyState> im
 		res.on('close', onClose);
 
 		try {
-			// CreaEditor: the session goes along, for connections that call a gateway themselves (CreaEditor Server).
+			// CreaEditor: the session goes along, for connections that call a gateway themselves (CreaEditor Server),
+			// and in the request, so the window's cost ledger keeps each chat apart and reads the issue from the
+			// session's own branch (a Director's worker runs in its own worktree).
 			const workingDirectory = runtime.state.sessionWorkingDirectories.get(sessionId);
-			const result = await connection.chat(bridgeRequest, { sessionId, signal: entry.ac.signal, ...(workingDirectory ? { workingDirectory } : {}) });
+			const location = workingDirectory ? await this._gitWorkLocations.get(workingDirectory) : undefined;
+			const sessionRequest: IByokLmChatRequest = { ...bridgeRequest, session: { id: sessionId, ...(location ? { hasWorkLocation: true, ...location } : {}) } };
+			const result = await connection.chat(sessionRequest, { sessionId, signal: entry.ac.signal, ...(workingDirectory ? { workingDirectory } : {}) });
 			if (entry.ac.signal.aborted || res.writableEnded) {
 				return;
 			}

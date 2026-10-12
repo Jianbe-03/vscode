@@ -16,6 +16,7 @@ import { EmbeddingType, getWellKnownEmbeddingTypeInfo, IEmbeddingsComputer } fro
 import { AUTO_MODE_TIER_PROPERTY, defaultAutoModeTier, selectableAutoModeTiers } from '../../../platform/endpoint/common/autoModeTiers';
 import { ChatEndpointFamily, IEndpointProvider } from '../../../platform/endpoint/common/endpointProvider';
 import { CustomDataPartMimeTypes } from '../../../platform/endpoint/common/endpointTypes';
+import type { IChatWorkLocation } from '../../../platform/endpoint/common/gatewayTracking';
 import { encodeStatefulMarker } from '../../../platform/endpoint/common/statefulMarkerContainer';
 import { AutoChatEndpoint } from '../../../platform/endpoint/node/autoChatEndpoint';
 import { IAutomodeService, type IAutoModeRoutingRequest } from '../../../platform/endpoint/node/automodeService';
@@ -846,6 +847,8 @@ export class CopilotLanguageModelWrapper extends Disposable {
 			requestOptions: options,
 			userInitiatedRequest: !!extensionId,
 			conversationId: internalModelOptions?._conversationId,
+			// CreaEditor: an Agents window chat says which branch and repository it works in (the cost ledger).
+			workLocation: toWorkLocation(internalModelOptions?._creaeditorWorkLocation),
 			telemetryProperties,
 			modelCapabilities: {
 				enableThinking: internalModelOptions?._enableThinking,
@@ -1072,6 +1075,17 @@ export class CopilotLanguageModelWrapper extends Disposable {
 
 function or(...checks: ((value: unknown) => boolean)[]): (value: unknown) => boolean {
 	return (value) => checks.some(check => check(value));
+}
+
+/** CreaEditor: the work location passed in the model options, keeping only its string fields. */
+function toWorkLocation(value: IChatWorkLocation | undefined): IChatWorkLocation | undefined {
+	if (!value || typeof value !== 'object') {
+		return undefined;
+	}
+	return {
+		...(typeof value.branch === 'string' && value.branch ? { branch: value.branch } : {}),
+		...(typeof value.repo === 'string' && value.repo ? { repo: value.repo } : {}),
+	};
 }
 
 class LanguageModelOptions {

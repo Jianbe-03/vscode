@@ -4,8 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import assert from 'assert';
+import * as fs from 'fs';
+import { tmpdir } from 'os';
+import { join } from '../../../../base/common/path.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
+import { getRandomTestPath } from '../../../../base/test/node/testUtils.js';
 import { NullLogService } from '../../../log/common/log.js';
 import type { IByokLmBridgeConnection, IByokLmChatRequest, IByokLmChatResult, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
 import { ByokLmBridgeRegistry } from '../../node/byokLmBridgeRegistry.js';
@@ -536,6 +540,43 @@ suite('ByokLmProxyService', () => {
 			);
 			assert.deepStrictEqual(result.statuses, [200]);
 		});
+	});
+
+	test('CreaEditor: tells the window which session a request belongs to, with its worktree\'s branch and repository', async () => {
+		const root = getRandomTestPath(tmpdir(), 'vsctests', 'byokLmProxySession');
+		const worktree = join(root, 'worktrees', '101-fix-login');
+		fs.mkdirSync(join(root, 'repo', '.git', 'worktrees', 'w1'), { recursive: true });
+		fs.mkdirSync(worktree, { recursive: true });
+		fs.writeFileSync(join(root, 'repo', '.git', 'config'), '[core]\n\tbare = false\n[remote "origin"]\n\turl = git@github.com:creacoon/bliep.git\n');
+		fs.writeFileSync(join(root, 'repo', '.git', 'worktrees', 'w1', 'HEAD'), 'ref: refs/heads/101-fix-login\n');
+		fs.writeFileSync(join(root, 'repo', '.git', 'worktrees', 'w1', 'commondir'), '../..\n');
+		fs.writeFileSync(join(worktree, '.git'), `gitdir: ${join(root, 'repo', '.git', 'worktrees', 'w1')}\n`);
+		const sessions: IByokLmChatRequest['session'][] = [];
+		try {
+			await withProxy(
+				async request => {
+					sessions.push(request.session);
+					return { output: [{ type: 'message', content: [{ type: 'text', text: 'ok' }] }] };
+				},
+				async handle => {
+					handle.describeSession?.('worker-1', worktree);
+					for (const session of ['worker-1', sessionId]) {
+						const response = await fetch(responsesUrl(handle, 'acme'), {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${handle.nonce}.${session}` },
+							body: JSON.stringify({ model: 'claude', input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }] }),
+						});
+						assert.strictEqual(response.status, 200);
+					}
+				},
+			);
+		} finally {
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+		assert.deepStrictEqual(sessions, [
+			{ id: 'worker-1', hasWorkLocation: true, branch: '101-fix-login', repo: 'creacoon/bliep' },
+			{ id: sessionId },
+		]);
 	});
 
 	test('rebinds with a fresh nonce after every handle is disposed', async () => {

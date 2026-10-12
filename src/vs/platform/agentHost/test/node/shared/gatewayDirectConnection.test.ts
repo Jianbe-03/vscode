@@ -16,7 +16,7 @@ import { IByokLmChatRequest } from '../../../common/agentHostByokLm.js';
 import { IServerHardStop } from '../../../common/creaeditorCosts.js';
 import { IDelegationGatewayKey } from '../../../common/creaeditorDelegation.js';
 import { GatewayCostLedgerWriter, IGatewayCostRecord } from '../../../node/shared/gatewayCostLedger.js';
-import { detectCostIssueFromBranch, GatewayDirectConnection, getGatewayChatCompletionsUrl, getGatewayKeyModels, IGatewayDirectConnectionHost, parseChatCompletionsAnswer } from '../../../node/shared/gatewayDirectConnection.js';
+import { detectCostIssueFromBranch, GatewayDirectConnection, getGatewayChatCompletionsUrl, getGatewayKeyModels, getRequestWorkContext, IGatewayDirectConnectionHost, parseChatCompletionsAnswer } from '../../../node/shared/gatewayDirectConnection.js';
 import { FileSecretStore } from '../../../node/shared/fileSecretStore.js';
 import { readServerCostLedger } from '../../../node/shared/serverCostLedger.js';
 import { ServerGatewayKeys } from '../../../node/shared/serverGatewayKeys.js';
@@ -259,6 +259,23 @@ suite('CreaEditor - server gateway connection', () => {
 			invalid: undefined,
 			names: ['mock-mini (Home key)', 'mock-opus (Home key)'],
 		});
+	});
+
+	test('completes the work context with the session\'s own branch, repository and first prompt line (a Director\'s worker)', () => {
+		const input: IByokLmChatRequest['input'] = [
+			{ type: 'message', role: 'developer', content: [{ type: 'text', text: 'Be brief.' }] },
+			{ type: 'message', role: 'user', content: [{ type: 'text', text: '<current_datetime>now</current_datetime>\nFix issue #101: login redirect\nDetails...' }] },
+		];
+		const worker: IByokLmChatRequest = { vendor: 'litellm', modelId: 'Work/claude', input, session: { id: 'worker-1', hasWorkLocation: true, branch: '101-fix-login', repo: 'acme/web' } };
+		assert.deepStrictEqual([
+			getRequestWorkContext(undefined, worker),
+			getRequestWorkContext({ worktree: '/srv/worktrees/d1', title: 'Fix the bug', repo: 'acme/app', branch: 'feature/PROJ-7-login' }, worker),
+			getRequestWorkContext(undefined, { vendor: 'litellm', modelId: 'Work/claude', input: [] }),
+		], [
+			{ title: 'Fix issue #101: login redirect', repo: 'acme/web', branch: '101-fix-login' },
+			{ title: 'Fix the bug', repo: 'acme/app', branch: 'feature/PROJ-7-login' },
+			undefined,
+		]);
 	});
 
 	test('builds gateway URLs and reads issues from branches like the laptop', () => {

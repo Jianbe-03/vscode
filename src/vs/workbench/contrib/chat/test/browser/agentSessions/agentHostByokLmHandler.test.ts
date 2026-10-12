@@ -574,4 +574,31 @@ suite('AgentHostByokLmHandler', () => {
 
 		assert.deepStrictEqual(result, { output: [], error: 'Your CreaEditor budget for the Work key ($20 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.', userFacingError: true });
 	});
+
+	test('CreaEditor: passes the session as the conversation id and its branch and repository to the model', async () => {
+		const service = new TestLanguageModelsService(
+			new Map([['id', byokModel('acme', 'claude')]]),
+			() => responseOf([{ type: 'text', value: 'ok' }]),
+		);
+		const handler = createHandler(service);
+		const input: IByokLmChatRequest['input'] = [{ type: 'message', role: 'user', content: [{ type: 'text', text: 'hi' }] }];
+
+		const modelOptions: unknown[] = [];
+		for (const session of [
+			{ id: 'worker-1', hasWorkLocation: true, branch: '101-fix-login', repo: 'creacoon/bliep' },
+			{ id: 'director', hasWorkLocation: true },
+			{ id: 'no-folder' },
+			undefined,
+		]) {
+			await handler.chat({ vendor: 'acme', modelId: 'claude', modelOptions: { temperature: 0.5 }, input, ...(session ? { session } : {}) }, CancellationToken.None);
+			modelOptions.push(service.captured?.options.modelOptions);
+		}
+
+		assert.deepStrictEqual(modelOptions, [
+			{ temperature: 0.5, _conversationId: 'worker-1', _creaeditorWorkLocation: { branch: '101-fix-login', repo: 'creacoon/bliep' } },
+			{ temperature: 0.5, _conversationId: 'director', _creaeditorWorkLocation: {} },
+			{ temperature: 0.5, _conversationId: 'no-folder' },
+			{ temperature: 0.5 },
+		]);
+	});
 });

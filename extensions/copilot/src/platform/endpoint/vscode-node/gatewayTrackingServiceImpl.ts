@@ -16,7 +16,7 @@ import { Emitter } from '../../../util/vs/base/common/event';
 import { Disposable } from '../../../util/vs/base/common/lifecycle';
 import { generateUuid } from '../../../util/vs/base/common/uuid';
 import { URI } from '../../../util/vs/base/common/uri';
-import { BACKGROUND_CHAT_ID, detectIssueFromBranch, detectIssueFromText, IChatIssue, IChatWorkContext, isJiraIssue, repoFromRemoteUrl } from '../common/gatewayTracking';
+import { BACKGROUND_CHAT_ID, detectIssueFromBranch, detectPromptIssue, IChatIssue, IChatWorkContext, IChatWorkLocation, isJiraIssue, repoFromRemoteUrl } from '../common/gatewayTracking';
 import { GatewayCostEntryUpdate, getServerCostsFolderPath, IGatewayCostEntry, IGatewayTrackingService, parseServerCostsFile } from '../common/gatewayTrackingService';
 
 const LEDGER_FILE = 'creaeditor-gateway-costs.jsonl';
@@ -72,7 +72,7 @@ export class GatewayTrackingService extends Disposable implements IGatewayTracki
 		return this._merged ??= [...this._entries, ...this._serverEntries].sort((a, b) => a.time - b.time);
 	}
 
-	getWorkContext(chatId: string, rootChatId: string, promptText: string | undefined): IChatWorkContext {
+	getWorkContext(chatId: string, rootChatId: string, promptText: string | undefined, location?: IChatWorkLocation): IChatWorkContext {
 		const root = this._getChat(rootChatId);
 		const chat = chatId === rootChatId ? root : this._getChat(chatId);
 		if (rootChatId === BACKGROUND_CHAT_ID) {
@@ -82,12 +82,14 @@ export class GatewayTrackingService extends Disposable implements IGatewayTracki
 			root.title = firstLine.length > MAX_TITLE_LENGTH ? firstLine.slice(0, MAX_TITLE_LENGTH - 1) + '…' : firstLine;
 		}
 		if (!root.promptIssue && !root.cleared && rootChatId !== BACKGROUND_CHAT_ID) {
-			root.promptIssue = detectIssueFromText(promptText);
+			root.promptIssue = detectPromptIssue(promptText);
 		}
 
-		const repository = this._gitService.activeRepository.get();
-		const branch = repository?.headBranchName;
-		const repo = repoFromRemoteUrl(repository?.remoteFetchUrls?.find(url => !!url));
+		// An Agents window chat (a Director's worker in its own worktree) says where it works; other chats
+		// work in this window's active repository.
+		const repository = location ? undefined : this._gitService.activeRepository.get();
+		const branch = location ? location.branch : repository?.headBranchName;
+		const repo = location ? location.repo : repoFromRemoteUrl(repository?.remoteFetchUrls?.find(url => !!url));
 
 		let issue: IChatIssue | undefined;
 		let issueSource: IChatWorkContext['issueSource'];

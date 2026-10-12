@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 
 import { describe, expect, test } from 'vitest';
-import { detectIssueFromBranch, detectIssueFromText, extractUserRequestText, formatIssue, gatewayKindFromUrl, getCostFromHeaders, getCostFromUsage, getGatewayTrackingBody, getGatewayTrackingHeaders, getIssueUrl, getTrackingMetadata, IChatIssue, IChatWorkContext, isJiraIssue, normalizeGatewayRoot, parseIssueReference, repoFromRemoteUrl } from '../gatewayTracking';
+import { detectIssueFromBranch, detectIssueFromText, detectPromptIssue, extractUserRequestText, formatIssue, gatewayKindFromUrl, getCostFromHeaders, getCostFromUsage, getGatewayTrackingBody, getGatewayTrackingHeaders, getIssueUrl, getTrackingMetadata, IChatIssue, IChatWorkContext, isJiraIssue, normalizeGatewayRoot, parseIssueReference, repoFromRemoteUrl } from '../gatewayTracking';
 
 describe('gatewayTracking (CreaEditor)', () => {
 	test('detects issues from branches, prompts and references', () => {
@@ -252,6 +252,26 @@ describe('gatewayTracking (CreaEditor)', () => {
 			'<environment_info>macOS</environment_info>\nNo tags here',
 			'<environment_info>only context</environment_info>',
 		].map(extractUserRequestText)).toEqual(['Fix #42 please', 'Plain query', 'No tags here', undefined]);
+	});
+
+	test('links a prompt to an issue only when it names that one issue (a Director splitting several over its chats names none)', () => {
+		expect([
+			'Fix #101 please',
+			'Fix #101, see https://github.com/creacoon/bliep/issues/101 and creacoon/bliep#101',
+			'Issues #101, #102 and #107 on develop',
+			'PROJ-12, PROJ-15 and PROJ-20',
+			'Fix PROJ-12 (https://acme.atlassian.net/browse/PROJ-12), it uses UTF-8',
+			'Fix #12 like PROJ-3',
+			'No issue here',
+		].map(detectPromptIssue)).toEqual([
+			{ number: 101 },
+			{ number: 101, repo: 'creacoon/bliep' },
+			undefined,
+			undefined,
+			{ kind: 'jira', key: 'PROJ-12', site: 'acme.atlassian.net' },
+			undefined,
+			undefined,
+		]);
 	});
 
 	test('reads reported costs', () => {

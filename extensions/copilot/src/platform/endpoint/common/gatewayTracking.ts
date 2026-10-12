@@ -50,6 +50,17 @@ export interface IChatWorkContext {
 	readonly user?: string;
 }
 
+/**
+ * Where a chat works, when the chat says so itself: an Agents window chat runs in its own folder or
+ * worktree (a Director's worker on its own branch), not in this window's active repository. A missing
+ * field means the chat's folder has none (no branch, no remote); it never falls back to the window's.
+ */
+export interface IChatWorkLocation {
+	readonly branch?: string;
+	/** `owner/repo` of the chat's repository. */
+	readonly repo?: string;
+}
+
 const OPENROUTER_HOST = /(^|\.)openrouter\.ai$/i;
 
 /**
@@ -208,6 +219,58 @@ export function detectIssueFromText(text: string | undefined): IChatIssue | unde
 		return { number: Number(plain.groups.number) };
 	}
 	return undefined;
+}
+
+/** What makes two references the same issue: the Jira key, or the GitHub number (`#12` and `owner/repo#12` are one). */
+function issueIdentity(issue: IChatIssue): string {
+	return isJiraIssue(issue) ? `jira:${issue.key}` : `github:${issue.number}`;
+}
+
+/** Every issue reference in a text, in no particular order (see {@link detectIssueFromText} for the patterns). */
+function findIssueReferences(text: string): IChatIssue[] {
+	const issues: IChatIssue[] = [];
+	for (const match of text.matchAll(new RegExp(GITHUB_URL.source, 'gi'))) {
+		if (match.groups) {
+			issues.push({ number: Number(match.groups.number), repo: match.groups.repo });
+		}
+	}
+	for (const match of text.matchAll(new RegExp(JIRA_URL.source, 'gi'))) {
+		const issue = match.groups && jiraIssue(match.groups.key, match.groups.site, true);
+		if (issue) {
+			issues.push(issue);
+		}
+	}
+	for (const match of text.matchAll(/(?:^|[\s(])(?<repo>[\w.-]+\/[\w.-]+)#(?<number>\d+)\b/g)) {
+		if (match.groups) {
+			issues.push({ number: Number(match.groups.number), repo: match.groups.repo });
+		}
+	}
+	for (const match of text.matchAll(JIRA_KEY_IN_TEXT)) {
+		const issue = match.groups && jiraIssue(match.groups.key);
+		if (issue) {
+			issues.push(issue);
+		}
+	}
+	for (const match of text.matchAll(/(?:^|[\s(])#(?<number>\d+)\b/g)) {
+		if (match.groups) {
+			issues.push({ number: Number(match.groups.number) });
+		}
+	}
+	return issues;
+}
+
+/**
+ * Detects the issue a chat's prompt is about: the issue {@link detectIssueFromText} finds, but only when
+ * the prompt names that one issue. A prompt that names several different issues (a Director asked to
+ * split "#101, #102 and #107" over a group of chats) is not about any one of them, so it gives none.
+ */
+export function detectPromptIssue(text: string | undefined): IChatIssue | undefined {
+	const issue = detectIssueFromText(text);
+	if (!issue || !text) {
+		return issue;
+	}
+	const identity = issueIdentity(issue);
+	return findIssueReferences(text).some(other => issueIdentity(other) !== identity) ? undefined : issue;
 }
 
 /** Chat id used for requests that do not belong to a chat (titles, summaries, commit messages, ...). */

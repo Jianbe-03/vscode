@@ -404,7 +404,7 @@ export class GatewayDirectConnection implements IByokLmBridgeConnection, IDispos
 			return { output: [], error: localize('gatewayDirect.noKey', "This server has no {0} key for model \"{1}\". Delegate a chat that uses this key to the server first.", request.vendor, request.modelId) };
 		}
 		const { key, gatewayModel } = resolved;
-		const work = this._host.findWorkContext(context?.workingDirectory);
+		const work = getRequestWorkContext(this._host.findWorkContext(context?.workingDirectory), request);
 		const issue = detectCostIssueFromBranch(work?.branch);
 		const issueLabel = formatIssueLabel(issue, work?.repo);
 
@@ -493,7 +493,42 @@ export class GatewayDirectConnection implements IByokLmBridgeConnection, IDispos
 	}
 }
 
-function trackingBody(vendor: string, chatId: string, work: IDelegationWorkContext | undefined, issue: string | undefined): Record<string, unknown> {
+/** The work context a request is recorded under. */
+type RequestWorkContext = Omit<IDelegationWorkContext, 'worktree'>;
+
+const MAX_TITLE_LENGTH = 120;
+
+/**
+ * The work context of a request: the delegated chat's, completed by the session's own branch, repository
+ * and first prompt line, so a session that is not a delegated chat itself (a Director's worker in its own
+ * worktree) still gets its own issue and title.
+ */
+export function getRequestWorkContext(delegated: IDelegationWorkContext | undefined, request: IByokLmChatRequest): RequestWorkContext | undefined {
+	const session = request.session;
+	const title = delegated?.title ?? getFirstPromptLine(request);
+	const repo = delegated?.repo ?? session?.repo;
+	const branch = delegated?.branch ?? session?.branch;
+	if (!title && !repo && !branch) {
+		return undefined;
+	}
+	return { ...(title ? { title } : {}), ...(repo ? { repo } : {}), ...(branch ? { branch } : {}) };
+}
+
+/** The first line of the first user message without the context blocks an agent adds (`<tag>...</tag>`). */
+function getFirstPromptLine(request: IByokLmChatRequest): string | undefined {
+	const message = request.input.find(item => item.type === 'message' && item.role === 'user');
+	if (message?.type !== 'message') {
+		return undefined;
+	}
+	const text = message.content.map(part => part.type === 'text' ? part.text : '').join('');
+	const line = text.replace(/<(?<tag>[A-Za-z_][\w-]*)(?:\s[^>]*)?>[\s\S]*?<\/\k<tag>>/g, '').trim().split(/\r?\n/)[0]?.trim();
+	if (!line) {
+		return undefined;
+	}
+	return line.length > MAX_TITLE_LENGTH ? line.slice(0, MAX_TITLE_LENGTH - 1) + '…' : line;
+}
+
+function trackingBody(vendor: string, chatId: string, work: RequestWorkContext | undefined, issue: string | undefined): Record<string, unknown> {
 	const metadata = Object.fromEntries(Object.entries({
 		creaeditor_chat: chatId,
 		creaeditor_issue: issue,
@@ -507,11 +542,11 @@ function trackingBody(vendor: string, chatId: string, work: IDelegationWorkConte
 	return { litellm_session_id: chatId, metadata: { ...metadata, session_id: chatId, trace_id: chatId, tags: trackingTags(chatId, work, issue) } };
 }
 
-function trackingTags(chatId: string, work: IDelegationWorkContext | undefined, issue: string | undefined): string[] {
+function trackingTags(chatId: string, work: RequestWorkContext | undefined, issue: string | undefined): string[] {
 	return ['creaeditor', `chat:${chatId}`, ...(issue ? [`issue:${issue}`] : []), ...(work?.repo ? [`repo:${work.repo}`] : [])];
 }
 
-function trackingHeaders(vendor: string, chatId: string, work: IDelegationWorkContext | undefined, issue: string | undefined): Record<string, string> {
+function trackingHeaders(vendor: string, chatId: string, work: RequestWorkContext | undefined, issue: string | undefined): Record<string, string> {
 	return vendor === 'openrouter'
 		? { 'HTTP-Referer': 'https://creacoon.nl', 'X-Title': 'CreaEditor', 'x-session-id': chatId }
 		: { 'x-litellm-tags': trackingTags(chatId, work, issue).join(',') };

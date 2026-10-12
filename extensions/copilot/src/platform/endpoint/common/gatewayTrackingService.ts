@@ -5,7 +5,7 @@
 
 import { createServiceIdentifier } from '../../../util/common/services';
 import { Emitter, Event } from '../../../util/vs/base/common/event';
-import { ChatIssueSource, GatewayKind, IChatIssue, IChatWorkContext } from './gatewayTracking';
+import { ChatIssueSource, GatewayKind, IChatIssue, IChatWorkContext, IChatWorkLocation } from './gatewayTracking';
 
 /** Where the cost of a {@link IGatewayCostEntry} came from. */
 export type GatewayCostSource = 'response' | 'header' | 'openrouter-api' | 'litellm-api';
@@ -100,8 +100,10 @@ export interface IGatewayTrackingService {
 	 * @param chatId the chat session id of the request (the subagent's own id for subagents)
 	 * @param rootChatId the top-level chat session id
 	 * @param promptText text of the first user message of the request, used for the chat title and issue detection
+	 * @param location the branch and repository the chat works in, when the request says (an Agents window chat
+	 * in its own worktree); otherwise this window's active repository
 	 */
-	getWorkContext(chatId: string, rootChatId: string, promptText: string | undefined): IChatWorkContext;
+	getWorkContext(chatId: string, rootChatId: string, promptText: string | undefined, location?: IChatWorkLocation): IChatWorkContext;
 
 	/** Sets the issue a chat works on, overriding any detected issue. `undefined` clears the override. */
 	setIssue(chatId: string, issue: IChatIssue | undefined): void;

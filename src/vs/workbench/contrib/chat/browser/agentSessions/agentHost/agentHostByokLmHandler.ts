@@ -98,7 +98,7 @@ export class AgentHostByokLmHandler extends Disposable implements IAgentHostByok
 			}))
 			: undefined;
 		const options: ILanguageModelChatRequestOptions = {
-			modelOptions: request.modelOptions,
+			modelOptions: this._withSessionModelOptions(request),
 			includeEncryptedThinking: true,
 			...(request.reasoningEffort ? { configuration: { reasoningEffort: request.reasoningEffort } } : {}),
 			...(tools ? { tools } : {}),
@@ -193,6 +193,28 @@ export class AgentHostByokLmHandler extends Disposable implements IAgentHostByok
 			}
 		}
 		return models;
+	}
+
+	/**
+	 * CreaEditor: tells the copilot extension which Agents window chat a request belongs to (as the
+	 * conversation id) and which branch and repository that chat works in, so its cost ledger shows each
+	 * chat on its own, under the issue of its own branch, instead of under "background requests".
+	 */
+	private _withSessionModelOptions(request: IByokLmChatRequest): Record<string, unknown> | undefined {
+		const session = request.session;
+		if (!session?.id) {
+			return request.modelOptions;
+		}
+		return {
+			...request.modelOptions,
+			_conversationId: session.id,
+			...(session.hasWorkLocation ? {
+				_creaeditorWorkLocation: {
+					...(session.branch ? { branch: session.branch } : {}),
+					...(session.repo ? { repo: session.repo } : {}),
+				},
+			} : {}),
+		};
 	}
 
 	/**

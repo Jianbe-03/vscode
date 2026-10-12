@@ -15,6 +15,7 @@ import { Source } from '../../chat/common/chatMLFetcher';
 import type { ChatLocation, ChatResponse } from '../../chat/common/commonTypes';
 import { ICAPIClientService } from '../../endpoint/common/capiClient';
 import { CustomModel, EndpointEditToolName } from '../../endpoint/common/endpointProvider';
+import type { IChatWorkLocation } from '../../endpoint/common/gatewayTracking';
 import { ILogService } from '../../log/common/logService';
 import { ITelemetryService, TelemetryProperties } from '../../telemetry/common/telemetry';
 import { TelemetryData } from '../../telemetry/common/telemetryData';
@@ -252,6 +253,11 @@ export interface IMakeChatRequestOptions {
 	 *   name suggestion, prompt categorization).
 	 */
 	interactionTypeOverride?: InteractionTypeOverride;
+	/**
+	 * CreaEditor: the branch and repository the chat of this request works in, when it is not this window's
+	 * active repository (an Agents window chat in its own worktree). Used for the cost ledger's issue detection.
+	 */
+	workLocation?: IChatWorkLocation;
 }
 
 export type IChatRequestTelemetryProperties = {

@@ -308,7 +308,8 @@ export class OpenAIEndpoint extends ChatEndpoint {
 	override createRequestBody(options: ICreateEndpointBodyOptions): IEndpointBody {
 		let body = this._createRequestBodyCore(options);
 		const token = getCurrentCapturingToken();
-		// Requests outside a chat (titles, summaries, ...) are tracked as background requests.
+		// Requests outside a chat (titles, summaries, ...) are tracked as background requests. An Agents window
+		// chat comes through the language model API with its session id as `conversationId`.
 		const chatId = token?.chatSessionId ?? options.conversationId ?? BACKGROUND_CHAT_ID;
 		this._requestMetadataVariables = { sessionId: options.conversationId ?? chatId, requestId: options.requestId };
 
@@ -316,7 +317,7 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		const gateway = this.gatewayKind;
 		if (gateway && chatId) {
 			const rootChatId = token?.parentChatSessionId ?? chatId;
-			this._workContext = this._gatewayTrackingService.getWorkContext(chatId, rootChatId, extractUserRequestText(getUserMessagesText(options.messages)));
+			this._workContext = this._gatewayTrackingService.getWorkContext(chatId, rootChatId, extractUserRequestText(getUserMessagesText(options.messages)), options.workLocation);
 			const api = this.useResponsesApi ? 'responses' : this.useMessagesApi ? 'messages' : 'chatCompletions';
 			body = applyRequestMetadataToBody(body, getGatewayTrackingBody(gateway, api, this._workContext, options.requestId));
 		}
@@ -579,7 +580,7 @@ export class OpenAIEndpoint extends ChatEndpoint {
 		const token = getCurrentCapturingToken();
 		const chatId = token?.chatSessionId ?? options.conversationId ?? BACKGROUND_CHAT_ID;
 		const needsContext = budgets.some(budget => budget.scope !== 'key');
-		const context = needsContext ? this._gatewayTrackingService.getWorkContext(chatId, token?.parentChatSessionId ?? chatId, extractUserRequestText(getUserMessagesText(options.messages))) : undefined;
+		const context = needsContext ? this._gatewayTrackingService.getWorkContext(chatId, token?.parentChatSessionId ?? chatId, extractUserRequestText(getUserMessagesText(options.messages)), options.workLocation) : undefined;
 		const exhausted = findHardStopBudget(budgets, this._gatewayTrackingService.entries, {
 			providerGroup: this._providerGroup,
 			issue: formatIssue(context?.issue, context?.repo),

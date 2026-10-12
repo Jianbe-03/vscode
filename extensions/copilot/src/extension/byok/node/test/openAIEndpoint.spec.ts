@@ -9,6 +9,7 @@ import { ChatFetchResponseType, ChatResponse } from '../../../../platform/chat/c
 import { ConfigKey, IConfigurationService } from '../../../../platform/configuration/common/configurationService';
 import { InMemoryConfigurationService } from '../../../../platform/configuration/test/common/inMemoryConfigurationService';
 import { IChatModelInformation, ModelSupportedEndpoint } from '../../../../platform/endpoint/common/endpointProvider';
+import { IChatWorkContext, IChatWorkLocation } from '../../../../platform/endpoint/common/gatewayTracking';
 import { IGatewayCostEntry, IGatewayTrackingService, NullGatewayTrackingService } from '../../../../platform/endpoint/common/gatewayTrackingService';
 import { CacheType, CustomDataPartMimeTypes } from '../../../../platform/endpoint/common/endpointTypes';
 import { ChatEndpoint } from '../../../../platform/endpoint/node/chatEndpoint';
@@ -863,6 +864,44 @@ describe('OpenAIEndpoint - budget hard stop (CreaEditor)', () => {
 			namedKey: 'Your CreaEditor budget for the Personal key ($50 per month) is used up. Raise it with Edit under Budgets on the AI Costs page.',
 			otherKey: ChatFetchResponseType.Success,
 			warnOnly: ChatFetchResponseType.Success,
+		});
+	});
+});
+
+/** Records the work context requests ask for. */
+class RecordingTrackingService extends NullGatewayTrackingService {
+	readonly calls: unknown[][] = [];
+	override getWorkContext(chatId: string, rootChatId: string, promptText?: string, location?: IChatWorkLocation): IChatWorkContext {
+		this.calls.push([chatId, rootChatId, promptText, location]);
+		return { chatId, rootChatId, ...location };
+	}
+}
+
+describe('OpenAIEndpoint - chat of a request (CreaEditor)', () => {
+	const disposables = new DisposableStore();
+
+	afterEach(() => {
+		disposables.clear();
+	});
+
+	it('tracks an Agents window chat under its session id and its own branch, and a request without a chat as background', () => {
+		const tracking = new RecordingTrackingService();
+		const testingServiceCollection = createExtensionUnitTestingServices();
+		testingServiceCollection.define(IGatewayTrackingService, tracking);
+		const accessor = disposables.add(testingServiceCollection.createTestingAccessor());
+		const endpoint = accessor.get(IInstantiationService).createInstance(OpenAIEndpoint, { id: 'm', name: 'M', capabilities: { type: 'chat', family: 'openai', tokenizer: 'o200k_base', supports: {}, limits: {} } } as unknown as IChatModelInformation, 'key', 'https://openrouter.ai/api/v1/chat/completions');
+		endpoint.setGateway('openrouter', 'Work');
+		const options = createTestOptions([{ role: Raw.ChatRole.User, content: [{ type: Raw.ChatCompletionContentPartKind.Text, text: '<current_datetime>now</current_datetime>\nFix issue #101' }] }]);
+
+		const worker = endpoint.createRequestBody({ ...options, conversationId: 'worker-1', workLocation: { branch: '101-fix-login', repo: 'creacoon/bliep' } });
+		endpoint.createRequestBody(options);
+
+		expect({ calls: tracking.calls, metadata: (worker as { metadata?: Record<string, string> }).metadata }).toEqual({
+			calls: [
+				['worker-1', 'worker-1', 'Fix issue #101', { branch: '101-fix-login', repo: 'creacoon/bliep' }],
+				['background', 'background', 'Fix issue #101', undefined],
+			],
+			metadata: { creaeditor_chat: 'worker-1', creaeditor_request: 'test-req-123', creaeditor_repo: 'creacoon/bliep', creaeditor_branch: '101-fix-login' },
 		});
 	});
 });
