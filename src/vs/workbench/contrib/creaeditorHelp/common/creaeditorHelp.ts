@@ -29,6 +29,7 @@ export const CREAEDITOR_HELP_PAGES: readonly string[] = [
 	'creaeditor-server',
 	'delegate-to-server',
 	'notifications',
+	'dictation',
 ];
 
 /**

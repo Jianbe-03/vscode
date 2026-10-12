@@ -444,6 +444,20 @@ OpenRouter and LiteLLM requests a CreaEditor Server makes itself are recorded in
 
 **Budgets** count the spend of all machines. Budgets with a hard stop also stop requests on a server: CreaEditor sends them to every server with what this computer and the other servers spent in the current period, and the server refuses a request once the budget is used up. When the period ends before CreaEditor sends again, the server counts only its own spend.
 
+## Dictation with Whisper
+
+Dictation (the microphone in the chat input, editor window and Agents window) runs **Whisper Large v3 Turbo** on this computer through Foundry Local (the native runtime is bundled in the macOS app; the model is not). Guide page: [Dictation](extensions/creaeditor-features/help/dictation.md).
+
+**One-time install**: the first dictation asks **Install the Whisper Large Speech Model?** (about 1.3 GB, downloaded once from Microsoft's Foundry Local catalog into `<cache>/chatDictationModels`). **Download** downloads it in the background with a cancellable progress notification and does not start listening; when it is done: "Whisper is installed. Start dictation again to talk." **Cancel** downloads nothing. A dictation start never downloads a model (`ILocalTranscriptionService.start` fails with `notInstalled`; only `downloadModel` downloads).
+
+**Segments**: Foundry Local's live transcription session only runs Nemotron ("NemotronStreamingProcessor requires a nemotron_speech model type"), so for Whisper the utility process cuts the audio into utterances (`SpeechSegmenter`: energy-based with an adaptive noise floor, 600 ms of silence ends one, at most 24 s, cut at the quietest recent frame) and transcribes each with `AudioClient.transcribeStreaming` (a private temporary WAV file, removed right after); the words of the utterance stream into the input as they are decoded, and Stop transcribes what was said last. Whisper's output for silence ("you", dots, subtitle credits) is dropped. Each utterance takes about 3.5 s on an M-series Mac (on all cores; Whisper pads every utterance to 30 s, so the time hardly depends on its length).
+
+**Language**: Foundry Local's Whisper does not detect the language; without a hint it writes English and translates Dutch into English. With the Dutch hint it keeps English words and sentences English. `dictation.language` (default Automatic: the Voice Mode language, else the first non-English language of the display language, the browser languages and the OS's preferred languages, else English). Pause between sentences in different languages: Whisper can drop a whole sentence in the other language inside one utterance.
+
+**Listening bar**: while dictation listens, a slim bar docked above the chat input shows the microphone level (a scrolling graph; a still meter with reduced motion) and **Listening…** / **Transcribing…** (aria-live).
+
+`dictation.model` still offers Nemotron (streaming, on-device) and MAI (cloud).
+
 ## Building from source
 
 ```sh

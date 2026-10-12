@@ -18,6 +18,7 @@ This guide explains each of those features: what it does, how it works, and how 
 | [CreaEditor Server](creaeditor-server.md) | Run agents on a computer that is always on, and use it from your laptop and phone. |
 | [Delegate to Server](delegate-to-server.md) | Hand a running chat, with its code, to your server, then bring the results back. |
 | [Notifications](notifications.md) | Get a push notification on your phone when a chat finishes, fails or needs you. |
+| [Dictation](dictation.md) | Talk instead of type, on this computer with Whisper: the one-time install, Dutch and English mixed, and the listening bar. |
 
 ## Your first 10 minutes
 
