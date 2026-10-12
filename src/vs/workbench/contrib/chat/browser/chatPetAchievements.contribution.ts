@@ -44,6 +44,24 @@ Registry.as<IEditorPaneRegistry>(EditorExtensions.EditorPane).registerEditorPane
 	[new SyncDescriptor(ChatPetAchievementsEditorInput)],
 );
 
+// CreaEditor: turns the pet on and off from the Command Palette (it lives in the Agents window).
+registerAction2(class extends Action2 {
+	constructor() {
+		super({
+			id: 'chat.pet.toggle',
+			title: localize2('chatPet.toggle', "Toggle Creacoon Pet"),
+			category: localize2('chatPet.category', "Chat"),
+			toggled: ChatPetContextKeys.enabled,
+			precondition: ChatContextKeys.enabled,
+			f1: true,
+		});
+	}
+
+	run(accessor: ServicesAccessor): void {
+		accessor.get(IChatPetService).toggle();
+	}
+});
+
 registerAction2(class extends Action2 {
 	constructor() {
 		super({

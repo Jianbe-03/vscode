@@ -2630,8 +2630,14 @@ export class ChatPetWidget extends Disposable {
 				this.chatPetService.setOnTheRun(!onTheRun);
 			}
 		));
+		// CreaEditor: the pet can be turned off from its own menu (back on with Chat: Toggle Creacoon Pet).
+		const hide = actions.add(new Action('chat.pet.hide', localize('chatPet.hide.action', "Hide Pet"), undefined, true, () => {
+			this._transientState.set(undefined, undefined);
+			this.chatPetService.toggle();
+		}));
 		const interactionSeparator = new Separator();
 		const appearanceSeparator = new Separator();
+		const hideSeparator = new Separator();
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => new StandardMouseEvent(dom.getWindow(this._button.element), event),
 			getActions: (): IAction[] => [
@@ -2644,6 +2650,8 @@ export class ChatPetWidget extends Disposable {
 				appearanceSeparator,
 				stable,
 				insiders,
+				hideSeparator,
+				hide,
 			],
 			onHide: () => {
 				this._contextMenuVisible = false;

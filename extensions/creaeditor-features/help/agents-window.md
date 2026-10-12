@@ -80,7 +80,7 @@ Extra headers and body fields per key and model, for the gateway's logs, are exp
 ### Backgrounds and the Creacoon pet
 
 - **Backgrounds:** right-click an empty part of the chat area and choose **Set Background...** (also in the Command Palette). Choose **Starry Night** (the default), **Creacoon Pattern**, **Codicons**, your own **Image...**, or **No Background**. Dark and light themes each remember their own choice.
-- **Pet:** type `/creacoon-pet` in the input box and press Enter (or right-click an empty spot on the new-session screen and check **Pet**). The pixel-art Creacoon acts out what your agents do; every subagent gets its own smaller pet. Do the same again to turn it off.
+- **Pet:** run **Chat: Toggle Creacoon Pet** from the Command Palette (or type `/creacoon-pet` in the input box and press Enter, or right-click an empty spot on the new-session screen and check **Pet**). The pixel-art Creacoon acts out what your agents do; every subagent gets its own smaller pet. To turn it off, right-click the pet and choose **Hide Pet**, or run the same command again.
 
 ## Settings
 

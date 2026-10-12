@@ -246,7 +246,7 @@ The Agents window has a chat background behind the new-session view and every op
 
 The choice is stored per color theme kind in `chat.agentSessions.preferredDarkBackgroundImage` and `chat.agentSessions.preferredLightBackgroundImage` (`starryNight`, `pattern`, `codicons`, `none`, or an image path). An existing `sessions.background` value is migrated to these settings. High contrast themes show no background, and with reduced motion on the stars don't twinkle, the pattern doesn't drift and there are no shooting stars.
 
-Type `/creacoon-pet` (or use **Pet** in the same right-click menu) for the Creacoon pet, the green chat companion that replaces the VS Code pet. Its context menu switches between Green and Mint colors.
+Run **Chat: Toggle Creacoon Pet** (or type `/creacoon-pet`, or use **Pet** in the same right-click menu; **Hide Pet** in the pet's own menu turns it off) for the Creacoon pet, the green chat companion that replaces the VS Code pet. Its context menu switches between Green and Mint colors.
 
 ## Subscription accounts
 
