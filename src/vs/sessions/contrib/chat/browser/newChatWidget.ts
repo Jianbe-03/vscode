@@ -6,7 +6,7 @@
 import './media/chatWidget.css';
 import * as dom from '../../../../base/browser/dom.js';
 import { StandardMouseEvent } from '../../../../base/browser/mouseEvent.js';
-import { Action, toAction } from '../../../../base/common/actions.js';
+import { toAction } from '../../../../base/common/actions.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { isCancellationError, onUnexpectedError } from '../../../../base/common/errors.js';
 import { toErrorMessage } from '../../../../base/common/errorMessage.js';
@@ -52,7 +52,6 @@ import { SessionInputBannerWidget } from '../../sessionInputBanners/browser/sess
 import { Codicon } from '../../../../base/common/codicons.js';
 import { ChatInputTipPresenter } from '../../../../workbench/contrib/chat/browser/widget/input/chatInputTipPresenter.js';
 import { chatInputStackClass, ChatInputStackSlot, setChatInputStackSlot } from '../../../../workbench/contrib/chat/browser/widget/input/chatInputStack.js';
-import { IChatPetService } from '../../../../workbench/contrib/chat/browser/chatPetService.js';
 import { IChatTipService } from '../../../../workbench/contrib/chat/browser/chatTipService.js';
 import { ChatContextKeys } from '../../../../workbench/contrib/chat/common/actions/chatContextKeys.js';
 import { ChatModeKind } from '../../../../workbench/contrib/chat/common/constants.js';
@@ -161,7 +160,6 @@ export class NewChatWidget extends Disposable {
 		@IAgentHostFilterService private readonly agentHostFilterService: IAgentHostFilterService,
 		@IUriIdentityService private readonly uriIdentityService: IUriIdentityService,
 		@IAgentFeedbackService private readonly agentFeedbackService: IAgentFeedbackService,
-		@IChatPetService private readonly chatPetService: IChatPetService,
 		@IChatTipService private readonly chatTipService: IChatTipService,
 		@IOpenerService private readonly openerService: IOpenerService,
 		@IDefaultAccountService private readonly defaultAccountService: IDefaultAccountService,
@@ -548,13 +546,6 @@ export class NewChatWidget extends Disposable {
 		}));
 		this._register(this.defaultAccountService.onDidChangeDefaultAccount(() => void this._refreshGitHubProfileName()));
 
-		const petAction = this._register(new Action(
-			'sessions.chatPet.toggle',
-			localize('petAction', "Pet (/creacoon-pet)"),
-			undefined,
-			true,
-			() => this.chatPetService.toggle()
-		));
 		this._register(dom.addDisposableListener(element, dom.EventType.CONTEXT_MENU, (e: MouseEvent) => {
 			const target = e.target as Node | null;
 			if (target && chatWidgetContent.contains(target)) {
@@ -563,13 +554,12 @@ export class NewChatWidget extends Disposable {
 
 			e.preventDefault();
 			e.stopPropagation();
-			petAction.checked = this.chatPetService.enabled.get();
 			const anchor = new StandardMouseEvent(dom.getWindow(element), e);
 			this.contextMenuService.showContextMenu({
 				menuId: Menus.SessionChatBackgroundContext,
 				contextKeyService: this.contextKeyService,
 				getAnchor: () => anchor,
-				getActions: () => [petAction],
+				getActions: () => [],
 				getCheckedActionsRepresentation: () => 'checkbox',
 			});
 		}));
