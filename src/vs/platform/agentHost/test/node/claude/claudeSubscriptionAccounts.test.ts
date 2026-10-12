@@ -16,7 +16,7 @@ import type { AgentSignal } from '../../../common/agent.js';
 import { ActionType } from '../../../common/state/sessionActions.js';
 import { createErrorResponsePart } from '../../../common/state/sessionState.js';
 import type { IClaudeAgentSdkService } from '../../../node/claude/claudeAgentSdkService.js';
-import { claudeAccountEnv, claudeProbePatch, claudeTokenFingerprint, ClaudeSubscriptionAccounts, ClaudeSubscriptionLimitTracker, claudeUsageWindows, getClaudeLimitSignal, readClaudeProbeOutcome, selectClaudeAccount, type ClaudeLimitDecision, type IClaudeAccountState } from '../../../node/claude/claudeSubscriptionAccounts.js';
+import { claudeAccountEnv, claudeProbePatch, claudeTokenFingerprint, ClaudeSubscriptionAccounts, ClaudeSubscriptionLimitTracker, claudeUsageWindows, getClaudeLimitSignal, readClaudeProbeOutcome, scrubClaudeLoginOutput, selectClaudeAccount, type ClaudeLimitDecision, type IClaudeAccountState } from '../../../node/claude/claudeSubscriptionAccounts.js';
 import type { ISubscriptionAccountsService, IStoredSubscriptionAccount } from '../../../node/shared/subscriptionAccountsService.js';
 
 suite('claudeSubscriptionAccounts', () => {
@@ -71,6 +71,20 @@ suite('claudeSubscriptionAccounts', () => {
 			token: { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat-test', ANTHROPIC_API_KEY: undefined, ANTHROPIC_AUTH_TOKEN: undefined },
 			login: { CLAUDE_CONFIG_DIR: '/home/u/.creaeditor/claude-accounts/a', CLAUDE_CODE_OAUTH_TOKEN: undefined, ANTHROPIC_API_KEY: undefined, ANTHROPIC_AUTH_TOKEN: undefined },
 		});
+	});
+
+	test('keeps sign-in URLs, codes and terminal sequences out of the log', () => {
+		assert.deepStrictEqual([
+			scrubClaudeLoginOutput('Opening browser to sign in\u2026\nIf the browser didn\'t open, visit: \x1b]8;;https://claude.ai/oauth/authorize?code=true&state=abc\x07https://claude.ai/oauth/authorize?state=abc\x1b]8;;\x07\n'),
+			scrubClaudeLoginOutput('Paste code here if prompted > '),
+			scrubClaudeLoginOutput('\x1b[32mLogin successful.\x1b[0m\n'),
+			scrubClaudeLoginOutput('Invalid code abcdefghijklmnopqrstuvwxyz0123456789#state'),
+		], [
+			'Opening browser to sign in\u2026 If the browser didn\'t open, visit: <url>',
+			'Paste code here if prompted >',
+			'Login successful.',
+			'Invalid code <redacted>',
+		]);
 	});
 
 	test('maps usage windows and limit signals', () => {

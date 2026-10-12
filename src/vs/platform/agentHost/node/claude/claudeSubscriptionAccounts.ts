@@ -63,6 +63,19 @@ const CLAUDE_PROBE_MODEL = 'haiku';
 const CLAUDE_LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
 /** Entries of the default config folder a `login` account shares, so chats move between accounts. */
 const SHARED_CONFIG_ENTRIES = ['projects', 'settings.json', 'CLAUDE.md', 'agents', 'commands', 'skills', 'plugins'];
+
+/**
+ * What `claude auth login` printed, fit for the log: no URLs (they carry the sign-in state), no
+ * terminal control sequences, no long code-like strings.
+ */
+export function scrubClaudeLoginOutput(text: string): string {
+	return text
+		.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07/g, '')
+		.replace(/https?:\/\/\S+/g, '<url>')
+		.replace(/[A-Za-z0-9_#-]{32,}/g, '<redacted>')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
 /** Prompt that continues an interrupted turn on another account. Sent to the model, never shown. */
 export const CLAUDE_CONTINUE_PROMPT = 'Continue where you left off.';
 
@@ -888,7 +901,14 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 
 	private async _doReadAccount(id: string, validate: boolean): Promise<void> {
 		const account = this._find(id);
-		if (!account || !(await this._sdkService.canLoadWithoutDownload())) {
+		if (!account) {
+			return;
+		}
+		if (!(await this._sdkService.canLoadWithoutDownload())) {
+			this._logService.info(`[Claude] Not reading subscription account ${id}: the Claude SDK is not on this computer yet`);
+			if (account.status === 'signingIn') {
+				this._update(id, { status: 'signedOut', error: localize('claudeAccountSdkMissing', "Signed in, but the Claude SDK is not downloaded yet, so CreaEditor cannot check the account. Refresh the account once the download finished.") });
+			}
 			return;
 		}
 		if (account.kind === 'token' && !this._tokens.has(id)) {
@@ -906,7 +926,13 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			try {
 				info = await query.accountInfo();
 				if (!isClaudeAccountSetUp(info)) {
-					this._update(id, { status: 'signedOut', usage: undefined });
+					this._logService.info(`[Claude] Subscription account ${id} has no login: apiProvider=${info.apiProvider ?? 'none'}, tokenSource=${info.tokenSource ?? 'none'}, apiKeySource=${info.apiKeySource ?? 'none'}`);
+					this._update(id, {
+						status: 'signedOut',
+						usage: undefined,
+						// After a browser sign-in, say so instead of only showing the account signed out.
+						...(account.kind === 'login' && account.status === 'signingIn' ? { error: localize('claudeAccountLoginNotFound', "The browser sign-in finished, but Claude Code did not find this account's login. Run `CLAUDE_CONFIG_DIR=\"{0}\" claude auth login` in a terminal, then refresh the account.", this._configDir(id)) } : {}),
+					});
 					return;
 				}
 				// The usage control request is experimental: an account without a reading is still signed in.
@@ -921,7 +947,8 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			}
 		} catch (error) {
 			this._logService.warn(`[Claude] Failed to read subscription account ${id}`, error);
-			this._update(id, { error: error instanceof Error ? error.message : String(error) });
+			// A sign-in that ends here must not keep showing "Signing in".
+			this._update(id, { ...(this._find(id)?.status === 'signingIn' ? { status: 'signedOut' } : {}), error: error instanceof Error ? error.message : String(error) });
 			return;
 		}
 		const hasReading = usage?.rate_limits_available === true;
@@ -1084,6 +1111,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			return;
 		}
 		this._update(id, { status: 'signingIn', error: undefined, authUrl: undefined, acceptsAuthCode: undefined });
+		this._logService.info(`[Claude] Signing in subscription account ${id} with \`claude auth login\``);
 		const login = spawn(cli, ['auth', 'login', '--claudeai'], {
 			env: { ...process.env, CLAUDE_CONFIG_DIR: dir, ELECTRON_RUN_AS_NODE: undefined, CLAUDE_CODE_OAUTH_TOKEN: undefined, ANTHROPIC_API_KEY: undefined },
 			stdio: ['pipe', 'pipe', 'pipe'],
@@ -1100,6 +1128,10 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			if (/paste code/i.test(text) && !this._find(id)?.acceptsAuthCode) {
 				this._update(id, { acceptsAuthCode: true });
 			}
+			const said = scrubClaudeLoginOutput(text);
+			if (said) {
+				this._logService.info(`[Claude] Sign-in of subscription account ${id}: ${said}`);
+			}
 		};
 		login.stdout?.on('data', onOutput);
 		login.stderr?.on('data', onOutput);
@@ -1108,6 +1140,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			login.on('exit', code => resolve(code));
 		});
 		clearTimeout(timeout);
+		this._logService.info(`[Claude] \`claude auth login\` of subscription account ${id} ended with exit code ${exitCode}`);
 		if (this._logins.get(id) !== login) {
 			return;
 		}
