@@ -12,8 +12,53 @@ export const ILocalTranscriptionService = createDecorator<ILocalTranscriptionSer
 /** IPC channel name used to reach the transcription service in the utility process. */
 export const localTranscriptionChannelName = 'localTranscription';
 
-/** Default on-device model used for dictation. */
-export const DEFAULT_LOCAL_TRANSCRIPTION_MODEL = 'nemotron-3.5-asr-streaming-0.6b';
+/**
+ * Default on-device model used for dictation. CreaEditor: Whisper Large v3 Turbo (Foundry Local alias),
+ * which is far more accurate than the streaming Nemotron model and keeps English words in English
+ * inside, for example, Dutch speech.
+ */
+export const DEFAULT_LOCAL_TRANSCRIPTION_MODEL = 'whisper-large-v3-turbo';
+
+/** CreaEditor: the streaming Nemotron model upstream VS Code uses; still selectable in `dictation.model`. */
+export const NEMOTRON_LOCAL_TRANSCRIPTION_MODEL = 'nemotron-3.5-asr-streaming-0.6b';
+
+/**
+ * CreaEditor: whether `model` cannot stream (Whisper). Foundry Local's live transcription session
+ * only runs Nemotron models ("NemotronStreamingProcessor requires a nemotron_speech model type"), so
+ * these models dictate in segments: the audio is cut at pauses and each utterance is transcribed whole.
+ */
+export function isSegmentedTranscriptionModel(model: string | undefined): boolean {
+	return /whisper/i.test(model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL);
+}
+
+/**
+ * CreaEditor: options that locate the model cache and the native runtime, and bridge VS Code's proxy
+ * settings into the utility process (see {@link ILocalTranscriptionService.start}).
+ */
+export interface ILocalTranscriptionModelOptions {
+	readonly cacheDir: string;
+	readonly model?: string;
+	readonly proxyUrl?: string;
+	readonly noProxy?: string;
+	readonly proxyStrictSSL?: boolean;
+	readonly proxyAuthorization?: string;
+	readonly runtimeUrlTemplate?: string;
+	readonly runtimeVersion?: string;
+}
+
+/** CreaEditor: whether a model is on disk, and how big its download is. */
+export interface ILocalTranscriptionModelInstallState {
+	readonly installed: boolean;
+	/** Download size in MB, from the Foundry Local catalog (when it could be read). */
+	readonly sizeMb?: number;
+}
+
+/**
+ * CreaEditor: `errorCode` of the model status when dictation started with a model that is not on
+ * disk. `start` never downloads a model; only {@link ILocalTranscriptionService.downloadModel} does,
+ * after the user agreed to the download.
+ */
+export const MODEL_NOT_INSTALLED_ERROR_CODE = 'notInstalled';
 
 export interface ILocalTranscriptionModelImportResult {
 	readonly model: string;
@@ -66,15 +111,21 @@ export interface ILocalTranscriptionResult {
 	 * — instead of waiting for a later interim to confirm it stopped changing.
 	 */
 	readonly finalizedText?: string;
+	/**
+	 * CreaEditor: segmented models (Whisper) only. Utterances that ended and are still being
+	 * transcribed; the renderer shows "Transcribing…" while this is above zero.
+	 */
+	readonly pendingSegments?: number;
 }
 
 
 /**
  * On-device speech-to-text using a downloaded model. Transcription runs through
  * Microsoft's Foundry Local streaming ASR engine (onnxruntime + onnxruntime-genai
- * native runtime), which handles decoding, VAD and endpointing internally. The
- * default model is NVIDIA's multilingual Nemotron 3.5 streaming RNN-T. The model
- * is chosen by the `dictation.model` setting. Runs in a utility process. A
+ * native runtime). Streaming models (NVIDIA's Nemotron 3.5 RNN-T) do their own
+ * VAD and endpointing; CreaEditor's default, Whisper Large v3 Turbo, cannot
+ * stream, so the service cuts the audio at pauses and transcribes each utterance
+ * (see `SpeechSegmenter`). The model is chosen by the `dictation.model` setting. Runs in a utility process. A
  * single transcription session is active at a time (dictation is a singleton
  * in the renderer).
  *
@@ -107,9 +158,19 @@ export interface ILocalTranscriptionService {
 	 */
 	importModel(options: { readonly sourcePath: string; readonly cacheDir: string }): Promise<ILocalTranscriptionModelImportResult>;
 
+	/** CreaEditor: whether the model is on disk (no download, and no prompt needed before dictating). */
+	getModelInstallState(options: ILocalTranscriptionModelOptions): Promise<ILocalTranscriptionModelInstallState>;
+
 	/**
-	 * Ensure the model is downloaded/loaded (idempotent) and begin a new
-	 * transcription session. `cacheDir` is where model files are stored. `model`
+	 * CreaEditor: download (and load) the model. Only called after the user agreed to the download;
+	 * progress is reported on {@link onDidChangeModelStatus}, and {@link cancel} stops it.
+	 */
+	downloadModel(options: ILocalTranscriptionModelOptions): Promise<void>;
+
+	/**
+	 * Ensure the model is loaded (idempotent) and begin a new transcription
+	 * session. CreaEditor: never downloads; a model that is not on disk fails
+	 * with {@link MODEL_NOT_INSTALLED_ERROR_CODE}. `cacheDir` is where model files are stored. `model`
 	 * selects the on-device Foundry Local model; when omitted the service default
 	 * is used. `language` optionally hints the spoken language.
 	 *
@@ -134,7 +195,7 @@ export interface ILocalTranscriptionService {
 	 * CDN for this host's target. When omitted (local dev builds), the runtime
 	 * falls back to the SDK's own `node_modules` payload and nothing is downloaded.
 	 */
-	start(options: { readonly cacheDir: string; readonly model?: string; readonly language?: string; readonly proxyUrl?: string; readonly noProxy?: string; readonly proxyStrictSSL?: boolean; readonly proxyAuthorization?: string; readonly runtimeUrlTemplate?: string; readonly runtimeVersion?: string }): Promise<void>;
+	start(options: ILocalTranscriptionModelOptions & { readonly language?: string }): Promise<void>;
 
 	/** Append captured audio (raw little-endian PCM16 mono 16 kHz). */
 	pushAudio(chunk: VSBuffer): Promise<void>;

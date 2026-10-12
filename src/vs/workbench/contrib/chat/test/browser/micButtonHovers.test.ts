@@ -25,7 +25,7 @@ suite('MicButtonHovers', () => {
 			cloud: getDictationHoverMarkdown('Dictate', cloud, false).value,
 			webFallback: getDictationHoverMarkdown('Dictate', webFallback, true).value,
 		}, {
-			onDevice: '**Dictate**\n\nTypes what you say into the input. Transcribes on-device with the Nemotron 3.5 ASR multilingual model.',
+			onDevice: '**Dictate**\n\nTypes what you say into the input. Transcribes on-device with the Whisper Large speech model.',
 			cloud: '**Dictate**\n\nTypes what you say into the input. Transcribes in the cloud with the MAI speech model.',
 			webFallback: '**Dictate**\n\nTypes what you say into the input. Transcribes in the cloud with the MAI speech model.',
 		});

@@ -8,10 +8,11 @@ import { createReadStream, promises as fs } from 'fs';
 import { basename, dirname, join } from '../../../base/common/path.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
 import { extract } from '../../../base/node/zip.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, ILocalTranscriptionModelImportResult } from '../common/localTranscription.js';
+import { ILocalTranscriptionModelImportResult, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL } from '../common/localTranscription.js';
 
 const MODEL_PUBLISHER = 'Microsoft';
-const MODEL_VARIANT = `${DEFAULT_LOCAL_TRANSCRIPTION_MODEL}-generic-cpu`;
+// CreaEditor: the package layout below is the Nemotron one; Whisper is downloaded with consent instead.
+const MODEL_VARIANT = `${NEMOTRON_LOCAL_TRANSCRIPTION_MODEL}-generic-cpu`;
 const INFERENCE_MODEL_FILE = 'inference_model.json';
 const GENAI_CONFIG_FILE = 'genai_config.json';
 const OCI_TITLE_ANNOTATION = 'org.opencontainers.image.title';
@@ -50,7 +51,7 @@ export async function importFoundryLocalModel(sourcePath: string, cacheDir: stri
 			: await prepareModelArchive(sourcePath, workDirectory);
 		await verifyPreparedModel(prepared.versionDirectory);
 		await installPreparedModel(prepared, cacheDir);
-		return { model: DEFAULT_LOCAL_TRANSCRIPTION_MODEL, version: prepared.version };
+		return { model: NEMOTRON_LOCAL_TRANSCRIPTION_MODEL, version: prepared.version };
 	} finally {
 		await fs.rm(workDirectory, { recursive: true, force: true });
 	}
@@ -201,7 +202,7 @@ function modelVersionFromName(name: string | undefined): number | undefined {
 	}
 	const match = new RegExp(`^${MODEL_VARIANT.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:(?<version>[1-9]\\d*)$`).exec(name);
 	if (!match?.groups?.version) {
-		throw new Error(`The selected package is not the ${DEFAULT_LOCAL_TRANSCRIPTION_MODEL} CPU model.`);
+		throw new Error(`The selected package is not the ${NEMOTRON_LOCAL_TRANSCRIPTION_MODEL} CPU model.`);
 	}
 	return Number(match.groups.version);
 }
@@ -231,7 +232,7 @@ async function findPreparedModel(root: string, canMove: boolean): Promise<IPrepa
 		const metadata = JSON.parse(await fs.readFile(inferenceModel, 'utf8')) as { Name?: string };
 		const version = modelVersionFromName(metadata.Name);
 		if (version === undefined) {
-			throw new Error(`The selected folder is not the ${DEFAULT_LOCAL_TRANSCRIPTION_MODEL} CPU model.`);
+			throw new Error(`The selected folder is not the ${NEMOTRON_LOCAL_TRANSCRIPTION_MODEL} CPU model.`);
 		}
 		const versionDirectory = dirname(inferenceModel);
 		if (basename(versionDirectory) !== `v${version}`) {

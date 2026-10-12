@@ -8,7 +8,7 @@ import { arch, platform } from '../../../../base/common/process.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { IConfigurationService } from '../../../../platform/configuration/common/configuration.js';
 import { IProductService } from '../../../../platform/product/common/productService.js';
-import { ILocalTranscriptionService, localTranscriptionChannelName } from '../../../../platform/localTranscription/common/localTranscription.js';
+import { ILocalTranscriptionModelOptions, ILocalTranscriptionService, localTranscriptionChannelName } from '../../../../platform/localTranscription/common/localTranscription.js';
 import { IUtilityProcessWorkerWorkbenchService } from '../../utilityProcess/electron-browser/utilityProcessWorkerWorkbenchService.js';
 
 /**
@@ -83,20 +83,27 @@ export class LocalTranscriptionService {
 
 	getModelStatus() { return this._getProxy().getModelStatus(); }
 	importModel(options: Parameters<ILocalTranscriptionService['importModel']>[0]) { return this._getProxy().importModel(options); }
+	// CreaEditor: whether the model is on disk, and its consented download.
+	getModelInstallState(options: { cacheDir: string; model?: string }) { return this._getProxy().getModelInstallState(this._withEnvironment(options)); }
+	downloadModel(options: { cacheDir: string; model?: string }) { return this._getProxy().downloadModel(this._withEnvironment(options)); }
 	start(options: { cacheDir: string; model?: string; language?: string }) {
+		return this._getProxy().start({ ...this._withEnvironment(options), language: options.language });
+	}
+
+	/** The model options plus the proxy settings and the native runtime location the utility process needs. */
+	private _withEnvironment(options: { cacheDir: string; model?: string }): ILocalTranscriptionModelOptions {
 		const { proxyUrl, noProxy, proxyStrictSSL, proxyAuthorization } = this._resolveProxyConfig();
 		const runtime = this.productService.dictationRuntime;
-		return this._getProxy().start({
+		return {
 			cacheDir: options.cacheDir,
 			model: options.model,
-			language: options.language,
 			proxyUrl,
 			noProxy,
 			proxyStrictSSL,
 			proxyAuthorization,
 			runtimeUrlTemplate: runtime?.urlTemplate,
 			runtimeVersion: runtime?.version,
-		});
+		};
 	}
 	pushAudio(chunk: Parameters<ILocalTranscriptionService['pushAudio']>[0]) { return this._getProxy().pushAudio(chunk); }
 	stop() { return this._getProxy().stop(); }

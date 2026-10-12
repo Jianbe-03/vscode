@@ -11,7 +11,7 @@ import { join } from '../../../../base/common/path.js';
 import { zip } from '../../../../base/node/zip.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
 import { getRandomTestPath } from '../../../../base/test/node/testUtils.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL } from '../../common/localTranscription.js';
+import { NEMOTRON_LOCAL_TRANSCRIPTION_MODEL } from '../../common/localTranscription.js';
 import { importFoundryLocalModel } from '../../node/foundryLocalModelImport.js';
 
 suite('FoundryLocalModelImport', () => {
@@ -47,10 +47,10 @@ suite('FoundryLocalModelImport', () => {
 			files: (await fs.promises.readdir(target)).sort(),
 			metadata,
 		}, {
-			result: { model: DEFAULT_LOCAL_TRANSCRIPTION_MODEL, version: 4 },
+			result: { model: NEMOTRON_LOCAL_TRANSCRIPTION_MODEL, version: 4 },
 			files: ['encoder.onnx', 'genai_config.json', 'inference_model.json'],
 			metadata: {
-				Name: `${DEFAULT_LOCAL_TRANSCRIPTION_MODEL}-generic-cpu:4`,
+				Name: `${NEMOTRON_LOCAL_TRANSCRIPTION_MODEL}-generic-cpu:4`,
 				PromptTemplate: null,
 			},
 		});
@@ -92,7 +92,7 @@ suite('FoundryLocalModelImport', () => {
 			result,
 			files: (await fs.promises.readdir(target)).sort(),
 		}, {
-			result: { model: DEFAULT_LOCAL_TRANSCRIPTION_MODEL, version: 3 },
+			result: { model: NEMOTRON_LOCAL_TRANSCRIPTION_MODEL, version: 3 },
 			files: ['encoder.onnx', 'genai_config.json', 'inference_model.json'],
 		});
 	});
@@ -143,7 +143,7 @@ suite('FoundryLocalModelImport', () => {
 
 		await assert.rejects(
 			importFoundryLocalModel(source, cacheDirectory),
-			new RegExp(`not the ${DEFAULT_LOCAL_TRANSCRIPTION_MODEL}`),
+			new RegExp(`not the ${NEMOTRON_LOCAL_TRANSCRIPTION_MODEL}`),
 		);
 		assert.strictEqual(fs.existsSync(join(cacheDirectory, 'Microsoft')), false);
 	});
@@ -185,7 +185,7 @@ suite('FoundryLocalModelImport', () => {
 
 		await assert.rejects(
 			importFoundryLocalModel(source, cacheDirectory),
-			new RegExp(`not the ${DEFAULT_LOCAL_TRANSCRIPTION_MODEL}`),
+			new RegExp(`not the ${NEMOTRON_LOCAL_TRANSCRIPTION_MODEL}`),
 		);
 	});
 });
@@ -194,7 +194,7 @@ function modelVersionDirectory(cacheDirectory: string, version: number): string 
 	return join(
 		cacheDirectory,
 		'Microsoft',
-		`${DEFAULT_LOCAL_TRANSCRIPTION_MODEL}-generic-cpu-${version}`,
+		`${NEMOTRON_LOCAL_TRANSCRIPTION_MODEL}-generic-cpu-${version}`,
 		`v${version}`,
 	);
 }

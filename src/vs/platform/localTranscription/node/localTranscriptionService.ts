@@ -3,9 +3,11 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as fs from 'fs';
+import { tmpdir } from 'os';
 import { Emitter, Event } from '../../../base/common/event.js';
 import { Disposable, toDisposable } from '../../../base/common/lifecycle.js';
-import { CancellationTokenSource } from '../../../base/common/cancellation.js';
+import { CancellationToken, CancellationTokenSource } from '../../../base/common/cancellation.js';
 import { VSBuffer } from '../../../base/common/buffer.js';
 import { dirname, join } from '../../../base/common/path.js';
 import { ensureFoundryLocalRuntime, findBundledFoundryLocalRuntime } from './foundryLocalRuntime.js';
@@ -16,8 +18,13 @@ import {
 	ILocalTranscriptionService,
 	DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
 	ILocalTranscriptionModelImportResult,
+	ILocalTranscriptionModelInstallState,
+	ILocalTranscriptionModelOptions,
+	isSegmentedTranscriptionModel,
 	LocalTranscriptionModelState,
+	MODEL_NOT_INSTALLED_ERROR_CODE,
 } from '../common/localTranscription.js';
+import { cleanWhisperSegmentText, ISpeechSegment, SpeechSegmenter } from '../common/speechSegmenter.js';
 import { importFoundryLocalModel } from './foundryLocalModelImport.js';
 
 /** PCM audio format the renderer captures and streams: mono 16 kHz signed 16-bit. */
@@ -46,6 +53,8 @@ const SESSION_START_TIMEOUT_MS = 15_000;
 const APPEND_TIMEOUT_MS = 15_000;
 const STREAM_INACTIVITY_TIMEOUT_MS = 60_000;
 const SESSION_TEARDOWN_TIMEOUT_MS = 15_000;
+/** CreaEditor: longest wait for the next piece of a segment's Whisper transcript. */
+const SEGMENT_TRANSCRIBE_TIMEOUT_MS = 60_000;
 
 /**
  * Race `promise` against a `ms` timeout, rejecting with `message` if it does
@@ -84,6 +93,89 @@ type FoundryLocalManager = import('foundry-local-sdk').FoundryLocalManager;
 type IModel = import('foundry-local-sdk').IModel;
 type LiveAudioTranscriptionSession = import('foundry-local-sdk').LiveAudioTranscriptionSession;
 type LiveAudioTranscriptionResponse = import('foundry-local-sdk').LiveAudioTranscriptionResponse;
+type AudioClient = import('foundry-local-sdk').AudioClient;
+
+/** CreaEditor: dictation started with a model that is not on disk (and `start` never downloads). */
+class ModelNotInstalledError extends Error {
+	constructor(modelId: string) {
+		super(`The ${modelId} speech model is not installed.`);
+	}
+}
+
+/**
+ * CreaEditor: whether the model cache holds files of `modelId` (a Foundry Local alias such as
+ * `whisper-large-v3-turbo`, stored as `<publisher>/openai-whisper-large-v3-turbo-generic-cpu-4/v4`).
+ * Used when the catalog cannot be read (offline), so an installed model never asks to be downloaded
+ * again. Exported for tests.
+ */
+export async function hasCachedModelFiles(cacheDir: string, modelId: string): Promise<boolean> {
+	let publishers: string[];
+	try {
+		publishers = await fs.promises.readdir(cacheDir);
+	} catch {
+		return false;
+	}
+	const alias = modelId.toLowerCase();
+	for (const publisher of publishers) {
+		let variants: string[];
+		try {
+			variants = await fs.promises.readdir(join(cacheDir, publisher));
+		} catch {
+			continue; // A file, not a publisher folder.
+		}
+		for (const variant of variants) {
+			const name = variant.toLowerCase();
+			if (name.startsWith(`${alias}-`) || name.startsWith(`openai-${alias}-`)) {
+				const versions = await fs.promises.readdir(join(cacheDir, publisher, variant)).catch(() => []);
+				if (versions.some(version => /^v\d+$/.test(version))) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
+}
+
+/** CreaEditor: PCM16 mono samples as a WAV file, the input Whisper's `transcribe` reads. */
+function encodeWav(samples: Int16Array, sampleRate: number): Buffer {
+	const data = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
+	const header = Buffer.alloc(44);
+	header.write('RIFF', 0, 'ascii');
+	header.writeUInt32LE(36 + data.length, 4);
+	header.write('WAVE', 8, 'ascii');
+	header.write('fmt ', 12, 'ascii');
+	header.writeUInt32LE(16, 16);
+	header.writeUInt16LE(1, 20); // PCM
+	header.writeUInt16LE(CHANNELS, 22);
+	header.writeUInt32LE(sampleRate, 24);
+	header.writeUInt32LE(sampleRate * CHANNELS * BITS_PER_SAMPLE / 8, 28);
+	header.writeUInt16LE(CHANNELS * BITS_PER_SAMPLE / 8, 32);
+	header.writeUInt16LE(BITS_PER_SAMPLE, 34);
+	header.write('data', 36, 'ascii');
+	header.writeUInt32LE(data.length, 40);
+	return Buffer.concat([header, data]);
+}
+
+/** CreaEditor: one streamed Whisper chunk, as the SDK yields it (untyped there). */
+interface IWhisperChunk {
+	/** A delta: the next piece of the transcript, with its own leading space. */
+	readonly text?: unknown;
+}
+
+/** CreaEditor: the text of one streamed Whisper chunk (`{ text: " word", ... }`). */
+function whisperChunkText(chunk: IWhisperChunk | null | undefined): string {
+	return typeof chunk?.text === 'string' ? chunk.text : '';
+}
+
+/**
+ * CreaEditor: Whisper's language hint, an ISO 639-1 code (`nl-NL` → `nl`), or `undefined` for none.
+ * Note that Foundry Local's Whisper does not detect the language: without a hint it writes English
+ * (translating other speech), so the renderer resolves a language. Exported for tests.
+ */
+export function toWhisperLanguage(language: string | undefined): string | undefined {
+	const code = language?.trim().toLowerCase().split(/[-_]/)[0];
+	return code && code !== 'auto' && /^[a-z]{2,3}$/.test(code) ? code : undefined;
+}
 
 /** Prefer the SDK's dynamically reported cached variant over stale catalog metadata. */
 export function selectCachedModelVariant<T extends { readonly isCached: boolean }>(model: { readonly isCached: boolean; readonly variants: readonly T[]; selectVariant(variant: T): void }): void {
@@ -103,6 +195,9 @@ export function selectCachedModelVariant<T extends { readonly isCached: boolean 
  */
 function classifyModelError(message: string): string {
 	const text = message.toLowerCase();
+	if (/\bspeech model is not installed\b/.test(text)) {
+		return MODEL_NOT_INSTALLED_ERROR_CODE;
+	}
 	if (/\btimed out\b/.test(text)) {
 		return 'timeout';
 	}
@@ -299,6 +394,23 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 	 */
 	private _generation = 0;
 
+	// --- CreaEditor: segmented dictation (Whisper cannot stream). ---
+	/** Whether the active session transcribes in segments. */
+	private _segmented = false;
+	/** Cuts the session's audio into utterances at pauses. */
+	private _segmenter: SpeechSegmenter | undefined;
+	/** Whisper client of the active session, once its model is loaded. */
+	private _audioClient: AudioClient | undefined;
+	/** Serializes segment transcriptions, in the order they were spoken. */
+	private _segmentChain: Promise<void> = Promise.resolve();
+	/** Utterances that ended and are not transcribed yet. */
+	private _pendingSegmentCount = 0;
+	/** Transcripts of the finished segments. */
+	private _segmentTexts: string[] = [];
+	/** Text of the segment being transcribed so far (Whisper streams it in pieces). */
+	private _segmentPartial = '';
+	private _segmentFileCounter = 0;
+
 	constructor() {
 		super();
 		// Tear down the active session (and its native ASR resources) when the
@@ -324,18 +436,56 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		this._onDidChangeModelStatus.fire(status);
 	}
 
-	async start(options: { cacheDir: string; model?: string; language?: string; proxyUrl?: string; noProxy?: string; proxyStrictSSL?: boolean; proxyAuthorization?: string; runtimeUrlTemplate?: string; runtimeVersion?: string }): Promise<void> {
-		// Bridge VS Code's proxy settings into this process's environment before any
-		// first-use download, so both our own fetches and the native Foundry Local
-		// model download route through the configured proxy (they read the OS/env
-		// proxy, not VS Code settings directly).
+	/**
+	 * Bridge VS Code's proxy settings into this process's environment before any
+	 * first-use download, so both our own fetches and the native Foundry Local
+	 * model download route through the configured proxy (they read the OS/env
+	 * proxy, not VS Code settings directly), and record where the native runtime
+	 * is published (from product.json). When unset (dev builds), the SDK's own
+	 * node_modules payload is used instead.
+	 */
+	private _prepareEnvironment(options: ILocalTranscriptionModelOptions): void {
 		this._applyProxyEnv(options.proxyUrl, options.noProxy, options.proxyStrictSSL, options.proxyAuthorization);
-
-		// Record where the native runtime is published (from product.json). When
-		// unset (dev builds), the SDK's own node_modules payload is used instead.
 		this._runtimeDownload = options.runtimeUrlTemplate && options.runtimeVersion
 			? { urlTemplate: options.runtimeUrlTemplate, version: options.runtimeVersion }
 			: undefined;
+	}
+
+	async getModelInstallState(options: ILocalTranscriptionModelOptions): Promise<ILocalTranscriptionModelInstallState> {
+		this._prepareEnvironment(options);
+		const modelId = options.model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL;
+		if (this._model && this._loadedModelId === modelId) {
+			return { installed: true };
+		}
+		try {
+			const manager = await this._ensureManager(options.cacheDir, CancellationToken.None);
+			const model = await withTimeout(
+				manager.catalog.getModel(modelId),
+				MODEL_CATALOG_TIMEOUT_MS,
+				`Foundry Local model catalog lookup timed out after ${MODEL_CATALOG_TIMEOUT_MS}ms.`
+			);
+			selectCachedModelVariant(model);
+			return { installed: model.isCached, sizeMb: model.info.fileSizeMb ?? undefined };
+		} catch {
+			// The catalog could not be read (offline): look at the cache itself.
+			return { installed: await hasCachedModelFiles(options.cacheDir, modelId) };
+		}
+	}
+
+	async downloadModel(options: ILocalTranscriptionModelOptions): Promise<void> {
+		this._prepareEnvironment(options);
+		const modelId = options.model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL;
+		try {
+			await this._ensureModel(options.cacheDir, modelId, true);
+		} catch (err) {
+			const message = String(err instanceof Error ? err.message : err);
+			this._setStatus({ state: LocalTranscriptionModelState.Error, error: message, errorCode: classifyModelError(message) });
+			throw err;
+		}
+	}
+
+	async start(options: ILocalTranscriptionModelOptions & { language?: string }): Promise<void> {
+		this._prepareEnvironment(options);
 
 		// Reset any prior session before starting a new one.
 		await this._disposeSession();
@@ -346,13 +496,173 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		this._partialText = '';
 		this._pendingChunks = [];
 		this._runtimeError = undefined;
+		this._resetSegmentedState();
 
 		const model = options.model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL;
 		const language = options.language;
+		// CreaEditor: Whisper cannot stream; cut the audio at pauses and transcribe each utterance.
+		this._segmented = isSegmentedTranscriptionModel(model);
+		if (this._segmented) {
+			this._segmenter = new SpeechSegmenter({ sampleRate: SAMPLE_RATE });
+			this._openPromise = this._openSegmentedSession(options.cacheDir, model, language, generation);
+			this._openPromise.catch(() => { /* status already reported */ });
+			// Segments wait for the model before they are transcribed.
+			this._segmentChain = this._openPromise.catch(() => { /* no client: segments are dropped */ });
+			return;
+		}
 		// Do not block capture on the (possibly first-use) model download/load and
 		// session open; buffer audio until the session is ready, then flush it.
 		this._openPromise = this._openSession(options.cacheDir, model, language, generation);
 		this._openPromise.catch(() => { /* status already reported */ });
+	}
+
+	/**
+	 * CreaEditor: load the (installed) Whisper model and keep its audio client for the segments of
+	 * this session. Audio captured meanwhile is already being segmented; its segments wait on
+	 * `_segmentChain`, which starts with this promise.
+	 */
+	private async _openSegmentedSession(cacheDir: string, modelId: string, language: string | undefined, generation: number): Promise<void> {
+		try {
+			const model = await this._ensureModel(cacheDir, modelId, false);
+			if (generation !== this._generation) {
+				return;
+			}
+			const client = model.createAudioClient();
+			const whisperLanguage = toWhisperLanguage(language);
+			if (whisperLanguage) {
+				client.settings.language = whisperLanguage;
+			}
+			this._audioClient = client;
+			this._setStatus({ state: LocalTranscriptionModelState.Ready });
+		} catch (err) {
+			if (generation === this._generation) {
+				const message = String(err instanceof Error ? err.message : err);
+				this._setStatus({ state: LocalTranscriptionModelState.Error, error: message, errorCode: classifyModelError(message) });
+			}
+			throw err;
+		}
+	}
+
+	/** CreaEditor: queue a finished utterance for transcription, after the ones spoken before it. */
+	private _enqueueSegment(segment: ISpeechSegment, generation: number): void {
+		this._pendingSegmentCount++;
+		this._fireSegmentedTranscript(generation);
+		const run = this._segmentChain.then(async () => {
+			const client = this._audioClient;
+			if (generation !== this._generation || !client) {
+				return;
+			}
+			await this._transcribeSegment(client, segment, generation);
+		});
+		this._segmentChain = run.catch(err => {
+			// A failing native transcription ends the session, like a failing stream does.
+			if (generation === this._generation && !this._runtimeError) {
+				const error = err instanceof Error ? err : new Error(String(err));
+				this._runtimeError = error;
+				const errorCode = /\btimed out\b/.test(error.message) ? 'timeout' : 'runtime';
+				this._setStatus({ state: LocalTranscriptionModelState.Error, error: error.message, errorCode });
+			}
+		}).finally(() => {
+			if (generation === this._generation) {
+				this._pendingSegmentCount = Math.max(0, this._pendingSegmentCount - 1);
+				this._fireSegmentedTranscript(generation);
+			}
+		});
+	}
+
+	/**
+	 * CreaEditor: transcribe one utterance with Whisper. The SDK reads audio from a file, so the
+	 * segment is written to a private temporary WAV file and removed right after. The streaming
+	 * variant is used because it runs off the event loop (the plain `transcribe` blocks this process
+	 * for the seconds a segment takes) and its pieces show the words as they are decoded.
+	 */
+	private async _transcribeSegment(client: AudioClient, segment: ISpeechSegment, generation: number): Promise<void> {
+		const file = join(tmpdir(), `creaeditor-dictation-${process.pid}-${++this._segmentFileCounter}.wav`);
+		await fs.promises.writeFile(file, encodeWav(segment.samples, SAMPLE_RATE), { mode: 0o600 });
+		try {
+			const iterator = client.transcribeStreaming(file)[Symbol.asyncIterator]();
+			let text = '';
+			try {
+				while (true) {
+					const { value, done } = await withTimeout(
+						iterator.next(),
+						SEGMENT_TRANSCRIBE_TIMEOUT_MS,
+						`Foundry Local transcription stalled for ${SEGMENT_TRANSCRIBE_TIMEOUT_MS}ms.`
+					);
+					if (done || generation !== this._generation) {
+						break;
+					}
+					text += whisperChunkText(value);
+					this._segmentPartial = text.trim() ? text.trimStart() : '';
+					this._fireSegmentedTranscript(generation);
+				}
+			} finally {
+				try {
+					await iterator.return?.(undefined);
+				} catch { /* best-effort */ }
+			}
+			if (generation !== this._generation) {
+				return;
+			}
+			const cleaned = cleanWhisperSegmentText(text);
+			if (cleaned) {
+				this._segmentTexts.push(cleaned);
+			}
+			this._segmentPartial = '';
+		} finally {
+			await fs.promises.rm(file, { force: true });
+		}
+	}
+
+	/** CreaEditor: the finished segments, joined naturally. */
+	private _segmentedFinalText(): string {
+		return this._segmentTexts.reduce((text, segment) => `${text}${transcriptSeparator(text, segment)}${segment}`, '');
+	}
+
+	/** CreaEditor: emit the segmented transcript: finished segments plus the one being transcribed. */
+	private _fireSegmentedTranscript(generation: number): void {
+		if (generation !== this._generation) {
+			return;
+		}
+		const finalized = this._segmentedFinalText();
+		const partial = this._segmentPartial;
+		const text = partial ? `${finalized}${transcriptSeparator(finalized, partial)}${partial}` : finalized;
+		this._onDidTranscribe.fire({ text, isFinal: false, finalizedText: finalized, pendingSegments: this._pendingSegmentCount });
+	}
+
+	/** CreaEditor: finish a segmented session: transcribe what was said last, then everything queued. */
+	private async _stopSegmented(generation: number): Promise<string> {
+		const last = this._segmenter?.flush();
+		if (last) {
+			this._enqueueSegment(last, generation);
+		}
+		try {
+			await this._openPromise;
+		} catch {
+			// Load failed; status already reported as Error.
+		}
+		await this._segmentChain;
+		if (generation !== this._generation) {
+			return '';
+		}
+		const runtimeError = this._runtimeError;
+		if (runtimeError) {
+			this._resetSessionState();
+			throw runtimeError;
+		}
+		const text = this._segmentedFinalText();
+		this._onDidTranscribe.fire({ text, isFinal: true, finalizedText: text, pendingSegments: 0 });
+		this._resetSessionState();
+		return text;
+	}
+
+	private _resetSegmentedState(): void {
+		this._segmenter = undefined;
+		this._audioClient = undefined;
+		this._segmentChain = Promise.resolve();
+		this._pendingSegmentCount = 0;
+		this._segmentTexts = [];
+		this._segmentPartial = '';
 	}
 
 	/**
@@ -427,7 +737,7 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 	 */
 	private async _openSession(cacheDir: string, modelId: string, language: string | undefined, generation: number): Promise<void> {
 		try {
-			const model = await this._ensureModel(cacheDir, modelId);
+			const model = await this._ensureModel(cacheDir, modelId, false);
 			if (generation !== this._generation) {
 				return; // superseded by a newer session
 			}
@@ -508,11 +818,57 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 	}
 
 	/**
-	 * Download (if needed) and load the selected model through Foundry Local,
+	 * Ensure the Foundry Local native runtime (N-API addon + core libraries) is
+	 * available, load the SDK and create the manager (once).
+	 */
+	private async _ensureManager(cacheDir: string, token: CancellationToken): Promise<FoundryLocalManager> {
+		// Ensure the Foundry Local native runtime (N-API addon + core
+		// libraries) is available before loading the SDK. We do not ship
+		// it — the addon requires a newer glibc than our minimum supported
+		// Linux distros — so in packaged builds it is downloaded on demand
+		// from VS Code's CDN (per `product.dictationRuntime`) into a
+		// per-user cache and the SDK loader is pointed at it via env var.
+		// This is a no-op once cached. In dev builds (no product config)
+		// the SDK resolves its addon + core libs from node_modules, so we
+		// skip provisioning and leave the loader on its default path.
+		if (this._runtimeDownload) {
+			const nativeDir = await ensureFoundryLocalRuntime(runtimeCacheDir(cacheDir), this._runtimeDownload, token);
+			process.env.VSCODE_FOUNDRY_LOCAL_NATIVE_DIR = nativeDir;
+		} else {
+			// CreaEditor: no CDN copy to download; use the runtime the build bundled, unpacked
+			// next to the archive (native code cannot load from inside `node_modules.asar`).
+			const bundledDir = findBundledFoundryLocalRuntime(dirname(FileAccess.asFileUri('').fsPath));
+			if (bundledDir) {
+				process.env.VSCODE_FOUNDRY_LOCAL_NATIVE_DIR = bundledDir;
+			}
+		}
+
+		if (!this._sdk) {
+			this._sdk = await import('foundry-local-sdk');
+		}
+		if (!this._manager) {
+			// Store downloaded model files under VS Code's cache dir so
+			// subsequent sessions load without re-downloading ("model
+			// management"). `createAsync` avoids blocking the event loop
+			// during native init.
+			this._manager = await this._sdk.FoundryLocalManager.createAsync({
+				appName: FOUNDRY_APP_NAME,
+				modelCacheDir: cacheDir,
+				logLevel: 'warn',
+			});
+		}
+		return this._manager;
+	}
+
+	/**
+	 * Download (if needed and allowed) and load the selected model through Foundry Local,
 	 * reporting download/load progress via the model status. Idempotent: a load
 	 * already in flight (or the same model already loaded) is reused.
+	 *
+	 * CreaEditor: `allowDownload` is only true for {@link downloadModel}, which runs after the user
+	 * agreed to the download; a dictation start never downloads a model that is not on disk.
 	 */
-	private async _ensureModel(cacheDir: string, modelId: string): Promise<IModel> {
+	private async _ensureModel(cacheDir: string, modelId: string, allowDownload: boolean): Promise<IModel> {
 		if (this._model && this._loadedModelId === modelId) {
 			return this._model;
 		}
@@ -528,44 +884,10 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 				// The model cache state is unknown until the catalog is queried.
 				this._setStatus({ state: LocalTranscriptionModelState.Loading });
 
-				// Ensure the Foundry Local native runtime (N-API addon + core
-				// libraries) is available before loading the SDK. We do not ship
-				// it — the addon requires a newer glibc than our minimum supported
-				// Linux distros — so in packaged builds it is downloaded on demand
-				// from VS Code's CDN (per `product.dictationRuntime`) into a
-				// per-user cache and the SDK loader is pointed at it via env var.
-				// This is a no-op once cached. In dev builds (no product config)
-				// the SDK resolves its addon + core libs from node_modules, so we
-				// skip provisioning and leave the loader on its default path.
-				if (this._runtimeDownload) {
-					const nativeDir = await ensureFoundryLocalRuntime(runtimeCacheDir(cacheDir), this._runtimeDownload, cts.token);
-					process.env.VSCODE_FOUNDRY_LOCAL_NATIVE_DIR = nativeDir;
-				} else {
-					// CreaEditor: no CDN copy to download; use the runtime the build bundled, unpacked
-					// next to the archive (native code cannot load from inside `node_modules.asar`).
-					const bundledDir = findBundledFoundryLocalRuntime(dirname(FileAccess.asFileUri('').fsPath));
-					if (bundledDir) {
-						process.env.VSCODE_FOUNDRY_LOCAL_NATIVE_DIR = bundledDir;
-					}
-				}
-
-				if (!this._sdk) {
-					this._sdk = await import('foundry-local-sdk');
-				}
-				if (!this._manager) {
-					// Store downloaded model files under VS Code's cache dir so
-					// subsequent sessions load without re-downloading ("model
-					// management"). `createAsync` avoids blocking the event loop
-					// during native init.
-					this._manager = await this._sdk.FoundryLocalManager.createAsync({
-						appName: FOUNDRY_APP_NAME,
-						modelCacheDir: cacheDir,
-						logLevel: 'warn',
-					});
-				}
+				const manager = await this._ensureManager(cacheDir, cts.token);
 
 				const model = await withTimeout(
-					this._manager.catalog.getModel(modelId),
+					manager.catalog.getModel(modelId),
 					MODEL_CATALOG_TIMEOUT_MS,
 					`Foundry Local model catalog lookup timed out after ${MODEL_CATALOG_TIMEOUT_MS}ms.`
 				);
@@ -573,6 +895,9 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 
 				let didDownload = false;
 				if (!model.isCached) {
+					if (!allowDownload) {
+						throw new ModelNotInstalledError(modelId);
+					}
 					didDownload = true;
 					// Only now, having confirmed a cache miss, surface the
 					// `Downloading` status. Report it up front (progress 0) so the
@@ -718,6 +1043,14 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		// of the bytes it queues to native core.
 		const pcm = new Uint8Array(bytes.byteLength);
 		pcm.set(bytes);
+		if (this._segmented) {
+			// CreaEditor: segmented dictation (Whisper): cut at pauses, transcribe each utterance.
+			const samples = new Int16Array(pcm.buffer, 0, Math.floor(pcm.byteLength / 2));
+			for (const segment of this._segmenter?.push(samples) ?? []) {
+				this._enqueueSegment(segment, this._generation);
+			}
+			return;
+		}
 		if (this._session) {
 			// Route through the shared append queue so this live chunk lands
 			// after any still-draining buffered backlog (preserving order across
@@ -735,6 +1068,9 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 	async stop(): Promise<string> {
 		const generation = this._generation;
 		this._sessionActive = false;
+		if (this._segmented) {
+			return this._stopSegmented(generation);
+		}
 
 		// Always wait for the in-flight session open to settle. `_session` is
 		// assigned before `_openSession` finishes flushing the buffered audio it
@@ -843,5 +1179,7 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		this._pendingChunks = [];
 		this._appendChain = Promise.resolve();
 		this._runtimeError = undefined;
+		this._segmented = false;
+		this._resetSegmentedState();
 	}
 }

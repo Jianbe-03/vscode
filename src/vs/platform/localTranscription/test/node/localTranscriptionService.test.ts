@@ -4,8 +4,12 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as assert from 'assert';
+import * as fs from 'fs';
+import { tmpdir } from 'os';
+import { join } from '../../../../base/common/path.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../base/test/common/utils.js';
-import { selectCachedModelVariant } from '../../node/localTranscriptionService.js';
+import { getRandomTestPath } from '../../../../base/test/node/testUtils.js';
+import { hasCachedModelFiles, selectCachedModelVariant, toWhisperLanguage } from '../../node/localTranscriptionService.js';
 
 suite('LocalTranscriptionService', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -37,5 +41,26 @@ suite('LocalTranscriptionService', () => {
 		selectCachedModelVariant(model);
 
 		assert.strictEqual(selectionCount, 0);
+	});
+
+	test('finds an installed model in the cache by its alias, without the catalog', async () => {
+		const cache = getRandomTestPath(tmpdir(), 'vsctests', 'dictation-cache');
+		fs.mkdirSync(join(cache, 'Microsoft', 'openai-whisper-large-v3-turbo-generic-cpu-4', 'v4'), { recursive: true });
+		fs.mkdirSync(join(cache, 'Microsoft', 'openai-whisper-small-generic-cpu-4'), { recursive: true });
+		fs.writeFileSync(join(cache, 'foundry.modelinfo.json'), '{}');
+		try {
+			assert.deepStrictEqual({
+				whisper: await hasCachedModelFiles(cache, 'whisper-large-v3-turbo'),
+				emptyVariant: await hasCachedModelFiles(cache, 'whisper-small'),
+				missing: await hasCachedModelFiles(cache, 'nemotron-3.5-asr-streaming-0.6b'),
+				noCache: await hasCachedModelFiles(join(cache, 'missing'), 'whisper-large-v3-turbo'),
+			}, { whisper: true, emptyVariant: false, missing: false, noCache: false });
+		} finally {
+			fs.rmSync(cache, { recursive: true, force: true });
+		}
+	});
+
+	test('passes Whisper a bare language code, and no hint for automatic', () => {
+		assert.deepStrictEqual(['nl-NL', 'en', 'pt_BR', 'auto', '', undefined, 'not a language'].map(toWhisperLanguage), ['nl', 'en', 'pt', undefined, undefined, undefined, undefined]);
 	});
 });

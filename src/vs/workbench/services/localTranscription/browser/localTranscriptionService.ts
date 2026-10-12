@@ -6,7 +6,7 @@
 import { Event } from '../../../../base/common/event.js';
 import { VSBuffer } from '../../../../base/common/buffer.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
-import { ILocalTranscriptionModelStatus, ILocalTranscriptionResult, ILocalTranscriptionService, LocalTranscriptionModelState } from '../../../../platform/localTranscription/common/localTranscription.js';
+import { ILocalTranscriptionModelInstallState, ILocalTranscriptionModelStatus, ILocalTranscriptionResult, ILocalTranscriptionService, LocalTranscriptionModelState } from '../../../../platform/localTranscription/common/localTranscription.js';
 
 /**
  * Web/no-op implementation: on-device transcription requires a utility process,
@@ -27,6 +27,14 @@ export class NullLocalTranscriptionService implements ILocalTranscriptionService
 	}
 
 	async importModel(): Promise<never> {
+		throw new Error('On-device transcription is not supported in this environment.');
+	}
+
+	async getModelInstallState(): Promise<ILocalTranscriptionModelInstallState> {
+		return { installed: false };
+	}
+
+	async downloadModel(): Promise<void> {
 		throw new Error('On-device transcription is not supported in this environment.');
 	}
 

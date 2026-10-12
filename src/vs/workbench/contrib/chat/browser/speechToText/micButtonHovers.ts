@@ -8,7 +8,7 @@ import { escapeMarkdownSyntaxTokens, MarkdownString } from '../../../../../base/
 import { isWeb } from '../../../../../base/common/platform.js';
 import { localize } from '../../../../../nls.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
+import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
 import { DICTATION_MODEL_SETTING, resolveDictationBackend } from './chatSpeechToTextService.js';
 
 /**
@@ -39,7 +39,11 @@ function getDictationDescription(configurationService: IConfigurationService, we
 	if (resolveDictationBackend(modelId, policyModelId, web) === 'mai') {
 		return localize('dictation.hover.cloud', "Types what you say into the input. Transcribes in the cloud with the MAI speech model.");
 	}
+	// CreaEditor: Whisper is the default on-device model.
 	if (!modelId || modelId === DEFAULT_LOCAL_TRANSCRIPTION_MODEL) {
+		return localize('dictation.hover.whisper', "Types what you say into the input. Transcribes on-device with the Whisper Large speech model.");
+	}
+	if (modelId === NEMOTRON_LOCAL_TRANSCRIPTION_MODEL) {
 		return localize('dictation.hover.nemotronMultilingual', "Types what you say into the input. Transcribes on-device with the Nemotron 3.5 ASR multilingual model.");
 	}
 	return localize('dictation.hover.onDevice', "Types what you say into the input. Transcribes on-device with {0}.", modelId);
