@@ -256,7 +256,7 @@ Claude and Codex can each run on **several subscription accounts** (for example 
 
 | Command | What it does |
 | --- | --- |
-| **Add Claude Account** | Asks a name, then **Paste a Setup-Token** (run `claude setup-token` in a terminal and paste the token it prints; it is kept in the keychain) or **Sign In with the Browser** (the Claude CLI opens claude.ai; if that fails, CreaEditor offers to run the printed `claude auth login` command in a terminal, or to copy it in the Agents window). |
+| **Add Claude Account** | Asks a name, then **Paste a Setup-Token** (run `claude setup-token` in a terminal and paste the token it prints; it is kept in the keychain) or **Sign In with the Browser** (CreaEditor opens claude.ai and picks up the login when the page says you are set up; no terminal or separate Claude install needed; if it does not finish, **Sign In** again). |
 | **Add Codex Account** | Asks a name and opens the ChatGPT sign-in page. |
 | **Manage Subscription Accounts** | Lists the accounts per provider: sign in, refresh usage, rename, move up or down (the order in which they are tried), remove. |
 | **Show Subscription Usage** | Opens the usage page. |

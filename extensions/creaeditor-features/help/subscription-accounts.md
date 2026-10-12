@@ -32,7 +32,7 @@ To add a Claude account with a setup-token:
 2. In CreaEditor, run **Add Claude Account** and type a name, such as "Work".
 3. Choose **Paste a Setup-Token** and paste it. It is kept in the macOS keychain.
 
-With **Sign In with the Browser**, the Claude CLI opens claude.ai for you. If that fails, CreaEditor offers to run the printed `claude auth login` command in a terminal.
+With **Sign In with the Browser**, CreaEditor opens claude.ai in your browser. Sign in there; when the page says "You're all set up for Claude Code", the account shows as signed in in CreaEditor. You need no terminal and no separate Claude install: CreaEditor brings its own copy of Claude Code.
 
 > After installing a new CreaEditor build, macOS asks once for access to **CreaEditor Safe Storage** (where the tokens are kept). Choose **Always Allow**.
 
@@ -140,7 +140,7 @@ The two compaction settings apply to every agent host this computer connects to,
 
 - **macOS keeps asking about "CreaEditor Safe Storage".** Choose **Always Allow**. Without an Apple Developer ID the answer does not carry over to the next build, so it asks once after each update.
 - **A Claude account shows an error after adding it.** The setup-token was refused. Run `claude setup-token` again and replace it in **Manage Subscription Accounts**.
-- **Browser sign-in does not open.** Use the `claude auth login` command CreaEditor offers, in a terminal.
+- **Browser sign-in does not open, or does not finish.** Use **Sign In** on the account again. If your browser did not open, the notification has an **Open Sign-in Page** button.
 
 ## Related pages
 

@@ -931,7 +931,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 						status: 'signedOut',
 						usage: undefined,
 						// After a browser sign-in, say so instead of only showing the account signed out.
-						...(account.kind === 'login' && account.status === 'signingIn' ? { error: localize('claudeAccountLoginNotFound', "The browser sign-in finished, but Claude Code did not find this account's login. Run `CLAUDE_CONFIG_DIR=\"{0}\" claude auth login` in a terminal, then refresh the account.", this._configDir(id)) } : {}),
+						...(account.kind === 'login' && account.status === 'signingIn' ? { error: localize('claudeAccountLoginNotFound', "The browser sign-in finished, but CreaEditor could not confirm the account. Try Sign In again.") } : {}),
 					});
 					return;
 				}
@@ -1092,8 +1092,8 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		}
 	}
 
-	private _manualLoginError(dir: string): string {
-		return localize('claudeAccountManualLogin', "Run `CLAUDE_CONFIG_DIR=\"{0}\" claude auth login` in a terminal, then refresh the account.", dir);
+	private _signInUnfinishedError(): string {
+		return localize('claudeAccountSignInUnfinished', "Signing in did not finish. Try Sign In again.");
 	}
 
 	private async _signIn(id: string): Promise<void> {
@@ -1107,7 +1107,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 		const dir = await this._prepareConfigDir(id);
 		const cli = await this._sdkService.resolveCliExecutable?.();
 		if (!cli) {
-			this._update(id, { status: 'signedOut', error: this._manualLoginError(dir) });
+			this._update(id, { status: 'signedOut', error: this._signInUnfinishedError() });
 			return;
 		}
 		this._update(id, { status: 'signingIn', error: undefined, authUrl: undefined, acceptsAuthCode: undefined });
@@ -1150,7 +1150,7 @@ export class ClaudeSubscriptionAccounts extends Disposable implements ISubscript
 			await this._readAccount(id, true);
 			return;
 		}
-		this._update(id, { status: 'signedOut', authUrl: undefined, acceptsAuthCode: undefined, error: this._manualLoginError(dir) });
+		this._update(id, { status: 'signedOut', authUrl: undefined, acceptsAuthCode: undefined, error: this._signInUnfinishedError() });
 	}
 
 	/**

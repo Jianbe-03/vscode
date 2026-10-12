@@ -64,6 +64,9 @@ suite('claudeTransportMode', () => {
 			['third-party backend (bedrock)', { apiProvider: 'bedrock' }, true],
 			['third-party backend (vertex)', { apiProvider: 'vertex' }, true],
 			['enterprise gateway', { apiProvider: 'gateway' }, true],
+			// SDK 0.3.281 with a claude.ai login (`claude auth login`): no
+			// `tokenSource` at all, only who is signed in.
+			['claude.ai login without tokenSource', { email: 'someone@example.com', organization: 'Example', subscriptionType: 'Claude Team', apiProvider: 'firstParty' }, true],
 		];
 
 		test('maps observed SDK account reports onto one set-up answer', () => {

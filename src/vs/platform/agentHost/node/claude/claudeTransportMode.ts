@@ -99,6 +99,14 @@ export function isClaudeAccountSetUp(account: AccountInfo | undefined): boolean 
 	}
 	// `tokenSource` spells "no credential" as `'none'` rather than absence;
 	// `apiKeySource` has only ever been observed absent in that case.
-	return (account.tokenSource !== undefined && account.tokenSource !== 'none')
-		|| account.apiKeySource !== undefined;
+	if (account.apiKeySource !== undefined) {
+		return true;
+	}
+	if (account.tokenSource !== undefined) {
+		return account.tokenSource !== 'none';
+	}
+	// CreaEditor: SDK 0.3.281 answers a claude.ai login with only `email`,
+	// `organization`, `subscriptionType` and `apiProvider` (no `tokenSource`),
+	// and an empty config folder with `tokenSource: 'none'`.
+	return !!account.email || !!account.subscriptionType;
 }
