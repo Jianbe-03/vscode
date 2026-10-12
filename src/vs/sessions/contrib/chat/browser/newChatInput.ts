@@ -116,6 +116,7 @@ import { NewChatInputPasteTarget } from './newChatInputPasteTarget.js';
 import { getChatSessionType } from '../../../../workbench/contrib/chat/common/model/chatUri.js';
 import { ChatSpeechToTextState, DictationSettingId, IChatSpeechToTextService } from '../../../../workbench/contrib/chat/browser/speechToText/chatSpeechToTextService.js';
 import { setupDictationMicGlow } from '../../../../workbench/contrib/chat/browser/speechToText/dictationMicGlow.js';
+import { DictationListeningBar } from '../../../../workbench/contrib/chat/browser/speechToText/dictationListeningBar.js';
 import { IDictationOnboardingService } from '../../../../workbench/contrib/chat/browser/speechToText/dictationOnboarding.js';
 import { ChatVoiceInputModeAction, VoiceInputModeActionViewItem } from '../../../../workbench/contrib/chat/browser/voiceInputMode/voiceInputModeActionViewItem.js';
 import { IVoiceInputModeService } from '../../../../workbench/contrib/chat/browser/voiceInputMode/voiceInputMode.js';
@@ -776,6 +777,14 @@ export class NewChatInputWidget extends Disposable implements IHistoryNavigation
 			onDidClose: () => this._dismissPromptOptions(),
 		});
 		this._promptOptionsWidget.value.setState(this._promptOptionsState);
+
+		// CreaEditor: the dictation listening bar, directly above the input area while dictation
+		// listens into this composer.
+		this._register(this.instantiationService.createInstance(DictationListeningBar, {
+			container: dom.append(chatInputContainer, dom.$(`.dictation-listening-bar-container.${chatInputStackSlotClass}`)),
+			isDictatingHere: () => !!this._editor && isDictationActiveForEditor(this._editor),
+			onDidChangeDictationTarget: onDidChangeDictationEditor,
+		}, undefined));
 
 		// Input area inside the input slot
 		const inputAreaWrapper = dom.append(chatInputContainer, dom.$('.new-chat-input-area-wrapper'));

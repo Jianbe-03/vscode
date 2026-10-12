@@ -117,7 +117,8 @@ interface IWave {
 	readonly phase: number;
 }
 
-function readMicrophoneLevel(analyser: AnalyserNode | undefined, waveform: Uint8Array<ArrayBuffer> | undefined): number {
+/** Loudness (RMS, scaled so speech fills most of the range) of the analyser's latest audio, `0..1`. */
+export function readMicrophoneLevel(analyser: AnalyserNode | undefined, waveform: Uint8Array<ArrayBuffer> | undefined): number {
 	if (!analyser || !waveform) {
 		return 0;
 	}

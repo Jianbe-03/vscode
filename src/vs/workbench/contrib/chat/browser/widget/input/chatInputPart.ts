@@ -119,6 +119,7 @@ import { ChatVoiceInputModeAction, VoiceInputModeActionViewItem } from '../../vo
 import { ChatSpeechToTextConnectingAction, ChatSpeechToTextPreparingAction, ToggleChatSpeechToTextAction } from '../../actions/chatSpeechToTextActions.js';
 import { DictationActionViewItem } from '../../speechToText/dictationActionViewItem.js';
 import { DictationDownloadActionViewItem } from '../../speechToText/dictationDownloadActionViewItem.js';
+import { DictationListeningBar } from '../../speechToText/dictationListeningBar.js';
 import { ChatSpeechToTextState, IChatSpeechToTextService } from '../../speechToText/chatSpeechToTextService.js';
 import { IDictationOnboardingService } from '../../speechToText/dictationOnboarding.js';
 import { isDictationActiveForEditor, notifyDictationSubmitted, onDidChangeDictationEditor } from '../../speechToText/dictationSession.js';
@@ -3266,6 +3267,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 						dom.h('.chat-artifacts-widget-container@chatArtifactsWidgetContainer'),
 						dom.h('.chat-editing-session@chatEditingSessionWidgetContainer'),
 						dom.h(`.chat-getting-started-tip-container.${chatInputStackSlotClass}@chatGettingStartedTipContainer`),
+						// CreaEditor: the dictation listening bar, directly above the input.
+						dom.h(`.dictation-listening-bar-container.${chatInputStackSlotClass}@dictationListeningBarContainer`),
 						dom.h('.interactive-input-and-side-toolbar@inputAndSideToolbar', [
 							dom.h('.chat-input-container@inputContainer', [
 								dom.h('.chat-editor-container@editorContainer'),
@@ -3302,6 +3305,8 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 					dom.h('.chat-artifacts-widget-container@chatArtifactsWidgetContainer'),
 					dom.h('.chat-editing-session@chatEditingSessionWidgetContainer'),
 					dom.h(`.chat-getting-started-tip-container.${chatInputStackSlotClass}@chatGettingStartedTipContainer`),
+					// CreaEditor: the dictation listening bar, directly above the input.
+					dom.h(`.dictation-listening-bar-container.${chatInputStackSlotClass}@dictationListeningBarContainer`),
 					dom.h('.interactive-input-and-side-toolbar@inputAndSideToolbar', [
 						dom.h('.chat-input-container@inputContainer', [
 							dom.h('.chat-attachments-container@attachmentsContainer', [
@@ -3477,6 +3482,12 @@ export class ChatInputPart extends Disposable implements IHistoryNavigationWidge
 		};
 		this._register(Event.any(this.speechToTextService.onDidChangeState, this.speechToTextService.onDidChangePreparingModel, onDidChangeDictationEditor)(updateDictationContextKeys));
 		updateDictationContextKeys();
+		// CreaEditor: the listening bar above the input, while dictation listens into it.
+		this._register(this.instantiationService.createInstance(DictationListeningBar, {
+			container: elements.dictationListeningBarContainer,
+			isDictatingHere: () => isDictationActiveForEditor(this._inputEditor),
+			onDidChangeDictationTarget: onDidChangeDictationEditor,
+		}, undefined));
 
 		SuggestController.get(this._inputEditor)?.forceRenderingAbove();
 		options.overflowWidgetsDomNode?.classList.add('hideSuggestTextIcons');
