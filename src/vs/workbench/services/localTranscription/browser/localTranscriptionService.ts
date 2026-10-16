@@ -46,6 +46,8 @@ export class NullLocalTranscriptionService implements ILocalTranscriptionService
 		throw new Error('On-device transcription is not supported in this environment.');
 	}
 
+	async setLanguage(): Promise<void> { }
+
 	async pushAudio(_chunk: VSBuffer): Promise<void> { }
 
 	async stop(): Promise<string> {

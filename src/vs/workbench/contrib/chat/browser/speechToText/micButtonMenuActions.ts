@@ -18,6 +18,8 @@ import { CONFIGURE_DICTATION_INSTRUCTIONS_ACTION_ID, CONFIGURE_VOICE_INSTRUCTION
 import { DictationSettingId } from './chatSpeechToTextService.js';
 import { SHOW_DICTATION_ONBOARDING_COMMAND } from './dictationOnboarding.js';
 
+/** CreaEditor: command that lets the user choose the spoken dictation language. */
+export const PICK_DICTATION_LANGUAGE_COMMAND = 'workbench.action.chat.pickDictationLanguage';
 /** CreaEditor: command that switches the on-device dictation model (Whisper Small or Large). */
 export const SWITCH_DICTATION_MODEL_COMMAND = 'workbench.action.chat.switchDictationModel';
 /** Command that opens the microphone picker shared by dictation and Voice Mode. */
@@ -78,6 +80,15 @@ function createSwitchDictationModelAction(commandService: ICommandService): IAct
 	});
 }
 
+/** CreaEditor: "Spoken Language..." entry for dictation: the language Whisper is told the user speaks. */
+function createPickDictationLanguageAction(commandService: ICommandService): IAction {
+	return toAction({
+		id: PICK_DICTATION_LANGUAGE_COMMAND,
+		label: localize('dictation.pickLanguage', "Spoken Language..."),
+		run: () => commandService.executeCommand(PICK_DICTATION_LANGUAGE_COMMAND),
+	});
+}
+
 function createShowDictationOnboardingAction(commandService: ICommandService): IAction {
 	return toAction({
 		id: SHOW_DICTATION_ONBOARDING_COMMAND,
@@ -135,6 +146,7 @@ export function getDictationContextMenuActions(commandService: ICommandService, 
 			createShowDictationOnboardingAction(commandService),
 			createSelectMicrophoneAction(commandService),
 			createSwitchDictationModelAction(commandService),
+			createPickDictationLanguageAction(commandService),
 		],
 	);
 }

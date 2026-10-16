@@ -4,17 +4,34 @@
  *--------------------------------------------------------------------------------------------*/
 
 // CreaEditor: a slim bar docked directly above the chat input while dictation is listening, with a
-// live audio-level graph and what dictation is doing ("Listening…" or "Transcribing…").
+// live audio-level graph, what dictation is doing ("Listening…" or "Transcribing…") and, for Whisper,
+// the spoken language as a chip that switches it.
 
 import * as dom from '../../../../../base/browser/dom.js';
 import { Event } from '../../../../../base/common/event.js';
 import { Disposable, IDisposable, MutableDisposable, toDisposable } from '../../../../../base/common/lifecycle.js';
 import { localize } from '../../../../../nls.js';
 import { IAccessibilityService } from '../../../../../platform/accessibility/common/accessibility.js';
+import { getDefaultHoverDelegate } from '../../../../../base/browser/ui/hover/hoverDelegateFactory.js';
+import { IHoverService } from '../../../../../platform/hover/browser/hover.js';
+import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
+import { language as displayLanguage } from '../../../../../base/common/platform.js';
 import { ChatInputStackSlot, setChatInputStackSlot } from '../widget/input/chatInputStack.js';
 import { ChatSpeechToTextState, IChatSpeechToTextService } from './chatSpeechToTextService.js';
 import { readMicrophoneLevel } from './dictationOnboarding.js';
 import './media/dictationListeningBar.css';
+
+/** CreaEditor: the command that switches the spoken dictation language (its shortcut shows in the chip's hover). */
+export const TOGGLE_DICTATION_LANGUAGE_COMMAND = 'workbench.action.chat.toggleDictationLanguage';
+
+/** The name of a language code in the display language, such as `nl` → "Dutch". */
+function getLanguageName(code: string): string {
+	try {
+		return new Intl.DisplayNames([displayLanguage], { type: 'language' }).of(code) ?? code;
+	} catch {
+		return code;
+	}
+}
 
 /** One stroke and the air beside it, the same rhythm as the dictation introduction's waveform. */
 const BAR_WIDTH = 1;
@@ -48,6 +65,7 @@ export class DictationListeningBar extends Disposable {
 	private readonly graph: HTMLElement;
 	private readonly meterFill: HTMLElement;
 	private readonly label: HTMLElement;
+	private readonly languageChip: HTMLButtonElement;
 	private readonly animationFrame = this._register(new MutableDisposable<IDisposable>());
 
 	private bars: HTMLElement[] = [];
@@ -62,6 +80,8 @@ export class DictationListeningBar extends Disposable {
 		observerCtor: typeof ResizeObserver | undefined,
 		@IChatSpeechToTextService private readonly speechToTextService: IChatSpeechToTextService,
 		@IAccessibilityService private readonly accessibilityService: IAccessibilityService,
+		@IHoverService hoverService: IHoverService,
+		@IKeybindingService private readonly keybindingService: IKeybindingService,
 	) {
 		super();
 
@@ -75,6 +95,12 @@ export class DictationListeningBar extends Disposable {
 		this.label = dom.append(root, dom.$('span.dictation-listening-label'));
 		this.label.setAttribute('role', 'status');
 		this.label.setAttribute('aria-live', 'polite');
+		this.languageChip = dom.append(root, dom.$<HTMLButtonElement>('button.dictation-listening-language'));
+		this.languageChip.type = 'button';
+		// Keep the focus (and the caret) in the input the user is dictating into.
+		this._register(dom.addDisposableListener(this.languageChip, dom.EventType.MOUSE_DOWN, e => e.preventDefault()));
+		this._register(dom.addDisposableListener(this.languageChip, dom.EventType.CLICK, () => this.speechToTextService.toggleSpokenLanguage()));
+		this._register(hoverService.setupManagedHover(getDefaultHoverDelegate('element'), this.languageChip, () => this.getLanguageTooltip()));
 		this._register(toDisposable(() => {
 			setChatInputStackSlot(container, ChatInputStackSlot.Empty);
 			root.remove();
@@ -89,6 +115,7 @@ export class DictationListeningBar extends Disposable {
 			this.speechToTextService.onDidChangeState,
 			this.speechToTextService.onDidChangePreparingModel,
 			this.speechToTextService.onDidChangeTranscribingSegment,
+			this.speechToTextService.onDidChangeSpokenLanguage,
 			this.options.onDidChangeDictationTarget,
 		)(() => this.update()));
 		this._register(this.accessibilityService.onDidChangeReducedMotion(() => this.update()));
@@ -113,8 +140,22 @@ export class DictationListeningBar extends Disposable {
 		this.label.textContent = service.isTranscribingSegment
 			? localize('dictation.listeningBar.transcribing', "Transcribing…")
 			: localize('dictation.listeningBar.listening', "Listening…");
+		const spokenLanguage = service.spokenLanguage;
+		this.languageChip.hidden = !spokenLanguage;
+		if (spokenLanguage) {
+			this.languageChip.textContent = spokenLanguage.toUpperCase();
+			this.languageChip.setAttribute('aria-label', localize('dictation.listeningBar.languageAria', "Spoken language: {0}. Switch Language", getLanguageName(spokenLanguage)));
+		}
 		this.layoutGraph();
 		this.start();
+	}
+
+	private getLanguageTooltip(): string {
+		const name = getLanguageName(this.speechToTextService.spokenLanguage ?? 'en');
+		const keybinding = this.keybindingService.lookupKeybinding(TOGGLE_DICTATION_LANGUAGE_COMMAND)?.getLabel();
+		return keybinding
+			? localize('dictation.listeningBar.languageTooltipKey', "Spoken language: {0}. Click or press {1} to switch; it applies from the next sentence.", name, keybinding)
+			: localize('dictation.listeningBar.languageTooltip', "Spoken language: {0}. Click to switch; it applies from the next sentence.", name);
 	}
 
 	/** Rebuild the strokes for the current width, keeping the most recent levels. */

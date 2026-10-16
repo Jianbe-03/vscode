@@ -436,6 +436,8 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 	private _segmenter: SpeechSegmenter | undefined;
 	/** Whisper client of the active session, once its model is loaded. */
 	private _audioClient: AudioClient | undefined;
+	/** CreaEditor: the spoken-language hint of the current session; {@link setLanguage} changes it. */
+	private _sessionLanguage: string | undefined;
 	/** Serializes segment transcriptions, in the order they were spoken. */
 	private _segmentChain: Promise<void> = Promise.resolve();
 	/** Utterances that ended and are not transcribed yet. */
@@ -547,6 +549,7 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 
 		const model = options.model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL;
 		const language = options.language;
+		this._sessionLanguage = language;
 		// CreaEditor: Whisper cannot stream; cut the audio at pauses and transcribe each utterance.
 		this._segmented = isSegmentedTranscriptionModel(model);
 		if (this._segmented) {
@@ -563,6 +566,20 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		this._openPromise.catch(() => { /* status already reported */ });
 	}
 
+	async setLanguage(language: string | undefined): Promise<void> {
+		this._sessionLanguage = language;
+		const client = this._audioClient;
+		if (!client) {
+			return;
+		}
+		const whisperLanguage = toWhisperLanguage(language);
+		if (whisperLanguage) {
+			client.settings.language = whisperLanguage;
+		} else {
+			delete client.settings.language;
+		}
+	}
+
 	/**
 	 * CreaEditor: load the (installed) Whisper model and keep its audio client for the segments of
 	 * this session. Audio captured meanwhile is already being segmented; its segments wait on
@@ -575,7 +592,8 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 				return;
 			}
 			const client = model.createAudioClient();
-			const whisperLanguage = toWhisperLanguage(language);
+			// A language switched while the model loaded wins over the one the session started with.
+			const whisperLanguage = toWhisperLanguage(this._sessionLanguage ?? language);
 			if (whisperLanguage) {
 				client.settings.language = whisperLanguage;
 			}

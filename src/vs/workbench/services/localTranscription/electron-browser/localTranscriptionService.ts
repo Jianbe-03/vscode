@@ -87,6 +87,7 @@ export class LocalTranscriptionService {
 	getModelInstallState(options: { cacheDir: string; model?: string }) { return this._getProxy().getModelInstallState(this._withEnvironment(options)); }
 	downloadModel(options: { cacheDir: string; model?: string }) { return this._getProxy().downloadModel(this._withEnvironment(options)); }
 	getSystemLanguages() { return this._getProxy().getSystemLanguages(); }
+	setLanguage(language: string | undefined) { return this._getProxy().setLanguage(language); }
 	start(options: { cacheDir: string; model?: string; language?: string }) {
 		return this._getProxy().start({ ...this._withEnvironment(options), language: options.language });
 	}

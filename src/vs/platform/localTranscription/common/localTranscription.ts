@@ -210,6 +210,12 @@ export interface ILocalTranscriptionService {
 	 */
 	start(options: ILocalTranscriptionModelOptions & { readonly language?: string }): Promise<void>;
 
+	/**
+	 * CreaEditor: change the spoken-language hint of the running Whisper session; it applies from the
+	 * next utterance on. Ignored by streaming (Nemotron) sessions and when no session runs.
+	 */
+	setLanguage(language: string | undefined): Promise<void>;
+
 	/** Append captured audio (raw little-endian PCM16 mono 16 kHz). */
 	pushAudio(chunk: VSBuffer): Promise<void>;
 

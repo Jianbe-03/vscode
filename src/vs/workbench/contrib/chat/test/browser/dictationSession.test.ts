@@ -7,7 +7,7 @@ import assert from 'assert';
 import sinon from 'sinon';
 import { mainWindow } from '../../../../../base/browser/window.js';
 import { DeferredPromise, timeout } from '../../../../../base/common/async.js';
-import { Emitter } from '../../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { Position } from '../../../../../editor/common/core/position.js';
 import { Range } from '../../../../../editor/common/core/range.js';
@@ -74,6 +74,10 @@ suite('DictationSession', () => {
 				await cancelBarrier;
 			},
 			async pickLocalModel() { },
+			get spokenLanguage() { return undefined; },
+			onDidChangeSpokenLanguage: Event.None,
+			async toggleSpokenLanguage() { },
+			async pickSpokenLanguage() { },
 			logDictationAccuracy() { },
 		};
 		return {

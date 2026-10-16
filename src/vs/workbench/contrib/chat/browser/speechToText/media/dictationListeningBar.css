@@ -83,3 +83,34 @@
 	color: var(--vscode-descriptionForeground);
 	white-space: nowrap;
 }
+
+/* --- Language chip: the spoken language (Whisper), a quiet control-tier button that switches it. --- */
+
+.dictation-listening-language {
+	flex: 0 0 auto;
+	padding: 0 var(--vscode-spacing-size60);
+	font: inherit;
+	font-size: var(--vscode-fontSize-label2);
+	font-weight: 600;
+	line-height: var(--vscode-spacing-size160);
+	letter-spacing: 0.04em;
+	color: var(--vscode-descriptionForeground);
+	background: transparent;
+	border: 1px solid var(--vscode-widget-border, var(--vscode-input-border, transparent));
+	border-radius: var(--vscode-cornerRadius-small);
+	cursor: pointer;
+}
+
+.dictation-listening-language:hover {
+	color: var(--vscode-foreground);
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.dictation-listening-language:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: 1px;
+}
+
+.dictation-listening-language[hidden] {
+	display: none;
+}

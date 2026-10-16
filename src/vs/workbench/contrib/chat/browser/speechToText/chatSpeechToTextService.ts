@@ -15,13 +15,16 @@ import { ICommandService } from '../../../../../platform/commands/common/command
 import { IAction, toAction } from '../../../../../base/common/actions.js';
 import { IContextKey, IContextKeyService } from '../../../../../platform/contextkey/common/contextkey.js';
 import { IConfigurationService } from '../../../../../platform/configuration/common/configuration.js';
+import { Extensions as ConfigurationExtensions, IConfigurationRegistry } from '../../../../../platform/configuration/common/configurationRegistry.js';
+import { Registry } from '../../../../../platform/registry/common/platform.js';
+import { getActiveWindow } from '../../../../../base/browser/dom.js';
 import { INotificationService, Severity } from '../../../../../platform/notification/common/notification.js';
 import { IProgress, IProgressService, IProgressStep, Progress, ProgressLocation } from '../../../../../platform/progress/common/progress.js';
 import { DeferredPromise, raceCancellation, raceTimeout } from '../../../../../base/common/async.js';
 import { CancellationToken, CancellationTokenSource } from '../../../../../base/common/cancellation.js';
 import { ILogService } from '../../../../../platform/log/common/log.js';
 import { localize } from '../../../../../nls.js';
-import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
+import { IStorageService, StorageScope, StorageTarget } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
 import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, ILocalTranscriptionModelInstallState, ILocalTranscriptionModelStatus, ILocalTranscriptionService, isSegmentedTranscriptionModel, LocalTranscriptionModelState, MODEL_NOT_INSTALLED_ERROR_CODE, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL, SMALL_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
@@ -137,6 +140,9 @@ const WHISPER_MODELS: readonly { readonly id: string; readonly sizeMb: number }[
 function formatDownloadSizeGb(sizeMb: number): string {
 	return (sizeMb / 1000).toFixed(1);
 }
+
+/** CreaEditor: the non-English language the spoken-language toggle switches back to. */
+const LAST_OTHER_SPOKEN_LANGUAGE_KEY = 'dictation.lastOtherLanguage';
 
 /** `dictation.model` sentinel selecting the cloud transcription backend. */
 export const DICTATION_MAI_MODEL_ID = 'mai';
@@ -414,6 +420,22 @@ export interface IChatSpeechToTextService {
 	 */
 	pickLocalModel(): Promise<void>;
 
+	/**
+	 * CreaEditor: the language Whisper is told the user speaks (an ISO 639-1 code such as `nl`), or
+	 * `undefined` when no Whisper dictation runs. Whisper cannot detect it; this is the main language,
+	 * and words from other languages are kept only where Whisper manages to.
+	 */
+	readonly spokenLanguage: string | undefined;
+	/** CreaEditor: fires when {@link spokenLanguage} changes. */
+	readonly onDidChangeSpokenLanguage: Event<string | undefined>;
+	/**
+	 * CreaEditor: switch the spoken language between English and the other language (the last one the
+	 * user chose, or the first non-English system language); during dictation from the next sentence.
+	 */
+	toggleSpokenLanguage(): Promise<void>;
+	/** CreaEditor: choose the spoken language from the list of `dictation.language`. */
+	pickSpokenLanguage(): Promise<void>;
+
 	/** The backend selected for the current/most-recent session (`nemo` or `mai`). */
 	readonly currentBackend: string;
 
@@ -435,6 +457,13 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 
 	private readonly _onDidChangeState = this._register(new Emitter<ChatSpeechToTextState>());
 	readonly onDidChangeState = this._onDidChangeState.event;
+
+	private readonly _onDidChangeSpokenLanguage = this._register(new Emitter<string | undefined>());
+	readonly onDidChangeSpokenLanguage = this._onDidChangeSpokenLanguage.event;
+	private _spokenLanguage: string | undefined;
+	get spokenLanguage(): string | undefined { return this._spokenLanguage; }
+	/** CreaEditor: the operating system's preferred languages, read once. */
+	private _systemLanguages: Promise<string[]> | undefined;
 
 	private readonly _onDidUpdateTranscript = this._register(new Emitter<IChatDictationTranscript>());
 	readonly onDidUpdateTranscript = this._onDidUpdateTranscript.event;
@@ -643,6 +672,9 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		this._register(this._configurationService.onDidChangeConfiguration(e => {
 			if (e.affectsConfiguration(ENABLED_SETTING) || e.affectsConfiguration(DICTATION_MODEL_SETTING)) {
 				this._updateConfiguredContextKey();
+			}
+			if ((e.affectsConfiguration(DictationSettingId.Language) || e.affectsConfiguration('agents.voice.language')) && this._spokenLanguage !== undefined) {
+				void this._applySpokenLanguage();
 			}
 		}));
 		this._register(this._chatEntitlementService.onDidChangeEntitlement(() => {
@@ -1123,11 +1155,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		const segmented = isSegmentedTranscriptionModel(model);
 		this._localFinalTimeoutMs = segmented ? SEGMENTED_FINAL_TIMEOUT_MS : NEMO_FINAL_TIMEOUT_MS;
 		const language = segmented
-			? resolveWhisperDictationLanguage(
-				this._configurationService.getValue(DictationSettingId.Language),
-				this._configurationService.getValue('agents.voice.language'),
-				[...window.navigator.languages, ...await local.getSystemLanguages().catch(() => [])],
-			)
+			? await this._resolveSpokenLanguage()
 			: resolveDictationLanguage(
 				this._configurationService.getValue('agents.voice.language'),
 				window.navigator.language,
@@ -1135,6 +1163,9 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		await local.start({ cacheDir, model, language });
 		if (generation !== this._sessionGeneration) {
 			return;
+		}
+		if (segmented) {
+			this._setSpokenLanguage(language);
 		}
 
 		// The model loads in the utility process in the background (start()
@@ -1281,6 +1312,77 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 				this._notificationService.info(localize('chatStt.installModel.doneToo', "{0} is installed too. To use it, right-click the microphone and choose Switch Speech Model.", name));
 			}
 		}
+	}
+
+	/** CreaEditor: the Whisper language for `dictationLanguage` (default: the `dictation.language` setting). */
+	private async _resolveSpokenLanguage(dictationLanguage: unknown = this._configurationService.getValue(DictationSettingId.Language)): Promise<string> {
+		this._systemLanguages ??= this._localTranscription.getSystemLanguages().catch(() => []);
+		return resolveWhisperDictationLanguage(
+			dictationLanguage,
+			this._configurationService.getValue('agents.voice.language'),
+			[...getActiveWindow().navigator.languages, ...await this._systemLanguages],
+		);
+	}
+
+	private _setSpokenLanguage(language: string | undefined): void {
+		if (this._spokenLanguage !== language) {
+			this._spokenLanguage = language;
+			this._onDidChangeSpokenLanguage.fire(language);
+		}
+	}
+
+	/** CreaEditor: hand a changed language setting to the running Whisper session. */
+	private async _applySpokenLanguage(): Promise<void> {
+		const language = await this._resolveSpokenLanguage();
+		if (this._spokenLanguage === undefined) {
+			return; // Dictation ended meanwhile.
+		}
+		this._setSpokenLanguage(language);
+		await this._localTranscription.setLanguage(language).catch(err => this._logService.warn('[chat-stt] could not switch the dictation language', err));
+	}
+
+	async toggleSpokenLanguage(): Promise<void> {
+		const current = this._spokenLanguage ?? await this._resolveSpokenLanguage();
+		if (current !== 'en') {
+			this._storageService.store(LAST_OTHER_SPOKEN_LANGUAGE_KEY, current, StorageScope.APPLICATION, StorageTarget.USER);
+			await this._configurationService.updateValue(DictationSettingId.Language, 'en');
+			return;
+		}
+		const other = this._storageService.get(LAST_OTHER_SPOKEN_LANGUAGE_KEY, StorageScope.APPLICATION) ?? await this._resolveSpokenLanguage('auto');
+		if (other === 'en') {
+			// Nothing to switch to yet: let the user choose the other language once.
+			return this.pickSpokenLanguage();
+		}
+		await this._configurationService.updateValue(DictationSettingId.Language, other);
+	}
+
+	async pickSpokenLanguage(): Promise<void> {
+		interface ILanguagePickItem extends IQuickPickItem {
+			readonly language: string;
+		}
+		const schema = Registry.as<IConfigurationRegistry>(ConfigurationExtensions.Configuration).getConfigurationProperties()[DictationSettingId.Language];
+		const languages = (schema?.enum ?? []) as string[];
+		const labels = schema?.enumItemLabels ?? [];
+		const configured = this._configurationService.getValue<string>(DictationSettingId.Language) || 'auto';
+		const automatic = await this._resolveSpokenLanguage('auto');
+		const items = languages.map((language, index): ILanguagePickItem => ({
+			language,
+			label: labels[index] ?? language,
+			description: language === 'auto'
+				? localize('chatStt.pickLanguage.auto', "Now {0}", labels[languages.indexOf(automatic)] ?? automatic)
+				: (language === configured ? localize('chatStt.pickLanguage.current', "Current") : undefined),
+		}));
+		const picked = await this._quickInputService.pick(items, {
+			placeHolder: localize('chatStt.pickLanguage.placeholder', "The language you speak; words in other languages are kept where Whisper can"),
+			activeItem: items.find(item => item.language === configured),
+		});
+		if (!picked || picked.language === configured) {
+			return;
+		}
+		if (picked.language !== 'en' && picked.language !== 'auto') {
+			this._storageService.store(LAST_OTHER_SPOKEN_LANGUAGE_KEY, picked.language, StorageScope.APPLICATION, StorageTarget.USER);
+		}
+		await this._configurationService.updateValue(DictationSettingId.Language, picked.language);
 	}
 
 	async pickLocalModel(): Promise<void> {
@@ -2041,6 +2143,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 			this._transcriptionClient.disconnect();
 		}
 		this._setTranscribingSegment(false);
+		this._setSpokenLanguage(undefined);
 		// Do not retain transcript text beyond the session that produced it.
 		this._finalizedText = '';
 		this._deltaText = '';

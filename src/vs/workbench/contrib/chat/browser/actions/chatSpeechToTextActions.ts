@@ -29,7 +29,8 @@ import { IChatWidgetService } from '../chat.js';
 import { ChatSpeechToTextState, DictationSettingId, IChatSpeechToTextService } from '../speechToText/chatSpeechToTextService.js';
 import { buildMicrophoneOptions, IDictationOnboardingService, RESET_DICTATION_ONBOARDING_COMMAND, SHOW_DICTATION_ONBOARDING_COMMAND } from '../speechToText/dictationOnboarding.js';
 import { cancelDictation, isDictating, startDictation, stopDictation } from '../speechToText/dictationSession.js';
-import { SWITCH_DICTATION_MODEL_COMMAND } from '../speechToText/micButtonMenuActions.js';
+import { PICK_DICTATION_LANGUAGE_COMMAND, SWITCH_DICTATION_MODEL_COMMAND } from '../speechToText/micButtonMenuActions.js';
+import { TOGGLE_DICTATION_LANGUAGE_COMMAND } from '../speechToText/dictationListeningBar.js';
 
 // Gate on `ChatContextKeys.enabled` so the dictation UI and its commands are
 // hidden (not just disabled) when the user has turned AI features off; without
@@ -407,6 +408,50 @@ class SwitchDictationModelAction extends Action2 {
 	}
 }
 
+/** CreaEditor: switch the spoken dictation language between English and the other language. */
+class ToggleDictationLanguageAction extends Action2 {
+	static readonly ID = TOGGLE_DICTATION_LANGUAGE_COMMAND;
+
+	constructor() {
+		super({
+			id: ToggleDictationLanguageAction.ID,
+			title: localize2('chat.speechToText.toggleLanguage', "Switch Dictation Language"),
+			category: CHAT_CATEGORY,
+			f1: true,
+			precondition: ChatSpeechToTextConfigured,
+			keybinding: {
+				// While dictating, so it never takes the shortcut from the editor otherwise.
+				weight: KeybindingWeight.WorkbenchContrib + 1,
+				when: ChatContextKeys.speechToTextRecording,
+				primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.KeyJ,
+			},
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IChatSpeechToTextService).toggleSpokenLanguage();
+	}
+}
+
+/** CreaEditor: choose the spoken dictation language from the list. */
+class PickDictationLanguageAction extends Action2 {
+	static readonly ID = PICK_DICTATION_LANGUAGE_COMMAND;
+
+	constructor() {
+		super({
+			id: PickDictationLanguageAction.ID,
+			title: localize2('chat.speechToText.pickLanguage', "Choose Dictation Language"),
+			category: CHAT_CATEGORY,
+			f1: true,
+			precondition: ChatSpeechToTextConfigured,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IChatSpeechToTextService).pickSpokenLanguage();
+	}
+}
+
 class CancelChatSpeechToTextAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.cancelSpeechToText';
 
@@ -448,5 +493,7 @@ export function registerChatSpeechToTextActions(): DisposableStore {
 	store.add(registerAction2(ResetChatSpeechToTextIntroductionAction));
 	store.add(registerAction2(SelectSpeechToTextMicrophoneAction));
 	store.add(registerAction2(SwitchDictationModelAction));
+	store.add(registerAction2(ToggleDictationLanguageAction));
+	store.add(registerAction2(PickDictationLanguageAction));
 	return store;
 }

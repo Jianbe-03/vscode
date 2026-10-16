@@ -121,6 +121,7 @@ type LocalStartupTestService = {
 	_environmentService: { cacheHome: URI };
 	_configurationService: { getValue: () => string };
 	_emitTranscript: () => void;
+	_setSpokenLanguage: (language: string | undefined) => void;
 	_handleModelStatus: (status: ILocalTranscriptionModelStatus) => void;
 	_startLocalSession: (window: Window & typeof globalThis, generation: number) => Promise<void>;
 };
@@ -475,6 +476,7 @@ suite('ChatSpeechToTextService', () => {
 		service._environmentService = { cacheHome: URI.file('/cache') };
 		service._configurationService = { getValue: () => '' };
 		service._emitTranscript = () => { };
+		service._setSpokenLanguage = () => { };
 		service._handleModelStatus = modelStatus => statuses.push(modelStatus);
 
 		try {
@@ -1072,6 +1074,39 @@ suite('ChatSpeechToTextService', () => {
 		} finally {
 			service._modelInstall.dispose();
 		}
+	});
+
+	test('switches the spoken language between English and the other language', async () => {
+		type LanguageToggleTestService = {
+			_spokenLanguage: string | undefined;
+			_configurationService: { updateValue: (key: string, value: string) => Promise<void> };
+			_storageService: { get: (key: string) => string | undefined; store: (key: string, value: string) => void };
+			_resolveSpokenLanguage: (language?: unknown) => Promise<string>;
+			pickSpokenLanguage: () => Promise<void>;
+			toggleSpokenLanguage: () => Promise<void>;
+		};
+		const run = async (current: string, stored: string | undefined, automatic: string) => {
+			const calls: string[] = [];
+			const service = Object.create(ChatSpeechToTextService.prototype) as LanguageToggleTestService;
+			service._spokenLanguage = current;
+			service._configurationService = { updateValue: async (_key, value) => { calls.push(`setting:${value}`); } };
+			service._storageService = { get: () => stored, store: (_key, value) => { calls.push(`remember:${value}`); } };
+			service._resolveSpokenLanguage = async () => automatic;
+			service.pickSpokenLanguage = async () => { calls.push('pick'); };
+			await service.toggleSpokenLanguage();
+			return calls;
+		};
+		assert.deepStrictEqual({
+			dutchToEnglish: await run('nl', undefined, 'nl'),
+			englishToRemembered: await run('en', 'de', 'nl'),
+			englishToSystem: await run('en', undefined, 'nl'),
+			englishOnly: await run('en', undefined, 'en'),
+		}, {
+			dutchToEnglish: ['remember:nl', 'setting:en'],
+			englishToRemembered: ['setting:de'],
+			englishToSystem: ['setting:nl'],
+			englishOnly: ['pick'],
+		});
 	});
 
 	test('resolves the Whisper language hint so mixed Dutch and English stays as spoken', () => {

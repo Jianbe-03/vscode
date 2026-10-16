@@ -45,11 +45,20 @@ The first time you dictate, macOS asks whether CreaEditor may use the microphone
 
 ### Choose your language
 
-Whisper writes in the language it is told; told nothing, it writes English and translates other languages into English. The setting **Dictation: Language** (`dictation.language`) picks the language:
+Whisper cannot tell by itself which language you speak: it writes in the language it is told, your **main language**. Words from another language survive only partly, so switch the main language when you switch language:
 
-- **Automatic** (the default) uses the Voice Mode language when you set one, otherwise the first language other than English in the display language and in your system's preferred languages (macOS: **System Settings > General > Language & Region**). With English and Dutch there, it uses Dutch.
-- When you mix English with another language, choose the other language, for example **Dutch**. English sentences stay English.
-- Choose **English** only when you speak English alone.
+- **Click the language chip** in the listening bar (for example **NL** or **EN**), or press **Cmd+Alt+J** while dictating. It switches between English and your other language, from the next sentence on, and is remembered.
+- **Choose another language:** right-click the microphone and choose **Spoken Language...** (or run **Choose Dictation Language**). The toggle then switches between English and that language.
+- **Automatic** (the default of **Dictation: Language**, `dictation.language`) uses the Voice Mode language when you set one, otherwise the first language other than English in the display language and your system's preferred languages (macOS: **System Settings > General > Language & Region**).
+
+What to expect with mixed speech, tested with Whisper Large:
+
+| You say | Main language Dutch | Main language English |
+| --- | --- | --- |
+| A Dutch sentence with English words ("Kun je de pull request reviewen?") | kept exactly | translated into English |
+| An English sentence with a Dutch word ("Update the gemeente field") | the Dutch word can be dropped | kept, sometimes misspelled |
+
+So set the language of the sentence you are about to say. Whisper Small follows the main language more strictly than Large: with Dutch set, it also turns English sentences into Dutch.
 
 ## Good to know
 

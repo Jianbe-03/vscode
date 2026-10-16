@@ -5,11 +5,13 @@
 
 import assert from 'assert';
 import { mainWindow } from '../../../../../base/browser/window.js';
-import { Emitter } from '../../../../../base/common/event.js';
+import { Emitter, Event } from '../../../../../base/common/event.js';
 import { DisposableStore } from '../../../../../base/common/lifecycle.js';
 import { mock } from '../../../../../base/test/common/mock.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { TestAccessibilityService } from '../../../../../platform/accessibility/test/common/testAccessibilityService.js';
+import { NullHoverService } from '../../../../../platform/hover/test/browser/nullHoverService.js';
+import { MockKeybindingService } from '../../../../../platform/keybinding/test/common/mockKeybindingService.js';
 import { ChatSpeechToTextState, IChatSpeechToTextService } from '../../browser/speechToText/chatSpeechToTextService.js';
 import { DictationListeningBar } from '../../browser/speechToText/dictationListeningBar.js';
 
@@ -41,6 +43,8 @@ suite('DictationListeningBar', () => {
 			override get isPreparingModel() { return preparing; }
 			override get isTranscribingSegment() { return transcribing; }
 			override get analyserNode() { return undefined; }
+			override readonly onDidChangeSpokenLanguage = Event.None;
+			override get spokenLanguage() { return undefined; }
 		};
 		const stack = mainWindow.document.createElement('div');
 		stack.className = 'chat-input-stack';
@@ -51,7 +55,7 @@ suite('DictationListeningBar', () => {
 			container: slot,
 			isDictatingHere: () => here,
 			onDidChangeDictationTarget: onDidChangeDictationTarget.event,
-		}, TestResizeObserver, service, new TestAccessibilityService()));
+		}, TestResizeObserver, service, new TestAccessibilityService(), NullHoverService, new MockKeybindingService()));
 
 		const snapshot = () => ({
 			docked: slot.classList.contains('chat-input-stack-docked'),
@@ -83,6 +87,48 @@ suite('DictationListeningBar', () => {
 			transcribingSegment: { docked: true, label: 'Transcribing…' },
 			otherInput: { docked: false, label: '' },
 			stopped: { docked: false, label: '' },
+		});
+	});
+
+	test('shows the spoken language as a chip that switches it', () => {
+		const disposables = store.add(new DisposableStore());
+		const onDidChangeSpokenLanguage = disposables.add(new Emitter<string | undefined>());
+		let spokenLanguage: string | undefined = 'nl';
+		let toggles = 0;
+		const service = new class extends mock<IChatSpeechToTextService>() {
+			override readonly onDidChangeState = Event.None;
+			override readonly onDidChangePreparingModel = Event.None;
+			override readonly onDidChangeTranscribingSegment = Event.None;
+			override readonly onDidChangeSpokenLanguage = onDidChangeSpokenLanguage.event;
+			override get state() { return ChatSpeechToTextState.Recording; }
+			override get isPreparingModel() { return false; }
+			override get isTranscribingSegment() { return false; }
+			override get analyserNode() { return undefined; }
+			override get spokenLanguage() { return spokenLanguage; }
+			override async toggleSpokenLanguage() { toggles++; }
+		};
+		const slot = mainWindow.document.createElement('div');
+		disposables.add(new DictationListeningBar({
+			container: slot,
+			isDictatingHere: () => true,
+			onDidChangeDictationTarget: Event.None,
+		}, TestResizeObserver, service, new TestAccessibilityService(), NullHoverService, new MockKeybindingService()));
+		const chip = () => slot.querySelector<HTMLButtonElement>('.dictation-listening-language')!;
+
+		const dutch = { hidden: chip().hidden, text: chip().textContent };
+		chip().click();
+		spokenLanguage = 'en';
+		onDidChangeSpokenLanguage.fire('en');
+		const english = { hidden: chip().hidden, text: chip().textContent };
+		spokenLanguage = undefined;
+		onDidChangeSpokenLanguage.fire(undefined);
+		const noWhisper = { hidden: chip().hidden };
+
+		assert.deepStrictEqual({ dutch, english, noWhisper, toggles }, {
+			dutch: { hidden: false, text: 'NL' },
+			english: { hidden: false, text: 'EN' },
+			noWhisper: { hidden: true },
+			toggles: 1,
 		});
 	});
 });
