@@ -168,6 +168,18 @@
             ]
           },
           {
+            "id": "issueAgents",
+            "title": "%step.issueAgents.title%",
+            "description": "%step.issueAgents.description%",
+            "media": {
+              "image": "media/issue-agents-picker.png",
+              "altText": "%step.issueAgents.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.openAgentsWindow"
+            ]
+          },
+          {
             "id": "chatGroups",
             "title": "%step.chatGroups.title%",
             "description": "%step.chatGroups.description%",
@@ -262,6 +274,19 @@
             },
             "completionEvents": [
               "onCommand:creaeditor.notifications.setUp"
+            ]
+          },
+          {
+            "id": "dictation",
+            "title": "%step.dictation.title%",
+            "description": "%step.dictation.description%",
+            "media": {
+              "image": "media/dictation-choose-model.png",
+              "altText": "%step.dictation.title%"
+            },
+            "completionEvents": [
+              "onCommand:workbench.action.chat.toggleSpeechToText",
+              "onCommand:workbench.action.chat.switchDictationModel"
             ]
           },
           {

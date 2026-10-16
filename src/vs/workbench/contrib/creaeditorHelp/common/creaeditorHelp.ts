@@ -25,6 +25,7 @@ export const CREAEDITOR_HELP_PAGES: readonly string[] = [
 	'costs-and-budgets',
 	'subscription-accounts',
 	'agents-window',
+	'issue-agents',
 	'remote-access',
 	'creaeditor-server',
 	'delegate-to-server',

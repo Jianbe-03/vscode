@@ -14,6 +14,7 @@ This guide explains each of those features: what it does, how it works, and how 
 | [Costs and Budgets](costs-and-budgets.md) | See what every chat and issue cost on the **AI Costs** page, and set budgets with alerts and a hard stop. |
 | [Subscription Accounts](subscription-accounts.md) | Pool several Claude and Codex subscriptions behind one model, switch accounts when one is used up, and save money by compacting idle Claude chats. |
 | [The Agents Window](agents-window.md) | The window made for agents: sessions, the Agents tree, chat groups that make several pull requests at once, Jira, and more. |
+| [Director, Issue to PR and Code Reviewer](issue-agents.md) | Turn issues into reviewed pull requests: which of the three agents to use when, and how, step by step. |
 | [Remote Access](remote-access.md) | Follow and steer the agents on your Mac from your phone. |
 | [CreaEditor Server](creaeditor-server.md) | Run agents on a computer that is always on, and use it from your laptop and phone. |
 | [Delegate to Server](delegate-to-server.md) | Hand a running chat, with its code, to your server, then bring the results back. |
