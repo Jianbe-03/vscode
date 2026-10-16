@@ -29,7 +29,7 @@ When in doubt: one issue means **Issue to PR**, more than one means **Director**
 
 All three are in the **Agent** picker below the input box in the Agents window.
 
-<img src="images/issue-agents-picker.png" alt="The Agent picker with Code Reviewer, Director and Issue to PR" width="560">
+<img src="images/issue-agents-picker.png" alt="The Agent picker with Code Reviewer, Director and Issue to PR" width="440">
 
 ### Issue to PR: one issue
 

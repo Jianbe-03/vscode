@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="600" viewBox="0 0 960 600" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
-	<rect width="960" height="600" rx="16" fill="#16152D"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="704" viewBox="0 0 960 704" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<rect width="960" height="704" rx="16" fill="#16152D"/>
 	<text x="40" y="72" fill="#F8F7FA" font-size="26" font-weight="600">CreaEditor Guide</text>
 	<text x="40" y="104" fill="#BCBBCA" font-size="15">Every feature, step by step, with pictures. Help &gt; CreaEditor Guide.</text>
 
@@ -31,5 +31,12 @@
 		<rect x="492" y="448" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
 		<text x="516" y="484" fill="#F8F7FA" font-weight="600">Notifications</text>
 		<text x="516" y="510" fill="#BCBBCA" font-size="14">A push message when a chat needs you</text>
+
+		<rect x="40" y="552" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="64" y="588" fill="#F8F7FA" font-weight="600">Director, Issue to PR and Code Reviewer</text>
+		<text x="64" y="614" fill="#BCBBCA" font-size="14">Issues to reviewed pull requests</text>
+		<rect x="492" y="552" width="428" height="88" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+		<text x="516" y="588" fill="#F8F7FA" font-weight="600">Dictation</text>
+		<text x="516" y="614" fill="#BCBBCA" font-size="14">Talk instead of type, Whisper Small or Large</text>
 	</g>
 </svg>
