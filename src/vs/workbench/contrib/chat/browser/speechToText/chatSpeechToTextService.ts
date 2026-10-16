@@ -1300,16 +1300,18 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 					description: id === SMALL_LOCAL_TRANSCRIPTION_MODEL
 						? localize('chatStt.pickModel.small', "Faster, good for clear speech")
 						: localize('chatStt.pickModel.large', "Most accurate, slower"),
-					detail: id === current && installed
-						? localize('chatStt.pickModel.inUse', "In use")
-						: installed
-							? localize('chatStt.pickModel.installed', "Installed")
-							: localize('chatStt.pickModel.notInstalled', "Not installed: downloads about {0} GB once", formatDownloadSizeGb(sizeMb)),
-					picked: id === current,
+					detail: installed
+						? (id === current ? localize('chatStt.pickModel.inUse', "In use") : localize('chatStt.pickModel.installed', "Installed"))
+						: (id === current
+							? localize('chatStt.pickModel.selectedNotInstalled', "Selected, not installed yet: downloads about {0} GB once", formatDownloadSizeGb(sizeMb))
+							: localize('chatStt.pickModel.notInstalled', "Not installed: downloads about {0} GB once", formatDownloadSizeGb(sizeMb))),
 				};
 			});
 		})();
-		const picked = await this._quickInputService.pick(items, { placeHolder: localize('chatStt.pickModel.placeholder', "Choose the speech model for dictation") });
+		const picked = await this._quickInputService.pick(items, {
+			placeHolder: localize('chatStt.pickModel.placeholder', "Choose the speech model for dictation"),
+			activeItem: items.then(all => all.find(item => item.model === current) ?? all[0]),
+		});
 		if (!picked || (picked.model === current && picked.installed)) {
 			return;
 		}
