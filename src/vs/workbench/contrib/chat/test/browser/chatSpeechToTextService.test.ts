@@ -165,20 +165,24 @@ type AudioPushTestService = {
 };
 
 type ModelConsentTestService = {
-	_configurationService: { getValue: () => string };
+	_configurationService: { getValue: () => string; updateValue?: (key: string, value: string) => Promise<void> };
+	_sessionGeneration: number;
 	_environmentService: { cacheHome: URI };
 	_logService: { warn: (message: string) => void; error: (message: string) => void };
 	_modelInstall: MutableDisposable<CancellationTokenSource>;
 	_localTranscription: {
 		getModelInstallState: () => Promise<ILocalTranscriptionModelInstallState>;
-		downloadModel: () => Promise<void>;
+		downloadModel: (options: { model?: string }) => Promise<void>;
 		onDidChangeModelStatus: Event<ILocalTranscriptionModelStatus>;
 		cancel: () => Promise<void>;
 	};
-	_dialogService: { confirm: (confirmation: { message: string; detail?: string; primaryButton?: string }) => Promise<{ confirmed: boolean }> };
+	_dialogService: {
+		confirm: (confirmation: { message: string; detail?: string; primaryButton?: string }) => Promise<{ confirmed: boolean }>;
+		prompt?: (prompt: { message: string; buttons: { label: string; run: () => readonly string[] }[] }) => Promise<{ result: readonly string[] | undefined }>;
+	};
 	_progressService: { withProgress: (options: unknown, task: (progress: IProgress<IProgressStep>) => Promise<void>) => Promise<void> };
 	_notificationService: { info: (message: string) => void; notify: (notification: { message: string }) => void; error: (message: string) => void };
-	_ensureLocalModelInstalled: () => Promise<boolean>;
+	_ensureLocalModelInstalled: (generation?: number) => Promise<boolean>;
 };
 
 suite('ChatSpeechToTextService', () => {
@@ -991,51 +995,64 @@ suite('ChatSpeechToTextService', () => {
 		]);
 	});
 
-	test('asks before downloading the on-device model, and downloads only on Download', async () => {
-		const run = async (installed: boolean, confirmed: boolean) => {
+	test('asks which Whisper model to download, and downloads only the chosen ones', async () => {
+		// `choice` is the index of the button pressed, or undefined for Cancel.
+		const run = async (installed: boolean, choice: number | undefined, stoppedWhileChecking = false) => {
 			const calls: string[] = [];
-			const downloaded = new DeferredPromise<void>();
+			const settled = new DeferredPromise<void>();
 			const service = Object.create(ChatSpeechToTextService.prototype) as ModelConsentTestService;
-			service._configurationService = { getValue: () => '' };
+			service._configurationService = { getValue: () => '', updateValue: async (_key, value) => { calls.push(`setting:${value}`); } };
+			service._sessionGeneration = 1;
 			service._environmentService = { cacheHome: URI.file('/cache') };
 			service._logService = { warn: message => calls.push(`warn:${message}`), error: message => calls.push(`error:${message}`) };
 			service._modelInstall = new MutableDisposable<CancellationTokenSource>();
 			service._localTranscription = {
-				getModelInstallState: async () => ({ installed, sizeMb: 1284 }),
-				downloadModel: async () => { calls.push('download'); downloaded.complete(); },
+				getModelInstallState: async () => {
+					if (stoppedWhileChecking) {
+						service._sessionGeneration++;
+					}
+					return { installed };
+				},
+				downloadModel: async options => { calls.push(`download:${options.model}`); },
 				onDidChangeModelStatus: Event.None,
 				cancel: async () => { calls.push('cancel'); },
 			};
 			service._dialogService = {
-				confirm: async confirmation => {
-					calls.push(`confirm:${confirmation.message}|${confirmation.detail}|${confirmation.primaryButton}`);
-					return { confirmed };
+				confirm: async () => { calls.push('confirm'); return { confirmed: false }; },
+				prompt: async prompt => {
+					calls.push(`prompt:${prompt.message}|${prompt.buttons.map(button => button.label).join(',')}`);
+					return { result: choice === undefined ? undefined : prompt.buttons[choice].run() };
 				},
 			};
-			service._progressService = { withProgress: async (_options, task) => { calls.push('progress'); await task({ report: () => { } }); } };
+			service._progressService = { withProgress: async (_options, task) => { await task({ report: () => { } }); } };
+			const done = (message: string) => { calls.push(message); if (/installed/.test(message) && (choice !== 2 || / too\./.test(message))) { settled.complete(); } };
 			service._notificationService = {
-				info: message => calls.push(`info:${message}`),
-				notify: notification => calls.push(`notify:${notification.message}`),
+				info: message => done(`info:${message}`),
+				notify: notification => done(`notify:${notification.message}`),
 				error: message => calls.push(`error:${message}`),
 			};
-			const canStart = await service._ensureLocalModelInstalled();
-			if (confirmed && !installed) {
-				await downloaded.p;
-				await new Promise(resolve => setTimeout(resolve, 0));
+			const canStart = await service._ensureLocalModelInstalled(1);
+			if (choice !== undefined && !installed && !stoppedWhileChecking) {
+				await settled.p;
 			}
-			const installInProgress = service._modelInstall.value !== undefined;
 			service._modelInstall.dispose();
-			return { canStart, calls, installInProgress };
+			return { canStart, calls };
 		};
-		const prompt = 'confirm:Install the Whisper Large Speech Model?|Dictation needs the Whisper Large speech model (about 1.3 GB, downloaded once from Microsoft\'s Foundry Local catalog). It runs on this computer; your audio never leaves it.|&&Download';
+		const prompt = 'prompt:Download a Speech Model for Dictation?|Whisper &&Small (Faster),Whisper &&Large (More Accurate),&&Both';
 		assert.deepStrictEqual({
-			installed: await run(true, false),
-			cancelled: await run(false, false),
-			download: await run(false, true),
+			installed: await run(true, undefined),
+			stoppedWhileChecking: await run(false, 0, true),
+			cancelled: await run(false, undefined),
+			small: await run(false, 0),
+			large: await run(false, 1),
+			both: await run(false, 2),
 		}, {
-			installed: { canStart: true, calls: [], installInProgress: false },
-			cancelled: { canStart: false, calls: [prompt], installInProgress: false },
-			download: { canStart: false, calls: [prompt, 'progress', 'download', 'notify:Whisper is installed. Start dictation again to talk.'], installInProgress: false },
+			installed: { canStart: true, calls: [] },
+			stoppedWhileChecking: { canStart: false, calls: [] },
+			cancelled: { canStart: false, calls: [prompt] },
+			small: { canStart: false, calls: [prompt, 'download:whisper-small', 'setting:whisper-small', 'notify:Whisper Small is installed. Start dictation again to talk.'] },
+			large: { canStart: false, calls: [prompt, 'download:whisper-large-v3-turbo', 'notify:Whisper Large is installed. Start dictation again to talk.'] },
+			both: { canStart: false, calls: [prompt, 'download:whisper-small', 'setting:whisper-small', 'notify:Whisper Small is installed. Start dictation again to talk.', 'download:whisper-large-v3-turbo', 'info:Whisper Large is installed too. To use it, right-click the microphone and choose Switch Speech Model.'] },
 		});
 	});
 

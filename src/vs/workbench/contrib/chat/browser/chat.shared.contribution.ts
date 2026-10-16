@@ -35,7 +35,7 @@ import { SyncDescriptor } from '../../../../platform/instantiation/common/descri
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService, ServicesAccessor } from '../../../../platform/instantiation/common/instantiation.js';
 import { IJSONContributionRegistry, Extensions as JSONExtensions } from '../../../../platform/jsonschemas/common/jsonContributionRegistry.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL } from '../../../../platform/localTranscription/common/localTranscription.js';
+import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL, SMALL_LOCAL_TRANSCRIPTION_MODEL } from '../../../../platform/localTranscription/common/localTranscription.js';
 import { McpAccessValue, McpAutoStartValue, mcpAccessConfig, mcpAllowedServersConfig, mcpAppsEnabledConfig, mcpAutoStartConfig, mcpDeniedServersConfig, mcpGalleryServiceEnablementConfig, mcpGalleryServiceUrlConfig } from '../../../../platform/mcp/common/mcpManagement.js';
 import { AgentNetworkFilterService, IAgentNetworkFilterService } from '../../../../platform/networkFilter/common/networkFilterService.js';
 import { AgentNetworkDomainSettingId } from '../../../../platform/networkFilter/common/settings.js';
@@ -361,19 +361,22 @@ configurationRegistry.registerConfiguration({
 		},
 		'dictation.model': {
 			type: 'string',
-			// CreaEditor: Whisper Large v3 Turbo is the default; Nemotron stays selectable.
+			// CreaEditor: Whisper Large v3 Turbo is the default, Whisper Small the faster choice; Nemotron stays selectable.
 			enum: [
 				DEFAULT_LOCAL_TRANSCRIPTION_MODEL,
+				SMALL_LOCAL_TRANSCRIPTION_MODEL,
 				NEMOTRON_LOCAL_TRANSCRIPTION_MODEL,
 				DICTATION_MAI_MODEL_ID,
 			],
 			enumItemLabels: [
 				nls.localize('dictation.model.whisper.label', "Whisper Large v3 Turbo — On-Device"),
+				nls.localize('dictation.model.whisperSmall.label', "Whisper Small — On-Device, Faster"),
 				nls.localize('dictation.model.nemotronMultilingual.label', "Nemotron 3.5 ASR (Multilingual) — On-Device"),
 				nls.localize('dictation.model.mai.label', "MAI — Cloud"),
 			],
 			markdownEnumDescriptions: [
 				nls.localize('dictation.model.whisper', "OpenAI Whisper Large v3 Turbo, run on-device through Microsoft Foundry Local. The most accurate option, also when you mix languages in one sentence: set `#dictation.language#` to the language you speak besides English. Text appears per sentence, at each pause. About 1.3 GB, downloaded once after you agree to it; no audio leaves the device."),
+				nls.localize('dictation.model.whisperSmall', "OpenAI Whisper Small, run on-device through Microsoft Foundry Local. Several times faster than Whisper Large and a little less accurate; good for clear speech. About 0.4 GB, downloaded once after you agree to it; no audio leaves the device. Switch at any time: right-click the microphone and choose **Switch Speech Model...**."),
 				nls.localize('dictation.model.nemotronMultilingual', "NVIDIA Nemotron 3.5 multilingual streaming RNN-T, run on-device through Microsoft Foundry Local. Works offline; no audio leaves the device. Automatic language selection follows the Voice Mode language setting; when that setting is Automatic, dictation uses the configured display language when supported, then the system or browser locale, with model detection as a fallback. Downloaded on first use and cached on disk."),
 				nls.localize('dictation.model.mai', "Cloud transcription through the same Microsoft AI voice service used by Voice Mode. Requires a network connection and GitHub sign-in; audio is streamed to the service."),
 			],

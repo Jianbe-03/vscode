@@ -73,6 +73,7 @@ suite('DictationSession', () => {
 				onDidChangeState.fire(state);
 				await cancelBarrier;
 			},
+			async pickLocalModel() { },
 			logDictationAccuracy() { },
 		};
 		return {
@@ -164,6 +165,24 @@ suite('DictationSession', () => {
 			isDictating: false,
 			isActiveForEditor: false,
 		});
+	});
+
+	test('stopping while dictation is still starting cancels the start instead of transcribing', async () => {
+		const { service } = createService('hello world', true);
+		const editor = store.add(createTestCodeEditor(store.add(createTextModel(''))));
+		const starting = new DeferredPromise<void>();
+		const calls: string[] = [];
+		service.start = () => starting.p;
+		const cancel = service.cancel;
+		service.cancel = async () => { calls.push('cancel'); await cancel(); starting.complete(); };
+		const stopAndTranscribe = service.stopAndTranscribe;
+		service.stopAndTranscribe = async () => { calls.push('stopAndTranscribe'); return stopAndTranscribe(); };
+
+		const started = startDictation(service, editor, mainWindow, new NullLogService());
+		await stopDictation();
+		await started;
+
+		assert.deepStrictEqual({ calls, isDictating: isDictating(), value: editor.getValue() }, { calls: ['cancel'], isDictating: false, value: '' });
 	});
 
 	test('stops only when the submitted editor owns dictation', async () => {

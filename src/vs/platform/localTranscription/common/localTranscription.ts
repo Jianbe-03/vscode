@@ -19,6 +19,12 @@ export const localTranscriptionChannelName = 'localTranscription';
  */
 export const DEFAULT_LOCAL_TRANSCRIPTION_MODEL = 'whisper-large-v3-turbo';
 
+/**
+ * CreaEditor: Whisper Small (Foundry Local alias), the faster alternative to {@link DEFAULT_LOCAL_TRANSCRIPTION_MODEL}:
+ * about a third of its size and several times quicker, a little less accurate.
+ */
+export const SMALL_LOCAL_TRANSCRIPTION_MODEL = 'whisper-small';
+
 /** CreaEditor: the streaming Nemotron model upstream VS Code uses; still selectable in `dictation.model`. */
 export const NEMOTRON_LOCAL_TRANSCRIPTION_MODEL = 'nemotron-3.5-asr-streaming-0.6b';
 

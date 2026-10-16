@@ -29,6 +29,7 @@ import { IChatWidgetService } from '../chat.js';
 import { ChatSpeechToTextState, DictationSettingId, IChatSpeechToTextService } from '../speechToText/chatSpeechToTextService.js';
 import { buildMicrophoneOptions, IDictationOnboardingService, RESET_DICTATION_ONBOARDING_COMMAND, SHOW_DICTATION_ONBOARDING_COMMAND } from '../speechToText/dictationOnboarding.js';
 import { cancelDictation, isDictating, startDictation, stopDictation } from '../speechToText/dictationSession.js';
+import { SWITCH_DICTATION_MODEL_COMMAND } from '../speechToText/micButtonMenuActions.js';
 
 // Gate on `ChatContextKeys.enabled` so the dictation UI and its commands are
 // hidden (not just disabled) when the user has turned AI features off; without
@@ -387,6 +388,25 @@ class ResetChatSpeechToTextIntroductionAction extends Action2 {
 	}
 }
 
+/** CreaEditor: switch the on-device dictation model between Whisper Small and Whisper Large. */
+class SwitchDictationModelAction extends Action2 {
+	static readonly ID = SWITCH_DICTATION_MODEL_COMMAND;
+
+	constructor() {
+		super({
+			id: SwitchDictationModelAction.ID,
+			title: localize2('chat.speechToText.switchModel', "Switch Dictation Speech Model"),
+			category: CHAT_CATEGORY,
+			f1: true,
+			precondition: ChatSpeechToTextConfigured,
+		});
+	}
+
+	async run(accessor: ServicesAccessor): Promise<void> {
+		await accessor.get(IChatSpeechToTextService).pickLocalModel();
+	}
+}
+
 class CancelChatSpeechToTextAction extends Action2 {
 	static readonly ID = 'workbench.action.chat.cancelSpeechToText';
 
@@ -427,5 +447,6 @@ export function registerChatSpeechToTextActions(): DisposableStore {
 	store.add(registerAction2(ShowChatSpeechToTextIntroductionAction));
 	store.add(registerAction2(ResetChatSpeechToTextIntroductionAction));
 	store.add(registerAction2(SelectSpeechToTextMicrophoneAction));
+	store.add(registerAction2(SwitchDictationModelAction));
 	return store;
 }

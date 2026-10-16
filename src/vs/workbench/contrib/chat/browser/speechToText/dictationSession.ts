@@ -479,6 +479,13 @@ export async function stopDictation(): Promise<void> {
 		return;
 	}
 	setActiveDictation(undefined);
+	if (active.service.state === ChatSpeechToTextState.Idle) {
+		// CreaEditor: still starting (checking the model, or asking to install it): stopping cancels
+		// the start, so no install prompt or recording follows once the user already stopped.
+		active.disposables.dispose();
+		await active.service.cancel();
+		return;
+	}
 	const promise = finalizeDictation(active);
 	setFinalizingDictation({ editor: active.editor, promise });
 	try {

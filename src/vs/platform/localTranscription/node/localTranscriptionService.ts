@@ -492,6 +492,11 @@ export class LocalTranscriptionService extends Disposable implements ILocalTrans
 		if (this._model && this._loadedModelId === modelId) {
 			return { installed: true };
 		}
+		// CreaEditor: no files on disk means not installed; answer at once, so the install prompt shows
+		// as soon as dictation starts instead of after the (online, up to 30 s) catalog lookup.
+		if (!await hasCachedModelFiles(options.cacheDir, modelId)) {
+			return { installed: false };
+		}
 		try {
 			const manager = await this._ensureManager(options.cacheDir, CancellationToken.None);
 			const model = await withTimeout(

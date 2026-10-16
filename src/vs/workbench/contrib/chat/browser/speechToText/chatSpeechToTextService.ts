@@ -24,8 +24,9 @@ import { localize } from '../../../../../nls.js';
 import { IStorageService, StorageScope } from '../../../../../platform/storage/common/storage.js';
 import { ITelemetryService } from '../../../../../platform/telemetry/common/telemetry.js';
 import { IEnvironmentService } from '../../../../../platform/environment/common/environment.js';
-import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, ILocalTranscriptionModelStatus, ILocalTranscriptionService, isSegmentedTranscriptionModel, LocalTranscriptionModelState, MODEL_NOT_INSTALLED_ERROR_CODE, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
+import { DEFAULT_LOCAL_TRANSCRIPTION_MODEL, ILocalTranscriptionModelInstallState, ILocalTranscriptionModelStatus, ILocalTranscriptionService, isSegmentedTranscriptionModel, LocalTranscriptionModelState, MODEL_NOT_INSTALLED_ERROR_CODE, NEMOTRON_LOCAL_TRANSCRIPTION_MODEL, SMALL_LOCAL_TRANSCRIPTION_MODEL } from '../../../../../platform/localTranscription/common/localTranscription.js';
 import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { IQuickInputService, IQuickPickItem } from '../../../../../platform/quickinput/common/quickInput.js';
 import { IProductService } from '../../../../../platform/product/common/productService.js';
 import { IAuthenticationService } from '../../../../services/authentication/common/authentication.js';
 import { AccessibilitySignal, IAccessibilitySignalService } from '../../../../../platform/accessibilitySignal/browser/accessibilitySignalService.js';
@@ -123,8 +124,19 @@ export const enum DictationSettingId {
 	Language = 'dictation.language',
 }
 
-/** CreaEditor: Whisper Large v3 Turbo's download size, when the catalog cannot be read. */
-const WHISPER_DOWNLOAD_SIZE_MB = 1284;
+/**
+ * CreaEditor: the Whisper models dictation offers, fastest first, with their download size in MB
+ * (from the Foundry Local catalog). Small is several times faster; Large is the most accurate.
+ */
+const WHISPER_MODELS: readonly { readonly id: string; readonly sizeMb: number }[] = [
+	{ id: SMALL_LOCAL_TRANSCRIPTION_MODEL, sizeMb: 438 },
+	{ id: DEFAULT_LOCAL_TRANSCRIPTION_MODEL, sizeMb: 1284 },
+];
+
+/** CreaEditor: a download size in MB as the GB figure the install prompts show. */
+function formatDownloadSizeGb(sizeMb: number): string {
+	return (sizeMb / 1000).toFixed(1);
+}
 
 /** `dictation.model` sentinel selecting the cloud transcription backend. */
 export const DICTATION_MAI_MODEL_ID = 'mai';
@@ -396,6 +408,12 @@ export interface IChatSpeechToTextService {
 	/** Abort an in-progress recording without keeping the transcript. */
 	cancel(): Promise<void>;
 
+	/**
+	 * CreaEditor: let the user choose the on-device Whisper model (Small or Large), downloading the
+	 * chosen one first, after asking, when it is not installed yet.
+	 */
+	pickLocalModel(): Promise<void>;
+
 	/** The backend selected for the current/most-recent session (`nemo` or `mai`). */
 	readonly currentBackend: string;
 
@@ -596,6 +614,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 		@IPromptsService private readonly _promptsService: IPromptsService,
 		@IChatEntitlementService private readonly _chatEntitlementService: IChatEntitlementService,
 		@IDialogService private readonly _dialogService: IDialogService,
+		@IQuickInputService private readonly _quickInputService: IQuickInputService,
 	) {
 		super();
 		this._recordingContextKey = ChatContextKeys.speechToTextRecording.bindTo(contextKeyService);
@@ -860,7 +879,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 
 		// CreaEditor: never download the on-device model without the user's consent; dictation starts
 		// once it is installed.
-		if (backend === 'nemo' && !await this._ensureLocalModelInstalled()) {
+		if (backend === 'nemo' && !await this._ensureLocalModelInstalled(generation)) {
 			return;
 		}
 		if (generation !== this._sessionGeneration) {
@@ -1152,53 +1171,173 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 
 	/** CreaEditor: the model's name in the install prompt and its notifications. */
 	private _getModelDisplayName(model: string | undefined): string {
+		if (model === SMALL_LOCAL_TRANSCRIPTION_MODEL) {
+			return localize('chatStt.whisperSmallName', "Whisper Small");
+		}
 		return isSegmentedTranscriptionModel(model)
 			? localize('chatStt.whisperName', "Whisper Large")
 			: (model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL);
 	}
 
+	/** CreaEditor: whether `model` is on disk, or `undefined` when that could not be checked. */
+	private async _readModelInstallState(model: string | undefined): Promise<ILocalTranscriptionModelInstallState | undefined> {
+		try {
+			return await this._localTranscription.getModelInstallState({ cacheDir: this._getModelCacheDir(), model });
+		} catch (err) {
+			this._logService.warn('[chat-stt] could not check whether the dictation model is installed', err);
+			return undefined;
+		}
+	}
+
 	/**
 	 * CreaEditor: whether the on-device model is installed, so dictation can start. When it is not,
-	 * asks (in a modal dialog) to download it; on Download it is downloaded in the background with a
-	 * progress notification, and dictation does not start: the user starts it again once it is
-	 * installed. Nothing is downloaded without that consent.
+	 * asks (in a modal dialog) to download it: for Whisper the user chooses Small (faster), Large (more
+	 * accurate) or both. The download runs in the background with a progress notification, and
+	 * dictation does not start: the user starts it again once it is installed. Nothing is downloaded
+	 * without that consent. When `generation` is given and dictation was stopped while the check ran,
+	 * nothing is asked.
 	 */
-	private async _ensureLocalModelInstalled(): Promise<boolean> {
+	private async _ensureLocalModelInstalled(generation?: number): Promise<boolean> {
 		const model = this._getModelId();
 		const name = this._getModelDisplayName(model);
 		if (this._modelInstall.value) {
 			this._notificationService.info(localize('chatStt.modelStillDownloading', "The {0} speech model is still downloading. Start dictation again once it is installed.", name));
 			return false;
 		}
-		const options = { cacheDir: this._getModelCacheDir(), model };
-		let sizeMb: number | undefined;
-		try {
-			const state = await this._localTranscription.getModelInstallState(options);
-			if (state.installed) {
-				return true;
-			}
-			sizeMb = state.sizeMb;
-		} catch (err) {
-			this._logService.warn('[chat-stt] could not check whether the dictation model is installed', err);
+		const state = await this._readModelInstallState(model);
+		if (generation !== undefined && generation !== this._sessionGeneration) {
+			return false;
 		}
-		const sizeGb = ((sizeMb ?? (isSegmentedTranscriptionModel(model) ? WHISPER_DOWNLOAD_SIZE_MB : 0)) / 1000).toFixed(1);
+		if (state?.installed) {
+			return true;
+		}
+		if (isSegmentedTranscriptionModel(model)) {
+			const models = await this._askWhisperModels();
+			if (models) {
+				void this._installLocalModels(models);
+			}
+			return false;
+		}
 		const { confirmed } = await this._dialogService.confirm({
 			type: Severity.Info,
 			message: localize('chatStt.installModel.title', "Install the {0} Speech Model?", name),
-			detail: sizeMb !== undefined || isSegmentedTranscriptionModel(model)
-				? localize('chatStt.installModel.detail', "Dictation needs the {0} speech model (about {1} GB, downloaded once from Microsoft's Foundry Local catalog). It runs on this computer; your audio never leaves it.", name, sizeGb)
+			detail: state?.sizeMb !== undefined
+				? localize('chatStt.installModel.detail', "Dictation needs the {0} speech model (about {1} GB, downloaded once from Microsoft's Foundry Local catalog). It runs on this computer; your audio never leaves it.", name, formatDownloadSizeGb(state.sizeMb))
 				: localize('chatStt.installModel.detailNoSize', "Dictation needs the {0} speech model (downloaded once from Microsoft's Foundry Local catalog). It runs on this computer; your audio never leaves it.", name),
 			primaryButton: localize({ key: 'chatStt.installModel.download', comment: ['&& denotes a mnemonic'] }, "&&Download"),
 			cancelButton: localize('chatStt.installModel.cancel', "Cancel"),
 		});
 		if (confirmed) {
-			void this._downloadLocalModel(options, name);
+			void this._installLocalModels([model ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL]);
 		}
 		return false;
 	}
 
+	/** CreaEditor: asks which Whisper models to download; `undefined` when the user cancels. */
+	private async _askWhisperModels(): Promise<readonly string[] | undefined> {
+		const [small, large] = WHISPER_MODELS;
+		const { result } = await this._dialogService.prompt<readonly string[] | undefined>({
+			type: Severity.Info,
+			message: localize('chatStt.chooseModel.title', "Download a Speech Model for Dictation?"),
+			detail: localize('chatStt.chooseModel.detail', "Dictation needs a Whisper speech model, downloaded once from Microsoft's Foundry Local catalog. It runs on this computer; your audio never leaves it.\n\nWhisper Small (about {0} GB) is fast and good for clear speech.\nWhisper Large (about {1} GB) is the most accurate, also when you mix languages, but slower.\n\nDownload both to switch at any time: right-click the microphone and choose Switch Speech Model.", formatDownloadSizeGb(small.sizeMb), formatDownloadSizeGb(large.sizeMb)),
+			buttons: [
+				{ label: localize({ key: 'chatStt.chooseModel.small', comment: ['&& denotes a mnemonic'] }, "Whisper &&Small (Faster)"), run: () => [small.id] },
+				{ label: localize({ key: 'chatStt.chooseModel.large', comment: ['&& denotes a mnemonic'] }, "Whisper &&Large (More Accurate)"), run: () => [large.id] },
+				{ label: localize({ key: 'chatStt.chooseModel.both', comment: ['&& denotes a mnemonic'] }, "&&Both"), run: () => [small.id, large.id] },
+			],
+			cancelButton: localize('chatStt.installModel.cancel', "Cancel"),
+		});
+		return result;
+	}
+
+	/**
+	 * CreaEditor: downloads `models` one after the other and makes the first one that installs the
+	 * dictation model, so dictation can start as soon as possible.
+	 */
+	private async _installLocalModels(models: readonly string[]): Promise<void> {
+		let switchedTo: string | undefined;
+		for (const model of models) {
+			const name = this._getModelDisplayName(model);
+			if (!await this._downloadLocalModel({ cacheDir: this._getModelCacheDir(), model }, name)) {
+				return;
+			}
+			if (switchedTo === undefined) {
+				switchedTo = model;
+				if ((this._getModelId() ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL) !== model) {
+					await this._configurationService.updateValue(DICTATION_MODEL_SETTING, model);
+				}
+				this._notificationService.notify({
+					severity: Severity.Info,
+					message: localize('chatStt.installModel.done', "{0} is installed. Start dictation again to talk.", name),
+					actions: {
+						secondary: [toAction({
+							id: 'chatStt.chooseLanguage',
+							label: localize('chatStt.installModel.language', "Choose Spoken Language"),
+							run: () => this._commandService.executeCommand('workbench.action.openSettings', DictationSettingId.Language),
+						})],
+					},
+				});
+			} else {
+				this._notificationService.info(localize('chatStt.installModel.doneToo', "{0} is installed too. To use it, right-click the microphone and choose Switch Speech Model.", name));
+			}
+		}
+	}
+
+	async pickLocalModel(): Promise<void> {
+		interface IModelPickItem extends IQuickPickItem {
+			readonly model: string;
+			readonly installed: boolean;
+		}
+		const current = this._getModelId() ?? DEFAULT_LOCAL_TRANSCRIPTION_MODEL;
+		const items = (async (): Promise<IModelPickItem[]> => {
+			const states = await Promise.all(WHISPER_MODELS.map(({ id }) => this._readModelInstallState(id)));
+			return WHISPER_MODELS.map(({ id, sizeMb }, index): IModelPickItem => {
+				const installed = !!states[index]?.installed;
+				return {
+					model: id,
+					installed,
+					label: this._getModelDisplayName(id),
+					description: id === SMALL_LOCAL_TRANSCRIPTION_MODEL
+						? localize('chatStt.pickModel.small', "Faster, good for clear speech")
+						: localize('chatStt.pickModel.large', "Most accurate, slower"),
+					detail: id === current && installed
+						? localize('chatStt.pickModel.inUse', "In use")
+						: installed
+							? localize('chatStt.pickModel.installed', "Installed")
+							: localize('chatStt.pickModel.notInstalled', "Not installed: downloads about {0} GB once", formatDownloadSizeGb(sizeMb)),
+					picked: id === current,
+				};
+			});
+		})();
+		const picked = await this._quickInputService.pick(items, { placeHolder: localize('chatStt.pickModel.placeholder', "Choose the speech model for dictation") });
+		if (!picked || (picked.model === current && picked.installed)) {
+			return;
+		}
+		const name = this._getModelDisplayName(picked.model);
+		if (picked.installed) {
+			await this._configurationService.updateValue(DICTATION_MODEL_SETTING, picked.model);
+			this._notificationService.info(localize('chatStt.pickModel.switched', "Dictation now uses {0}.", name));
+			return;
+		}
+		if (this._modelInstall.value) {
+			this._notificationService.info(localize('chatStt.pickModel.busy', "A speech model is still downloading. Try again once it is installed."));
+			return;
+		}
+		const sizeMb = WHISPER_MODELS.find(({ id }) => id === picked.model)?.sizeMb ?? 0;
+		const { confirmed } = await this._dialogService.confirm({
+			type: Severity.Info,
+			message: localize('chatStt.installModel.title', "Install the {0} Speech Model?", name),
+			detail: localize('chatStt.pickModel.detail', "{0} is downloaded once (about {1} GB) from Microsoft's Foundry Local catalog and runs on this computer; your audio never leaves it. Dictation switches to it once it is installed.", name, formatDownloadSizeGb(sizeMb)),
+			primaryButton: localize({ key: 'chatStt.installModel.download', comment: ['&& denotes a mnemonic'] }, "&&Download"),
+			cancelButton: localize('chatStt.installModel.cancel', "Cancel"),
+		});
+		if (confirmed) {
+			void this._installLocalModels([picked.model]);
+		}
+	}
+
 	/** CreaEditor: the consented download, with a cancellable progress notification. */
-	private async _downloadLocalModel(options: { readonly cacheDir: string; readonly model: string | undefined }, name: string): Promise<void> {
+	private async _downloadLocalModel(options: { readonly cacheDir: string; readonly model: string | undefined }, name: string): Promise<boolean> {
 		const cts = new CancellationTokenSource();
 		this._modelInstall.value = cts;
 		let succeeded = false;
@@ -1240,19 +1379,7 @@ export class ChatSpeechToTextService extends Disposable implements IChatSpeechTo
 				cts.dispose();
 			}
 		}
-		if (succeeded) {
-			this._notificationService.notify({
-				severity: Severity.Info,
-				message: localize('chatStt.installModel.done', "{0} is installed. Start dictation again to talk.", isSegmentedTranscriptionModel(options.model) ? localize('chatStt.whisperShortName', "Whisper") : name),
-				actions: {
-					secondary: [toAction({
-						id: 'chatStt.chooseLanguage',
-						label: localize('chatStt.installModel.language', "Choose Spoken Language"),
-						run: () => this._commandService.executeCommand('workbench.action.openSettings', DictationSettingId.Language),
-					})],
-				},
-			});
-		}
+		return succeeded;
 	}
 
 	/**

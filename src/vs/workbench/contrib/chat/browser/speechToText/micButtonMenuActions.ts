@@ -18,6 +18,8 @@ import { CONFIGURE_DICTATION_INSTRUCTIONS_ACTION_ID, CONFIGURE_VOICE_INSTRUCTION
 import { DictationSettingId } from './chatSpeechToTextService.js';
 import { SHOW_DICTATION_ONBOARDING_COMMAND } from './dictationOnboarding.js';
 
+/** CreaEditor: command that switches the on-device dictation model (Whisper Small or Large). */
+export const SWITCH_DICTATION_MODEL_COMMAND = 'workbench.action.chat.switchDictationModel';
 /** Command that opens the microphone picker shared by dictation and Voice Mode. */
 export const SELECT_MICROPHONE_COMMAND = 'workbench.action.chat.selectSpeechToTextMicrophone';
 /** Command that cancels the active/preparing dictation session. */
@@ -64,6 +66,15 @@ function createDisableDictationAction(commandService: ICommandService, configura
 			await commandService.executeCommand(CANCEL_DICTATION_COMMAND);
 			await configurationService.updateValue(DICTATION_ENABLED_SETTING, false);
 		},
+	});
+}
+
+/** CreaEditor: "Switch Speech Model..." entry for dictation: Whisper Small (faster) or Large (more accurate). */
+function createSwitchDictationModelAction(commandService: ICommandService): IAction {
+	return toAction({
+		id: SWITCH_DICTATION_MODEL_COMMAND,
+		label: localize('dictation.switchModel', "Switch Speech Model..."),
+		run: () => commandService.executeCommand(SWITCH_DICTATION_MODEL_COMMAND),
 	});
 }
 
@@ -123,6 +134,7 @@ export function getDictationContextMenuActions(commandService: ICommandService, 
 			createConfigureInstructionsAction(commandService, CONFIGURE_DICTATION_INSTRUCTIONS_ACTION_ID, localize('dictation.configureInstructions', "Configure Instructions")),
 			createShowDictationOnboardingAction(commandService),
 			createSelectMicrophoneAction(commandService),
+			createSwitchDictationModelAction(commandService),
 		],
 	);
 }
