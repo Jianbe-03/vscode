@@ -90,13 +90,18 @@ export class SinglePaneDraftSessionStrategy extends SinglePaneLayoutStrategy {
 
 		this._register(
 			this._editorService.onWillOpenEditor((event) => {
-				if (!this._ctx.isRestoringSessionLayout && !this._layoutService.isEditorPartAutoVisibilitySuppressed()) {
+				const layoutDriven = this._ctx.isRestoringSessionLayout || this._layoutService.isEditorPartAutoVisibilitySuppressed();
+				if (!layoutDriven) {
 					this._replacementDraftKey = undefined;
 				}
 				if (!this._getActiveNewSessionKey()) {
 					return;
 				}
-				if (!(event.editor instanceof EmptyFileEditorInput)) {
+				// Only an editor the user opens cancels the entry rule. Layout-driven opens
+				// (the managed tabs replacing an outgoing session's Changes tab in place when
+				// switching from an existing session to a new one) must not, or the new
+				// session keeps the outgoing session's editor area next to the Files details.
+				if (!layoutDriven && !(event.editor instanceof EmptyFileEditorInput)) {
 					this._pendingEntryHideSessionKey = undefined;
 				}
 			}),

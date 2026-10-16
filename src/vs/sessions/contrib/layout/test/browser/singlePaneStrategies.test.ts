@@ -249,6 +249,47 @@ suite('SinglePane layout strategies', () => {
 		]);
 	});
 
+	test('New Session entry from an Existing Session hides Editor after the managed tabs replace the Changes tab in place', () => {
+		harness = createTestHarness(store);
+		const { ctx, state } = createStrategyTestContext(store, harness);
+		const existing = makeSession(URI.parse('session:/existing'), { isCreated: true });
+		const draft = makeSession(URI.parse('session:/new'), { status: SessionStatus.Untitled, isCreated: false });
+		const existingChanges = store.add(new TestStubEditorInput(harness.sessionChangesService.getChangesEditorResource(existing.resource)));
+		const emptyFiles = store.add(harness.instaService.createInstance(EmptyFileEditorInput, existing.workspace.get()));
+		harness.activeGroupEditors.push(existingChanges, emptyFiles);
+		harness.activeEditorInput = existingChanges;
+		harness.partVisibility.set(Parts.EDITOR_PART, true);
+		harness.partVisibility.set(Parts.AUXILIARYBAR_PART, true);
+		createDraftStrategy(ctx);
+		activate(existing);
+		harness.setPartHiddenCalls.length = 0;
+
+		// The switch restores the draft's layout while the managed tabs replace the
+		// outgoing session's Changes tab in place (a layout-driven open under suppression).
+		state.isRestoringSessionLayout = true;
+		activate(draft);
+		const draftChanges = store.add(new TestStubEditorInput(harness.sessionChangesService.getChangesEditorResource(draft.resource)));
+		const suppression = harness.layoutService.suppressEditorPartAutoVisibility();
+		harness.onWillOpenEditor.fire({ groupId: 1, editor: draftChanges });
+		harness.activeGroupEditors.splice(0, 1, draftChanges);
+		harness.activeEditorInput = draftChanges;
+		suppression.dispose();
+		state.isRestoringSessionLayout = false;
+		state.endSessionLayoutRestore();
+
+		assert.deepStrictEqual({
+			editorVisible: harness.partVisibility.get(Parts.EDITOR_PART),
+			auxiliaryBarVisible: harness.partVisibility.get(Parts.AUXILIARYBAR_PART),
+			visibilityChanges: harness.setPartHiddenCalls,
+		}, {
+			editorVisible: false,
+			auxiliaryBarVisible: true,
+			visibilityChanges: [
+				{ hidden: true, part: Parts.EDITOR_PART },
+			],
+		});
+	});
+
 	for (const composition of [
 		{ editor: false, auxiliaryBar: true },
 		{ editor: true, auxiliaryBar: true },
