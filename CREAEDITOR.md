@@ -207,9 +207,18 @@ In the **Agents window**, an agent can start other sessions, each in its own git
 CreaEditor ships a built-in **Director** agent for this. To make several pull requests at once:
 
 1. Open the Agents window, pick your repository, and pick **Director** in the agent picker.
-2. Ask for the work, for example: *"Make PRs for issues #101, #102 and #107 on `develop` with the Issue to PR (Agents View) agent."*
-3. The Director reads the issues (with `gh`), checks that they don't overlap, and starts one session per issue with `create_session_group`. You confirm the whole group once.
-4. Each session works in its **own new worktree and branch** and opens its own pull request. The Director follows them up and ends with a table of branches and PR links.
+2. Ask for the work, for example: *"Make PRs for issues #101, #102 and #107 on `develop`."* When it cannot tell whether they are GitHub or Jira issues, it asks.
+3. The Director reads the issues (with `gh`, or the Atlassian tools for Jira), checks that they don't overlap, and starts one session per issue with `create_session_group`. You confirm the whole group once.
+4. Each session runs the built-in **Issue to PR** agent in its **own new worktree and branch**: it implements the issue, has the **Code Reviewer** agent review it as its own subagent, and opens its own pull request. The Director follows them up and ends with a table of branches and PR links.
+
+### Issue to PR and Code Reviewer
+
+Two more built-in agents, usable without the Director:
+
+- **Issue to PR** takes one GitHub or Jira issue to a ready-to-review pull request: issue to In Progress, branch, plan, implement, tests and the project's own checks, review by the Code Reviewer (at most two fix rounds), push, pull request, issue to In Review. It asks whether the issue is on GitHub or Jira when the prompt does not say. It learns the project's commands and rules from AGENTS.md, CONTRIBUTING and the build files. Started by the Director, it stays on the branch it was given.
+- **Code Reviewer** is read-only: it reviews a branch's changes against its base and the acceptance criteria and reports verified findings with file and line. Issue to PR calls it as a subagent; you can run it yourself on any branch.
+
+The agents live in `extensions/creaeditor-agents/agents/`. Copy one into a project's `.github/agents/` to change it for that project.
 
 The Director itself never changes code, so it never needs a worktree. While it is selected, the **New Worktree** checkbox is hidden and the session works in your folder. Your usual worktree choice for that workspace is left as it was. The checkbox otherwise only affects the session you are starting.
 

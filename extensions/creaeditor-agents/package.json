@@ -16,6 +16,12 @@
     "chatAgents": [
       {
         "path": "./agents/director.agent.md"
+      },
+      {
+        "path": "./agents/issue-to-pr.agent.md"
+      },
+      {
+        "path": "./agents/code-reviewer.agent.md"
       }
     ]
   }

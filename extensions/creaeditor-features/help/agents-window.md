@@ -47,11 +47,20 @@ An agent in the Agents window can start other sessions, each in its **own git wo
 1. Open the Agents window and pick your repository in the folder button.
 2. Click **Agent** below the input box and choose **Director**. The New Worktree checkbox disappears: the Director itself never changes code, so it works in your folder.
 3. Describe the work, for example "make PRs for issues #101, #102 and #107 on develop", and press Enter.
-4. The Director reads the issues, checks that they do not overlap and proposes one session per issue. Confirm the list once.
-5. The new sessions appear in the Sessions list under one group name. Each works on its own branch and opens its own pull request. A failing session does not stop the others.
+4. The Director reads the issues, checks that they do not overlap and proposes one session per issue. When it cannot tell whether they are GitHub or Jira issues, it asks first. Confirm the list once.
+5. The new sessions appear in the Sessions list under one group name. Each runs the **Issue to PR** agent on its own branch: it implements its issue, has the **Code Reviewer** agent review it, and opens its own pull request. A failing session does not stop the others.
 6. The Director follows them up and ends with a table of branches and PR links.
 
 The Director reads GitHub issues with the GitHub CLI, so install **gh** and run `gh auth login` first. With [Jira](#jira) connected, it reads Jira issues too.
+
+### Issue to PR and Code Reviewer
+
+You do not need the Director for a single issue. CreaEditor ships two more built-in agents, in the same **Agent** picker:
+
+- **Issue to PR** takes one issue to a ready-to-review pull request: it reads the issue, moves it to In Progress (on a GitHub Project board, or the Jira transition), creates a branch, plans, implements, tests, runs the project's own checks, has the Code Reviewer review the changes, fixes real findings (at most two rounds), pushes, opens the pull request and moves the issue to In Review. Ask it, for example, "work on issue #123" or "finish PROJ-45". When your prompt does not say whether it is a GitHub or a Jira issue, it asks. It reads the project's own rules (AGENTS.md, CONTRIBUTING, build files) for the test commands and conventions.
+- **Code Reviewer** is a read-only reviewer: it reads a branch's changes against its base and the issue's acceptance criteria, and reports verified findings with file and line. It never edits. Issue to PR runs it as a subagent in its own context; you can also run it yourself, for example "review 101-fix-login against main".
+
+The Director starts every issue session as Issue to PR, so each of them runs its own Code Reviewer, exactly as when you run Issue to PR yourself. To change either agent for a project, copy it into the project's `.github/agents/` and edit the copy.
 
 To make your own director, copy the built-in one into `.github/agents/` and give the file a name ending in `director.agent.md` (for example `sprint-director.agent.md`). Any agent whose `tools` include `agent` can start sessions with the `create_session` and `create_session_group` tools (up to 10 sessions at once).
 

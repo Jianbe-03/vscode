@@ -1,4 +1,4 @@
 {
   "displayName": "CreaEditor Agents",
-  "description": "Built-in custom agents for CreaEditor, such as the Director, which makes several pull requests at once. Kept separate from CreaEditor Features so the agents are also available in the Agents window."
+  "description": "Built-in custom agents for CreaEditor: the Director, which makes several pull requests at once; Issue to PR, which takes one GitHub or Jira issue to a pull request; and the Code Reviewer, which reviews a branch's changes. Kept separate from CreaEditor Features so the agents are also available in the Agents window."
 }
