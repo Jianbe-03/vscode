@@ -15,17 +15,16 @@ import { IContextMenuService } from '../../../../../platform/contextview/browser
 import { IKeybindingService } from '../../../../../platform/keybinding/common/keybinding.js';
 import { AgentsVoiceSettingId } from '../../../agentsVoice/common/agentsVoice.js';
 import { CONFIGURE_DICTATION_INSTRUCTIONS_ACTION_ID, CONFIGURE_VOICE_INSTRUCTIONS_ACTION_ID } from '../actions/configureVoiceInstructionsAction.js';
-import { DictationSettingId } from './chatSpeechToTextService.js';
 import { SHOW_DICTATION_ONBOARDING_COMMAND } from './dictationOnboarding.js';
 
+/** CreaEditor: opens a page of the CreaEditor Guide; its argument is the page name (see `creaeditorHelp.ts`). */
+const OPEN_CREAEDITOR_HELP_COMMAND = 'creaeditor.help.open';
 /** CreaEditor: command that lets the user choose the spoken dictation language. */
 export const PICK_DICTATION_LANGUAGE_COMMAND = 'workbench.action.chat.pickDictationLanguage';
 /** CreaEditor: command that switches the on-device dictation model (Whisper Small or Large). */
 export const SWITCH_DICTATION_MODEL_COMMAND = 'workbench.action.chat.switchDictationModel';
 /** Command that opens the microphone picker shared by dictation and Voice Mode. */
 export const SELECT_MICROPHONE_COMMAND = 'workbench.action.chat.selectSpeechToTextMicrophone';
-/** Command that cancels the active/preparing dictation session. */
-const CANCEL_DICTATION_COMMAND = 'workbench.action.chat.cancelSpeechToText';
 /** Command that tears down an active Voice Mode session. */
 const VOICE_DISCONNECT_COMMAND = 'agentsVoice.disconnect';
 /** Command that opens the Voice Mode settings; the affordance that used to live behind the toolbar gear. */
@@ -36,8 +35,6 @@ const OPEN_SETTINGS_COMMAND = 'workbench.action.openSettings';
 const DICTATION_SETTINGS_QUERY = 'dictation';
 /** Command that shows the Voice Mode onboarding card again. */
 export const SHOW_VOICE_MODE_ONBOARDING_COMMAND = 'agentsVoice.showOnboarding';
-/** Setting that enables dictation; toggled off by "Disable". */
-const DICTATION_ENABLED_SETTING = 'dictation.enabled';
 /** Setting that enables Voice Mode; toggled off by "Disable". */
 const VOICE_ENABLED_SETTING = 'agents.voice.enabled';
 /** Setting that shows the live voice transcript overlay; toggled from the menu. */
@@ -52,22 +49,6 @@ function createSelectMicrophoneAction(commandService: ICommandService): IAction 
 		id: SELECT_MICROPHONE_COMMAND,
 		label: localize('mic.selectMicrophone', "Select Microphone"),
 		run: () => commandService.executeCommand(SELECT_MICROPHONE_COMMAND),
-	});
-}
-
-/**
- * "Disable" entry for dictation. Cancels any active/preparing dictation first so
- * disabling the setting doesn't leave the microphone capturing while the toolbar
- * affordance disappears, then turns off the feature setting.
- */
-function createDisableDictationAction(commandService: ICommandService, configurationService: IConfigurationService): IAction {
-	return toAction({
-		id: 'chat.dictation.disable',
-		label: localize('dictation.disable', "Disable"),
-		run: async () => {
-			await commandService.executeCommand(CANCEL_DICTATION_COMMAND);
-			await configurationService.updateValue(DICTATION_ENABLED_SETTING, false);
-		},
 	});
 }
 
@@ -89,6 +70,15 @@ function createPickDictationLanguageAction(commandService: ICommandService): IAc
 	});
 }
 
+/** CreaEditor: "How Dictation Works" entry: the Dictation page of the CreaEditor Guide. */
+function createDictationHelpAction(commandService: ICommandService): IAction {
+	return toAction({
+		id: 'chat.dictation.help',
+		label: localize('dictation.help', "How Dictation Works"),
+		run: () => commandService.executeCommand(OPEN_CREAEDITOR_HELP_COMMAND, 'dictation'),
+	});
+}
+
 function createShowDictationOnboardingAction(commandService: ICommandService): IAction {
 	return toAction({
 		id: SHOW_DICTATION_ONBOARDING_COMMAND,
@@ -103,7 +93,7 @@ function createShowDictationOnboardingAction(commandService: ICommandService): I
  * removes the toolbar affordance — dictation can still be launched with its
  * Cmd/Ctrl+I shortcut, and the button can be restored from Settings.
  */
-function createToggleButtonAction(configurationService: IConfigurationService, settingId: DictationSettingId.ShowButton | AgentsVoiceSettingId.ShowButton, id: string, label: string): IAction {
+function createToggleButtonAction(configurationService: IConfigurationService, settingId: AgentsVoiceSettingId.ShowButton, id: string, label: string): IAction {
 	const shown = configurationService.getValue<boolean>(settingId) !== false;
 	return toAction({
 		id,
@@ -135,10 +125,10 @@ function createDisableVoiceModeAction(commandService: ICommandService, configura
  */
 export function getDictationContextMenuActions(commandService: ICommandService, configurationService: IConfigurationService, keybindingService: IKeybindingService, keybindingCommandId: string): IAction[] {
 	return Separator.join(
+		// CreaEditor: no "Microphone Button" or "Disable" here: once the button was hidden there was no
+		// way back to it from the input box.
 		[
 			createConfigureKeybindingAction(commandService, keybindingService, keybindingCommandId),
-			createToggleButtonAction(configurationService, DictationSettingId.ShowButton, 'chat.dictation.toggleButton', localize('dictation.microphoneButton', "Microphone Button")),
-			createDisableDictationAction(commandService, configurationService),
 		],
 		[
 			createDictationSettingsAction(commandService),
@@ -147,6 +137,9 @@ export function getDictationContextMenuActions(commandService: ICommandService, 
 			createSelectMicrophoneAction(commandService),
 			createSwitchDictationModelAction(commandService),
 			createPickDictationLanguageAction(commandService),
+		],
+		[
+			createDictationHelpAction(commandService),
 		],
 	);
 }

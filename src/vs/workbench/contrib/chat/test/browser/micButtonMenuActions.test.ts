@@ -69,27 +69,15 @@ suite('Mic button menu actions', () => {
 
 		assert.deepStrictEqual(actions.map(action => action.label), [
 			'Configure Keybinding',
-			'Microphone Button',
-			'Disable',
 			'',
 			'Open Settings',
 			'Configure Instructions',
 			'Show Introduction',
 			'Select Microphone',
+			'Switch Speech Model...',
+			'Spoken Language...',
+			'',
+			'How Dictation Works',
 		]);
-	});
-
-	test('dictation "Microphone Button" toggle reflects and flips the visibility setting', async () => {
-		const updated: [string, unknown][] = [];
-		const configurationService = upcastPartial<IConfigurationService>({
-			getValue: () => false,
-			updateValue: async (key: string, value: unknown) => { updated.push([key, value]); },
-		});
-		const actions = getDictationContextMenuActions(commandService, configurationService, keybindingService, 'dictation.start');
-		const toggle = actions.find(action => action.label === 'Microphone Button')!;
-
-		assert.strictEqual(toggle.checked, false);
-		await toggle.run();
-		assert.deepStrictEqual(updated, [['dictation.showButton', true]]);
 	});
 });

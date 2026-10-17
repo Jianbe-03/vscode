@@ -448,6 +448,8 @@ configurationRegistry.registerConfiguration({
 		[DictationSettingId.ShowButton]: {
 			type: 'boolean',
 			markdownDescription: nls.localize('dictation.showButton', "Controls whether the dictation microphone button is shown in the chat input. When hidden, dictation can still be started with its keyboard shortcut."),
+			// CreaEditor: always shown; a stored `false` is cleared (see the migrations below).
+			markdownDeprecationMessage: nls.localize('dictation.showButton.deprecated', "CreaEditor always shows the microphone button."),
 			default: true,
 			tags: ['experimental']
 		},
@@ -2897,6 +2899,17 @@ Registry.as<IConfigurationMigrationRegistry>(Extensions.ConfigurationMigration).
 				? DEFAULT_LOCAL_TRANSCRIPTION_MODEL
 				: value
 		})
+	},
+	{
+		// CreaEditor: the microphone button cannot be hidden or switched off any more (a hidden button
+		// had no way back from the input box); clear a stored `false` so it comes back.
+		key: DictationSettingId.ShowButton,
+		migrateFn: (value: unknown): ConfigurationKeyValuePairs => value === false ? [[DictationSettingId.ShowButton, { value: undefined }]] : []
+	},
+	{
+		// CreaEditor: as above for `dictation.enabled`; an administrator policy can still turn it off.
+		key: 'dictation.enabled',
+		migrateFn: (value: unknown): ConfigurationKeyValuePairs => value === false ? [['dictation.enabled', { value: undefined }]] : []
 	},
 	{
 		// Dictation settings were regrouped under the top-level `dictation.*`
