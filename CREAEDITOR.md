@@ -467,6 +467,8 @@ Dictation (the microphone in the chat input, editor window and Agents window) ru
 
 `dictation.model` still offers Nemotron (streaming, on-device) and MAI (cloud).
 
+**Microphone always shown**: the microphone's right-click menu has no **Microphone Button** or **Disable** any more (a hidden button had no way back from the input box), and configuration migrations clear a stored `false` of `dictation.showButton` and `dictation.enabled` (both default `true`; the `DictationEnabled` policy still turns dictation off). The menu ends with **How Dictation Works** (`creaeditor.help.open` `dictation`).
+
 ## Building from source
 
 ```sh

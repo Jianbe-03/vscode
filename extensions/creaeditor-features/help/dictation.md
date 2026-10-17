@@ -11,6 +11,8 @@ You can install both and switch at any time.
 
 ## How it works
 
+![Dictation: choose a model once, the listening bar with the language chip, and the microphone's right-click menu](images/dictation-overview.svg)
+
 - **The model runs on this computer.** Whisper runs through Microsoft's Foundry Local runtime, which comes with CreaEditor. The models themselves are not in the app: the one you choose is downloaded once, the first time you dictate, and only after you agree to it.
 - **Text appears per sentence.** Whisper listens until you pause, then writes what you said. While it works on a sentence, the words appear in the input box one by one; you can keep talking meanwhile. When you stop dictation, the last sentence is written too.
 - **Dutch and English mixed.** Whisper keeps English words in English inside, for example, a Dutch sentence ("Kun je de functie parseConfigFile aanpassen?"). It needs to know which language you speak besides English (see below). Pause briefly when you switch language between sentences: Whisper writes one language per sentence and can skip a whole sentence in the other language when there is no pause between them.
@@ -63,5 +65,6 @@ So set the language of the sentence you are about to say. Whisper Small follows 
 ## Good to know
 
 - Whisper Large uses the processor for a few seconds per sentence. On a busy computer the text can lag a little behind; it catches up when you pause. Too slow? Switch to Whisper Small.
+- The microphone button is always shown: it cannot be hidden or switched off from its menu any more (a hidden button had no way back). Starting dictation with **Cmd+I** works too.
 - The model in use is the setting **Dictation: Model** (`dictation.model`). It also offers Nemotron (on-device, streams word by word, less accurate) and MAI (cloud, needs a GitHub account).
 - Remove the models: delete the folder `chatDictationModels` in CreaEditor's cache folder (`~/Library/Application Support/CreaEditor/chatDictationModels` on macOS). CreaEditor asks again before downloading one the next time.

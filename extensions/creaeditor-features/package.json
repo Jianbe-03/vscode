@@ -172,7 +172,7 @@
             "title": "%step.issueAgents.title%",
             "description": "%step.issueAgents.description%",
             "media": {
-              "image": "media/issue-agents-picker.png",
+              "svg": "media/issue-agents.svg",
               "altText": "%step.issueAgents.title%"
             },
             "completionEvents": [
@@ -281,7 +281,7 @@
             "title": "%step.dictation.title%",
             "description": "%step.dictation.description%",
             "media": {
-              "image": "media/dictation-choose-model.png",
+              "svg": "media/dictation.svg",
               "altText": "%step.dictation.title%"
             },
             "completionEvents": [

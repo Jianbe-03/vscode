@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" viewBox="0 0 960 560" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+	<title>Director, Issue to PR and Code Reviewer: the Director starts one Issue to PR session per issue; each Issue to PR has the Code Reviewer review its changes and opens its own pull request. You can also start Issue to PR yourself for one issue, or run the Code Reviewer on a branch.</title>
+	<rect width="960" height="560" rx="16" fill="#16152D"/>
+
+	<!-- Column labels -->
+	<text x="40" y="44" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">YOU ASK</text>
+	<text x="300" y="44" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">ONE SESSION PER ISSUE, OWN BRANCH</text>
+	<text x="670" y="44" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">SUBAGENT</text>
+	<text x="840" y="44" fill="#8E8CA8" font-size="13" font-weight="600" letter-spacing="1">RESULT</text>
+
+	<!-- Director -->
+	<rect x="40" y="64" width="220" height="164" rx="12" fill="#1C1A37" stroke="#00EC95"/>
+	<text x="60" y="94" fill="#00EC95" font-size="16" font-weight="600">Director</text>
+	<text x="60" y="118" fill="#BCBBCA" font-size="13">"Make PRs for issues</text>
+	<text x="60" y="136" fill="#BCBBCA" font-size="13">#101, #102 and #107"</text>
+	<text x="60" y="172" fill="#8E8CA8" font-size="12">Plans, starts the sessions,</text>
+	<text x="60" y="190" fill="#8E8CA8" font-size="12">follows them up. Never</text>
+	<text x="60" y="208" fill="#8E8CA8" font-size="12">changes code itself.</text>
+
+	<!-- Director fan-out -->
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M260 146 C280 146 280 96 296 96"/>
+		<path d="M260 146 H296"/>
+		<path d="M260 146 C280 146 280 196 296 196"/>
+		<path d="M288 90 L296 96 L288 102"/>
+		<path d="M288 140 L296 146 L288 152"/>
+		<path d="M288 190 L296 196 L288 202"/>
+	</g>
+
+	<!-- Three Issue to PR sessions -->
+	<g font-size="13">
+		<rect x="300" y="76" width="300" height="40" rx="8" fill="#252347"/>
+		<text x="316" y="101" fill="#F8F7FA" font-weight="600">Issue to PR</text>
+		<text x="412" y="101" fill="#BCBBCA">#101 · 101-fix-login</text>
+
+		<rect x="300" y="126" width="300" height="40" rx="8" fill="#252347"/>
+		<text x="316" y="151" fill="#F8F7FA" font-weight="600">Issue to PR</text>
+		<text x="412" y="151" fill="#BCBBCA">#102 · 102-cart-total</text>
+
+		<rect x="300" y="176" width="300" height="40" rx="8" fill="#252347"/>
+		<text x="316" y="201" fill="#F8F7FA" font-weight="600">Issue to PR</text>
+		<text x="412" y="201" fill="#BCBBCA">#107 · 107-export-csv</text>
+	</g>
+
+	<!-- Reviewer links for the Director's sessions -->
+	<g stroke="#8E8CA8" stroke-width="1.5" fill="none" stroke-dasharray="4 4">
+		<path d="M600 96 H660"/>
+		<path d="M600 146 H660"/>
+		<path d="M600 196 H660"/>
+	</g>
+	<g font-size="12">
+		<rect x="664" y="82" width="150" height="28" rx="14" fill="#1C1A37" stroke="#3B3866"/>
+		<text x="739" y="101" fill="#F8F7FA" text-anchor="middle">Code Reviewer</text>
+		<rect x="664" y="132" width="150" height="28" rx="14" fill="#1C1A37" stroke="#3B3866"/>
+		<text x="739" y="151" fill="#F8F7FA" text-anchor="middle">Code Reviewer</text>
+		<rect x="664" y="182" width="150" height="28" rx="14" fill="#1C1A37" stroke="#3B3866"/>
+		<text x="739" y="201" fill="#F8F7FA" text-anchor="middle">Code Reviewer</text>
+	</g>
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M814 96 H836"/>
+		<path d="M814 146 H836"/>
+		<path d="M814 196 H836"/>
+	</g>
+	<g font-size="13" font-weight="600">
+		<rect x="840" y="82" width="80" height="28" rx="6" fill="#00EC95"/>
+		<text x="880" y="101" fill="#16152D" text-anchor="middle">PR</text>
+		<rect x="840" y="132" width="80" height="28" rx="6" fill="#00EC95"/>
+		<text x="880" y="151" fill="#16152D" text-anchor="middle">PR</text>
+		<rect x="840" y="182" width="80" height="28" rx="6" fill="#00EC95"/>
+		<text x="880" y="201" fill="#16152D" text-anchor="middle">PR</text>
+	</g>
+
+	<!-- Divider -->
+	<path d="M40 252 H920" stroke="#2F2C55"/>
+
+	<!-- Issue to PR alone -->
+	<rect x="40" y="282" width="220" height="104" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="312" fill="#F8F7FA" font-size="16" font-weight="600">Issue to PR</text>
+	<text x="60" y="336" fill="#BCBBCA" font-size="13">"Work on issue #123"</text>
+	<text x="60" y="362" fill="#8E8CA8" font-size="12">One issue, no Director</text>
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M260 334 H296"/>
+		<path d="M288 328 L296 334 L288 340"/>
+	</g>
+	<rect x="300" y="312" width="300" height="44" rx="8" fill="#252347"/>
+	<text x="316" y="339" fill="#F8F7FA" font-size="13" font-weight="600">Issue to PR</text>
+	<text x="412" y="339" fill="#BCBBCA" font-size="13">#123 · 123-new-branch</text>
+	<path d="M600 334 H660" stroke="#8E8CA8" stroke-width="1.5" fill="none" stroke-dasharray="4 4"/>
+	<rect x="664" y="320" width="150" height="28" rx="14" fill="#1C1A37" stroke="#3B3866"/>
+	<text x="739" y="339" fill="#F8F7FA" font-size="12" text-anchor="middle">Code Reviewer</text>
+	<path d="M814 334 H836" stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round"/>
+	<rect x="840" y="320" width="80" height="28" rx="6" fill="#00EC95"/>
+	<text x="880" y="339" fill="#16152D" font-size="13" font-weight="600" text-anchor="middle">PR</text>
+
+	<!-- Code Reviewer alone -->
+	<rect x="40" y="414" width="220" height="104" rx="12" fill="#1C1A37" stroke="#2F2C55"/>
+	<text x="60" y="444" fill="#F8F7FA" font-size="16" font-weight="600">Code Reviewer</text>
+	<text x="60" y="468" fill="#BCBBCA" font-size="13">"Review my branch</text>
+	<text x="60" y="486" fill="#BCBBCA" font-size="13">against main"</text>
+	<g stroke="#00EC95" stroke-width="2" fill="none" stroke-linecap="round">
+		<path d="M260 466 H296"/>
+		<path d="M288 460 L296 466 L288 472"/>
+	</g>
+	<rect x="300" y="444" width="620" height="44" rx="8" fill="#252347"/>
+	<text x="316" y="471" fill="#F8F7FA" font-size="13" font-weight="600">A list of findings with file and line</text>
+	<text x="580" y="471" fill="#BCBBCA" font-size="13">· read-only, changes nothing</text>
+</svg>
